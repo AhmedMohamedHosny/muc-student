@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MUC - تسجيل حضور المحاضرة</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {
+            --primary: #7A0C16;
+            --secondary: #93131E;
+            --accent: #C59B27;
+            --success: #10B981;
+            --danger: #EF4444;
+            --bg: #4A040A;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Cairo', sans-serif; }
+        body {
+            background: radial-gradient(circle at top right, #93131E, #4A040A) fixed;
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+        .card {
+            background: #ffffff;
+            color: #0F172A;
+            width: 100%;
+            max-width: 420px;
+            border-top: 5px solid var(--accent);
+            padding: 2rem 1.5rem;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+        }
+        .logo { height: 75px; object-fit: contain; margin-bottom: 0.75rem; }
+        .session-badge {
+background: #FDF2F3;
+            color: var(--secondary);
+            font-size: 0.85rem;
+            font-weight: 700;
+            padding: 0.35rem 0.85rem;
+            border-radius: 50px;
+            margin: 0.5rem auto 1.5rem;
+            display: inline-block;
+        }
+        .form-group { text-align: right; margin-bottom: 1.25rem; }
+        .form-group label { display: block; font-size: 0.9rem; font-weight: 700; margin-bottom: 0.4rem; }
+        .form-group input {
+            width: 100%;
+            padding: 0.85rem 1rem;
+            border: 2px solid #E2E8F0;
+            border-radius: 10px;
+            font-size: 1.1rem;
+            text-align: center;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+        .form-group input:focus { outline: none; border-color: var(--secondary); }
+        .btn {
+            width: 100%;
+            padding: 0.9rem;
+            font-size: 1.05rem;
+            font-weight: 700;
+            border: none;
+            border-radius: 10px;
+            background: var(--primary);
+            color: #fff;
+            cursor: pointer;
+            transition: 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+        .btn:disabled { opacity: 0.7; cursor: not-allowed; }
+                .btn:hover:not(:disabled) { background: #5C080F; }
+        .receipt {
+            background: #F8FAFC;
+            border-radius: 10px;
+            padding: 1rem;
+            margin-top: 1.25rem;
+            text-align: right;
+            border: 1px solid #E2E8F0;
+        }
+        .receipt-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.45rem 0;
+            border-bottom: 1px dashed #CBD5E1;
+            font-size: 0.9rem;
+        }
+        .receipt-row:last-child { border-bottom: none; }
+        .icon-circle {
+            width: 65px;
+            height: 65px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            margin: 0 auto 1rem;
+        }
+        .icon-success { background: #ECFDF5; color: var(--success); }
+        .icon-danger { background: #FEF2F2; color: var(--danger); }
+        .d-none { display: none !important; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <img src="logo.jpg" alt="MUC Logo" class="logo">
+        <h2 style="font-size: 1.3rem; font-weight: 800; color: #7A0C16;">جامعة مايو بالقاهرة</h2>
+        <div id="course-badge" class="session-badge">تسجيل الحضور الذكي المباشر</div>
+
+        <!-- 1. نموذج إدخال الرقم الجامعي -->
+        <div id="input-step">
+            <p style="color: #64748B; font-size: 0.9rem; margin-bottom: 1.25rem;">
+                أدخل رقمك الجامعي لتثبيت حضورك بالمحاضرة فوراً
+            </p>
+            <form id="attendance-form">
+                <div class="form-group">
+                    <label><i class="fa-solid fa-id-card"></i> الرقم الجامعي (Student ID)</label>
+                    <input type="text" id="student-id" placeholder="مثال: 20250123" inputmode="numeric" required autofocus>
+                </div>
+                <button type="submit" id="btn-submit" class="btn">
+                    <span>تأكيد الحضور الآن</span>
+                    <i class="fa-solid fa-check"></i>
+                </button>
+            </form>
+            <p style="font-size: 0.75rem; color: #94A3B8; margin-top: 1rem;">
+                <i class="fa-solid fa-shield-halved"></i> يرتبط التسجيل ببصمة هذا الهاتف منعاً لتسجيل الزملاء الغائبين.
+            </p>
+        </div>
+
+        <!-- 2. بطاقة النتيجة (نجاح أو رفض الجهاز) -->
+        <div id="result-step" class="d-none">
+            <div id="status-icon" class="icon-circle"></div>
+            <h3 id="status-title" style="font-size: 1.2rem; margin-bottom: 0.5rem;"></h3>
+            <p id="status-msg" style="color: #64748B; font-size: 0.9rem;"></p>
+                        <button type="button" id="btn-retry" class="btn d-none" style="margin-top:1rem;">
+                <i class="fa-solid fa-rotate-right"></i><span>إعادة المحاولة</span>
+            </button>
+
+            <div id="receipt-box" class="receipt d-none">
+                <div class="receipt-row"><span>اسم الطالب:</span><strong id="rcpt-name">--</strong></div>
+                <div class="receipt-row"><span>الرقم الجامعي:</span><strong id="rcpt-id">--</strong></div>
+                <div class="receipt-row"><span>المقرر الدراسي:</span><strong id="rcpt-course">--</strong></div>
+                <div class="receipt-row"><span>وقت التسجيل:</span><strong id="rcpt-time">--</strong></div>
+                <div class="receipt-row"><span>الحالة:</span><strong id="rcpt-status" style="color: var(--success);">حاضر (Present)</strong></div>
+            </div>
+        </div>
+    </div>
+
+    <div style="position:fixed; bottom:0; left:0; right:0; text-align:center; padding:0.6rem 0.75rem; font-size:0.75rem; font-weight:700; color:#E5C158; background:rgba(0,0,0,0.25);">
+        تم تصميم وتنفيذ البرنامج بواسطة فريق عمل من كلية الهندسة جامعة مايو بالقاهرة
+    </div>
+
+    <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
+    <script type="module">
+        import { recordStudentAttendance } from "./firebase.js";
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionId = urlParams.get("session");
+        const token = urlParams.get("token");
+
+        // استخراج أو توليد بصمة فريدة لهاتف الطالب
+        let deviceId = localStorage.getItem("muc_device_fingerprint");
+        if (!deviceId) {
+            deviceId = "dev_" + Math.random().toString(36).substring(2) + "_" + Date.now();
+            localStorage.setItem("muc_device_fingerprint", deviceId);
+        }
+
+        // فحص مسبق: هل سجل هذا الجهاز في هذه الجلسة مسبقاً؟
+        const localCheck = localStorage.getItem("attended_session_" + sessionId);
+        if (localCheck) {
+            showResult(false, "تم تسجيل الحضور مسبقاً", "هذا الهاتف قام بتسجيل الحضور في هذه المحاضرة بالفعل مسبقاً، ولا يمكن تسجيل طالب آخر.");
+        }
+
+        const form = document.getElementById("attendance-form");
+        const btn = document.getElementById("btn-submit");
+
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const studentId = document.getElementById("student-id").value.trim();
+
+            if (!sessionId || !token) {
+                showResult(false, "خطأ في الرابط", "رمز الحضور غير صالح أو منتهي الصلاحية، يرجى مسح الرمز الجديد من الشاشة.");
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> جاري التحقق من الهاتف...`;
+
+            try {
+                // إرسال الرقم الجامعي مع بصمة الجهاز للتحقق
+                const res = await recordStudentAttendance(sessionId, token, studentId, deviceId);
+                
+                // قفل الهاتف محلياً لهذه المحاضرة
+                localStorage.setItem("attended_session_" + sessionId, studentId);
+
+                // إظهار إيصال الحضور الرسمي
+                showResult(true, "تم تسجيل الحضور بنجاح", "تم توثيق حضورك رسميّاً في سجل المحاضرة بجامعة مايو.");
+                document.getElementById("receipt-box").classList.remove("d-none");
+                document.getElementById("rcpt-name").innerText = res.studentName;
+                document.getElementById("rcpt-id").innerText = res.studentId;
+                document.getElementById("rcpt-course").innerText = res.courseName;
+                document.getElementById("rcpt-time").innerText = res.time;
+                document.getElementById("rcpt-status").innerText = res.status === "Present" ? "حاضر (Present)" : "متأخر (Late)";
+
+            } catch (err) {
+                showResult(false, "تم رفض التسجيل", err.message);
+                btn.disabled = false;
+                btn.innerHTML = `<span>تأكيد الحضور الآن</span> <i class="fa-solid fa-check"></i>`;
+            }
+        });
+
+        function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
+            document.getElementById("input-step").classList.add("d-none");
+            document.getElementById("result-step").classList.remove("d-none");
+            document.getElementById("receipt-box").classList.add("d-none");
+            document.getElementById("btn-retry").classList.toggle("d-none", !canRetry);
+
+            const icon = document.getElementById("status-icon");
+            icon.className = "icon-circle " + (isSuccess ? "icon-success" : "icon-danger");
+            icon.innerHTML = `<i class="fa-solid ${isSuccess ? 'fa-check' : 'fa-triangle-exclamation'}"></i>`;
+
+            document.getElementById("status-title").innerText = title;
+            document.getElementById("status-msg").innerText = msg;
+        }
+
+        document.getElementById("btn-retry").addEventListener("click", () => {
+            document.getElementById("result-step").classList.add("d-none");
+            document.getElementById("input-step").classList.remove("d-none");
+        });
+    </script>
+</body>
+</html>
