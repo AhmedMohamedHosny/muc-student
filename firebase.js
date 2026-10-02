@@ -67,35 +67,32 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
 
 if (sessionData.hostRole === "ta") {
             const secInfo = (studentData.sections || {})[sessionData.courseId] || {};
-            const studentGroup = typeof secInfo === "string" ? secInfo : (secInfo.group || secInfo.groupName || "");
-            const sessionGroup = sessionData.group || "";
+            const studentGroup = typeof secInfo === "string" ? secInfo : (secInfo.group || secInfo.groupName || "جروب 1");
+            const sessionGroup = sessionData.group || "جروب 1";
+
+            // استخراج رقم الجروب فقط (مثال: جروب 1 يستخرج منه الرقم 1)
+            const stdNum = (studentGroup.match(/\d+/) || ["1"])[0];
+            const sessNum = (sessionGroup.match(/\d+/) || ["1"])[0];
 
             let isAssigned = false;
 
-            // 1. لو اسم الجروب متطابق (جروب 1 مع جروب 1)
-            if (studentGroup && sessionGroup && studentGroup.trim().toLowerCase() === sessionGroup.trim().toLowerCase()) {
+            // 1. لو رقم الجروب متطابق (1 مع 1) يدخل فوراً
+            if (stdNum === sessNum) {
                 isAssigned = true;
             }
 
-            // 2. لو الطالب متسكن مع نفس معيد الجلسة
+            // 2. لو الطالب متسكن مع نفس المعيد
             if (!isAssigned && secInfo.taId && secInfo.taId === sessionData.doctorId) {
                 isAssigned = true;
             }
 
-            // 3. مطابقة ذكية بالأرقام (لو الطالب فيه رقم 1 وجلسة المعيد فيها رقم 1)
-            if (!isAssigned && studentGroup && sessionGroup) {
-                const stdNum = studentGroup.replace(/[^0-9]/g, "");
-                const sessNum = sessionGroup.replace(/[^0-9]/g, "");
-                if (stdNum && sessNum && stdNum === sessNum) isAssigned = true;
-            }
-
-            // 4. لو الجلسة قديمة أو مفيهاش اسم جروب، طالما الطالب مسجل في الكورس ده نسمحله بالدخول فوراً
-            if (!isAssigned && (!sessionGroup || sessionGroup === "")) {
+            // 3. لو الجلسة قديمة بدون جروب
+            if (!isAssigned && (!sessionData.group || sessionData.group === "")) {
                 isAssigned = true;
             }
 
             if (!isAssigned) {
-                throw new Error(`عفواً يا ${studentData.name}، أنت مقيد في (${studentGroup || 'مجموعة أخرى'}) وهذا السكشن خاص بطلاب (${sessionGroup || 'جروب آخر'}).`);
+                throw new Error(`عفواً يا ${studentData.name}، أنت مقيد في (جروب ${stdNum}) وهذا السكشن خاص بطلاب (جروب ${sessNum}).`);
             }
         }
 
