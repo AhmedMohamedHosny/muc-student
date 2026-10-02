@@ -145,10 +145,11 @@ background: #FDF2F3;
                 <i class="fa-solid fa-rotate-right"></i><span>إعادة المحاولة</span>
             </button>
 
-            <div id="receipt-box" class="receipt d-none">
+<div id="receipt-box" class="receipt d-none">
                 <div class="receipt-row"><span>اسم الطالب:</span><strong id="rcpt-name">--</strong></div>
                 <div class="receipt-row"><span>الرقم الجامعي:</span><strong id="rcpt-id">--</strong></div>
                 <div class="receipt-row"><span>المقرر الدراسي:</span><strong id="rcpt-course">--</strong></div>
+                <div class="receipt-row"><span>تاريخ الجلسة:</span><strong id="rcpt-date">--</strong></div>
                 <div class="receipt-row"><span>وقت التسجيل:</span><strong id="rcpt-time">--</strong></div>
                 <div class="receipt-row"><span>الحالة:</span><strong id="rcpt-status" style="color: var(--success);">حاضر (Present)</strong></div>
             </div>
@@ -202,12 +203,22 @@ background: #FDF2F3;
                 // قفل الهاتف محلياً لهذه المحاضرة
                 localStorage.setItem("attended_session_" + sessionId, studentId);
 
-                // إظهار إيصال الحضور الرسمي
-                showResult(true, "تم تسجيل الحضور بنجاح", "تم توثيق حضورك رسميّاً في سجل المحاضرة بجامعة مايو.");
+// تحديد نوع الجلسة ديناميكياً (محاضرة / سكشن نظري / معمل عملي)
+                const typeLabels = {
+                    lab: "معمل العملي",
+                    section: "السكشن النظري",
+                    lecture: "المحاضرة"
+                };
+                const sessionLabel = typeLabels[res.sessionType] || "المحاضرة";
+                const sessionDate = res.date || new Date().toLocaleDateString("ar-EG", { year: 'numeric', month: 'long', day: 'numeric' });
+
+                // إظهار إيصال الحضور مع تخصيص الرسالة حسب نوع الجلسة والتاريخ
+                showResult(true, "تم تسجيل الحضور بنجاح", `تم توثيق حضورك رسميّاً في سجل ${sessionLabel} بجامعة مايو.`);
                 document.getElementById("receipt-box").classList.remove("d-none");
                 document.getElementById("rcpt-name").innerText = res.studentName;
                 document.getElementById("rcpt-id").innerText = res.studentId;
-                document.getElementById("rcpt-course").innerText = res.courseName;
+                document.getElementById("rcpt-course").innerText = `${res.courseName} (${sessionLabel})`;
+                document.getElementById("rcpt-date").innerText = sessionDate;
                 document.getElementById("rcpt-time").innerText = res.time;
                 document.getElementById("rcpt-status").innerText = res.status === "Present" ? "حاضر (Present)" : "متأخر (Late)";
 
