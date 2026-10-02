@@ -66,19 +66,30 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
         }
 
 if (sessionData.hostRole === "ta") {
-            const secInfo = (studentData.sections || {})[sessionData.courseId];
+            const secInfo = (studentData.sections || {})[sessionData.courseId] || {};
+            const studentGroup = typeof secInfo === "string" ? secInfo : (secInfo.group || secInfo.groupName || "");
+            const sessionGroup = sessionData.group || "";
+
             let isAssigned = false;
-            if (typeof secInfo === "string") {
-                isAssigned = (secInfo === sessionData.doctorId);
-            } else if (secInfo && typeof secInfo === "object") {
-                // فحص المطابقة بالمعيد أو برقم المجموعة (جروب 1، جروب 2...)
-                if (secInfo.taId && secInfo.taId === sessionData.doctorId) isAssigned = true;
-                if (Array.isArray(secInfo.taIds) && secInfo.taIds.includes(sessionData.doctorId)) isAssigned = true;
-                if (sessionData.group && (secInfo.group === sessionData.group || secInfo.groupName === sessionData.group)) isAssigned = true;
-                // في حالة مطابقة السكشن أو المعمل
-                if (!isAssigned && (!sessionData.group || sessionData.group === secInfo.group)) isAssigned = true;
+
+            // 1. مطابقة اسم المجموعة مباشرة (مثال: جروب 1 يطابق جروب 1)
+            if (studentGroup && sessionGroup) {
+                isAssigned = (studentGroup.trim().toLowerCase() === sessionGroup.trim().toLowerCase());
             }
-            if (!isAssigned) throw new Error(`عفواً يا ${studentData.name}، أنت مقيد في (${(secInfo && secInfo.group) || 'مجموعة أخرى'}) وليس هذا السكشن.`);
+
+            // 2. مطابقة بواسطة معرف المعيد
+            if (!isAssigned && secInfo.taId) {
+                isAssigned = (secInfo.taId === sessionData.doctorId);
+            }
+
+            // 3. مطابقة إضافية لو كان الجروب مسجل ضمن قائمة
+            if (!isAssigned && Array.isArray(secInfo.taIds)) {
+                isAssigned = secInfo.taIds.includes(sessionData.doctorId);
+            }
+
+            if (!isAssigned) {
+                throw new Error(`عفواً يا ${studentData.name}، أنت مقيد في (${studentGroup || 'مجموعة أخرى'}) وهذا السكشن خاص بطلاب (${sessionGroup || 'جروب آخر'}).`);
+            }
         }
 
         const existing = await transaction.get(recordRef);
