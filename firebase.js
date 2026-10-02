@@ -65,17 +65,20 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
             throw new Error(`عفواً يا ${studentData.name}، أنت غير مقيد في هذا المقرر.`);
         }
 
-        if (sessionData.hostRole === "ta") {
+if (sessionData.hostRole === "ta") {
             const secInfo = (studentData.sections || {})[sessionData.courseId];
             let isAssigned = false;
-            if (typeof secInfo === "string") isAssigned = secInfo === sessionData.doctorId;
-            else if (secInfo && typeof secInfo === "object") {
-                isAssigned = secInfo.taId === sessionData.doctorId || 
-                             (Array.isArray(secInfo.taIds) && secInfo.taIds.includes(sessionData.doctorId)) ||
-                             (sessionData.sessionType === "section" && secInfo.section === sessionData.doctorId) ||
-                             (sessionData.sessionType === "lab" && secInfo.lab === sessionData.doctorId);
+            if (typeof secInfo === "string") {
+                isAssigned = (secInfo === sessionData.doctorId);
+            } else if (secInfo && typeof secInfo === "object") {
+                // فحص المطابقة بالمعيد أو برقم المجموعة (جروب 1، جروب 2...)
+                if (secInfo.taId && secInfo.taId === sessionData.doctorId) isAssigned = true;
+                if (Array.isArray(secInfo.taIds) && secInfo.taIds.includes(sessionData.doctorId)) isAssigned = true;
+                if (sessionData.group && (secInfo.group === sessionData.group || secInfo.groupName === sessionData.group)) isAssigned = true;
+                // في حالة مطابقة السكشن أو المعمل
+                if (!isAssigned && (!sessionData.group || sessionData.group === secInfo.group)) isAssigned = true;
             }
-            if (!isAssigned) throw new Error(`عفواً يا ${studentData.name}، أنت غير مسجل في هذا الجروب/السكشن.`);
+            if (!isAssigned) throw new Error(`عفواً يا ${studentData.name}، أنت مقيد في (${(secInfo && secInfo.group) || 'مجموعة أخرى'}) وليس هذا السكشن.`);
         }
 
         const existing = await transaction.get(recordRef);
