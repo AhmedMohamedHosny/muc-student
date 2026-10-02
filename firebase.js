@@ -133,13 +133,16 @@ if (sessionData.hostRole === "ta") {
             createdAt: serverTimestamp()
         });
 
-        return {
-            success: true,
-            studentName: studentData.name,
-            studentId: cleanedStudentId,
-            courseName: sessionData.courseName,
-            status: status,
-            time: new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })
-        };
+const now = new Date();
+            return {
+                success: true,
+                studentName: studentData.name,
+                studentId: cleanedStudentId,
+                courseName: sessionData.courseName,
+                status: status,
+                sessionType: sessionData.sessionType || "lecture",
+                date: now.toLocaleDateString("ar-EG", { year: 'numeric', month: 'long', day: 'numeric' }),
+                time: now.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })
+            };
     });
 }
