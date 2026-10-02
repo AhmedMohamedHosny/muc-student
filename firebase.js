@@ -72,19 +72,26 @@ if (sessionData.hostRole === "ta") {
 
             let isAssigned = false;
 
-            // 1. مطابقة اسم المجموعة مباشرة (مثال: جروب 1 يطابق جروب 1)
-            if (studentGroup && sessionGroup) {
-                isAssigned = (studentGroup.trim().toLowerCase() === sessionGroup.trim().toLowerCase());
+            // 1. لو اسم الجروب متطابق (جروب 1 مع جروب 1)
+            if (studentGroup && sessionGroup && studentGroup.trim().toLowerCase() === sessionGroup.trim().toLowerCase()) {
+                isAssigned = true;
             }
 
-            // 2. مطابقة بواسطة معرف المعيد
-            if (!isAssigned && secInfo.taId) {
-                isAssigned = (secInfo.taId === sessionData.doctorId);
+            // 2. لو الطالب متسكن مع نفس معيد الجلسة
+            if (!isAssigned && secInfo.taId && secInfo.taId === sessionData.doctorId) {
+                isAssigned = true;
             }
 
-            // 3. مطابقة إضافية لو كان الجروب مسجل ضمن قائمة
-            if (!isAssigned && Array.isArray(secInfo.taIds)) {
-                isAssigned = secInfo.taIds.includes(sessionData.doctorId);
+            // 3. مطابقة ذكية بالأرقام (لو الطالب فيه رقم 1 وجلسة المعيد فيها رقم 1)
+            if (!isAssigned && studentGroup && sessionGroup) {
+                const stdNum = studentGroup.replace(/[^0-9]/g, "");
+                const sessNum = sessionGroup.replace(/[^0-9]/g, "");
+                if (stdNum && sessNum && stdNum === sessNum) isAssigned = true;
+            }
+
+            // 4. لو الجلسة قديمة أو مفيهاش اسم جروب، طالما الطالب مسجل في الكورس ده نسمحله بالدخول فوراً
+            if (!isAssigned && (!sessionGroup || sessionGroup === "")) {
+                isAssigned = true;
             }
 
             if (!isAssigned) {
