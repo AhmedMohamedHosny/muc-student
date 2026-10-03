@@ -160,6 +160,10 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
             };
         });
     } catch (err) {
+// ==========================================
+        // 🚨 رادار التنبيهات (تم إيقافه مؤقتاً بكومنت)
+        // ==========================================
+        /*
         // سيناريو 1: تسجيل زميل من نفس الهاتف
         if (err.message === "DEVICE_DUPLICATE") {
             try {
@@ -192,6 +196,15 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
                 });
             } catch (e) { console.warn("Alert log error:", e); }
             throw new Error("رمز QR انتهت مدته (سكرين شوت قديمة). يرجى مسح الرمز الحي المحدث من الشاشة.");
+        }
+        */
+
+        // رسائل خطأ عادية وبسيطة للطالب بدون إرسال أي تنبيهات للشاشة:
+        if (err.message === "DEVICE_DUPLICATE") {
+            throw new Error("عفواً، تم تسجيل الحضور مسبقاً من هذا الهاتف.");
+        }
+        if (err.message === "QR_EXPIRED") {
+            throw new Error("انتهت صلاحية الرمز، يرجى مسح الباركود الجديد من الشاشة.");
         }
 
         throw err;
