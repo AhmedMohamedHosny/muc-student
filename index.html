@@ -175,11 +175,7 @@ background: #FDF2F3;
             localStorage.setItem("muc_device_fingerprint", deviceId);
         }
 
-        // فحص مسبق: هل سجل هذا الجهاز في هذه الجلسة مسبقاً؟
-        const localCheck = localStorage.getItem("attended_session_" + sessionId);
-        if (localCheck) {
-            showResult(false, "تم تسجيل الحضور مسبقاً", "هذا الهاتف قام بتسجيل الحضور في هذه المحاضرة بالفعل مسبقاً، ولا يمكن تسجيل طالب آخر.");
-        }
+
 
         const form = document.getElementById("attendance-form");
         const btn = document.getElementById("btn-submit");
