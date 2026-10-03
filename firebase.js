@@ -34,6 +34,7 @@ function getLocalDeviceId() {
     }
 }
 
+
 export async function recordStudentAttendance(sessionId, clientToken, studentIdInput, deviceId) {
     const cleanedStudentId = String(studentIdInput).trim();
     if (!cleanedStudentId) throw new Error("يرجى إدخال الرقم الجامعي.");
@@ -54,7 +55,7 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
             const sessionData = sessionDoc.data();
             if (sessionData.status !== "active") throw new Error("جلسة الحضور مغلقة حالياً من قبل أستاذ المادة.");
 
-            // 1. فحص هل الباركود منتهي (سكرين شوت قديمة مبعوتة واتساب)
+            // 1. فحص سكرين شوت واتساب
             const t = sessionData.currentToken || {};
             if (!clientToken || (t.token !== clientToken && t.prevToken !== clientToken)) {
                 const err = new Error("QR_EXPIRED");
@@ -93,7 +94,7 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
             const existing = await transaction.get(recordRef);
             if (existing.exists()) throw new Error(`تم تسجيل حضورك مسبقاً يا ${studentData.name}.`);
 
-            // 2. فحص محاولة تسجيل زميل من نفس الهاتف (جهاز مكرر)
+            // 2. فحص محاولة تسجيل زميل من نفس الموبايل
             const deviceDoc = await transaction.get(deviceRef);
             if (deviceDoc.exists()) {
                 const err = new Error("DEVICE_DUPLICATE");
@@ -145,7 +146,7 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
             };
         });
     } catch (err) {
-        // إطلاق إنذار الرادار السحابي فوراً لشاشة المحاضرة والبروجيكتور
+        // إرسال تنبيه الرادار لشاشة الدكتور فوراً
         if (err.message === "DEVICE_DUPLICATE") {
             try {
                 const origSnap = await getDoc(doc(db, "students", err.originalStudentId));
@@ -160,23 +161,26 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
                     targetStudentName: err.targetStudentName,
                     createdAt: serverTimestamp()
                 });
-            } catch (e) { console.warn(e); }
+            } catch (e) { console.warn("Alert write error:", e); }
             throw new Error("⚠️ تنبيه أمني: هذا الهاتف سجل حضور لطالب آخر بالفعل! تم إشعار شاشة المحاضرة بمحاولة الغش.");
         }
 
         if (err.message === "QR_EXPIRED") {
             try {
-                const sSnap = await getDoc(doc(db, "students", err.studentId));
-                const sName = sSnap.exists() ? sSnap.data().name : err.studentId;
+                let sName = err.studentId;
+                if (err.studentId) {
+                    const sSnap = await getDoc(doc(db, "students", err.studentId));
+                    if (sSnap.exists()) sName = sSnap.data().name;
+                }
 
                 await setDoc(doc(collection(db, "attendance_alerts")), {
                     sessionId: sessionId,
                     type: "EXPIRED_SCREENSHOT",
-                    targetStudentId: err.studentId,
+                    targetStudentId: err.studentId || "غير محدد",
                     targetStudentName: sName,
                     createdAt: serverTimestamp()
                 });
-            } catch (e) { console.warn(e); }
+            } catch (e) { console.warn("Alert write error:", e); }
             throw new Error("رمز QR انتهت مدته (سكرين شوت قديمة). يرجى مسح الرمز الحي المحدث من الشاشة.");
         }
 
