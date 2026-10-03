@@ -123,7 +123,12 @@ background: #FDF2F3;
             </p>
             <form id="attendance-form">
                 <div class="form-group">
-                    <label><i class="fa-solid fa-id-card"></i> الرقم الجامعي (Student ID)</label>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+                        <label style="margin-bottom:0;"><i class="fa-solid fa-id-card"></i> الرقم الجامعي (Student ID)</label>
+                        <button type="button" id="btn-change-saved-id" class="d-none" style="background: none; border: none; color: #DC2626; font-size: 0.78rem; font-weight: 700; cursor: pointer;">
+                            <i class="fa-solid fa-pen-to-square"></i> تغيير الرقم المحفوظ
+                        </button>
+                    </div>
                     <input type="text" id="student-id" placeholder="مثال: 20250123" inputmode="numeric" required autofocus>
                 </div>
                 <button type="submit" id="btn-submit" class="btn">
@@ -177,29 +182,56 @@ background: #FDF2F3;
 
 
 
-        const form = document.getElementById("attendance-form");
+const form = document.getElementById("attendance-form");
         const btn = document.getElementById("btn-submit");
+        const inputId = document.getElementById("student-id");
+        const changeIdBtn = document.getElementById("btn-change-saved-id");
 
-        form.addEventListener("submit", async (e) => {
-            e.preventDefault();
-            const studentId = document.getElementById("student-id").value.trim();
+        // قراءة الرقم الجامعي المحفوظ مسبقاً في هذا الهاتف
+        const savedStudentId = localStorage.getItem("muc_saved_student_id");
 
+        if (savedStudentId) {
+            inputId.value = savedStudentId;
+            changeIdBtn.classList.remove("d-none");
+
+            // إذا دخل الطالب برابط يحتوي على جلسة وتوكن صالح، نسجل له فوراً وتلقائياً
+            if (sessionId && token) {
+                btn.disabled = true;
+                btn.innerHTML = `<i class="fa-solid fa-bolt fa-fade"></i> جاري تسجيل حضورك تلقائياً...`;
+                setTimeout(() => {
+                    executeAttendance(savedStudentId);
+                }, 400); // تأخير بسيط لضمان تهيئة الصفحة
+            }
+        }
+
+        // إتاحة تغيير الرقم المحفوظ بضغطة زر
+        changeIdBtn?.addEventListener("click", () => {
+            const newId = prompt("أدخل الرقم الجامعي الجديد لتثبيته على هذا الهاتف:", inputId.value);
+            if (newId && newId.trim()) {
+                const clean = newId.trim();
+                localStorage.setItem("muc_saved_student_id", clean);
+                inputId.value = clean;
+                alert(`✅ تم تحديث رقمك الجامعي المحفوظ إلى (${clean}).`);
+            }
+        });
+
+        // دالة تنفيذ التسجيل المركزية
+        async function executeAttendance(studentId) {
             if (!sessionId || !token) {
                 showResult(false, "خطأ في الرابط", "رمز الحضور غير صالح أو منتهي الصلاحية، يرجى مسح الرمز الجديد من الشاشة.");
                 return;
             }
 
             btn.disabled = true;
-            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> جاري التحقق من الهاتف...`;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> جاري تثبيت الحضور في المنظومة...`;
 
             try {
-                // إرسال الرقم الجامعي مع بصمة الجهاز للتحقق
                 const res = await recordStudentAttendance(sessionId, token, studentId, deviceId);
-                
-                // قفل الهاتف محلياً لهذه المحاضرة
+
+                // حفظ الرقم الجامعي تلقائياً للمرات القادمة
+                localStorage.setItem("muc_saved_student_id", studentId);
                 localStorage.setItem("attended_session_" + sessionId, studentId);
 
-// تحديد نوع الجلسة ديناميكياً (محاضرة / سكشن نظري / معمل عملي)
                 const typeLabels = {
                     lab: "معمل العملي",
                     section: "السكشن النظري",
@@ -208,8 +240,7 @@ background: #FDF2F3;
                 const sessionLabel = typeLabels[res.sessionType] || "المحاضرة";
                 const sessionDate = res.date || new Date().toLocaleDateString("ar-EG", { year: 'numeric', month: 'long', day: 'numeric' });
 
-                // إظهار إيصال الحضور مع تخصيص الرسالة حسب نوع الجلسة والتاريخ
-                showResult(true, "تم تسجيل الحضور بنجاح", `تم توثيق حضورك رسميّاً في سجل ${sessionLabel} بجامعة مايو.`);
+                showResult(true, "تم تسجيل الحضور بنجاح", `تم توثيق حضورك تلقائياً في سجل ${sessionLabel} بجامعة مايو.`);
                 document.getElementById("receipt-box").classList.remove("d-none");
                 document.getElementById("rcpt-name").innerText = res.studentName;
                 document.getElementById("rcpt-id").innerText = res.studentId;
@@ -223,6 +254,12 @@ background: #FDF2F3;
                 btn.disabled = false;
                 btn.innerHTML = `<span>تأكيد الحضور الآن</span> <i class="fa-solid fa-check"></i>`;
             }
+        }
+
+        form.addEventListener("submit", (e) => {
+            e.preventDefault();
+            const sid = inputId.value.trim();
+            if (sid) executeAttendance(sid);
         });
 
         function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
