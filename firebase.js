@@ -62,17 +62,16 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
             }
             const studentData = studentDoc.data();
 
+// ========================================================
+            // 1. فحص الحضور المكرر (موقوف مؤقتاً للتجربة والاختبار)
             // ========================================================
-            // 1. الفحص الأول والأهم: فحص بصمة الجهاز المكرر
-            // ========================================================
+            /*
             const deviceDoc = await transaction.get(deviceRef);
             if (deviceDoc.exists()) {
                 const prevStudentId = deviceDoc.data().studentId;
-                // إذا كان نفس الطالب يعيد المحاولة بهاتفه
                 if (prevStudentId === cleanedStudentId) {
                     throw new Error(`تم تسجيل حضورك مسبقاً يا ${studentData.name}.`);
                 }
-                // إذا كان الطالب يحاول تسجيل شخص آخر من نفس الهاتف
                 const err = new Error("DEVICE_DUPLICATE");
                 err.originalStudentId = prevStudentId;
                 err.targetStudentId = cleanedStudentId;
@@ -80,9 +79,9 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
                 throw err;
             }
 
-            // فحص هل الطالب سجل في الجلسة من جهاز آخر
             const existing = await transaction.get(recordRef);
             if (existing.exists()) throw new Error(`تم تسجيل حضورك مسبقاً يا ${studentData.name}.`);
+            */
 
             // ========================================================
             // 2. الفحص الثاني: فحص سكرين شوت متأخر (جهاز جديد برمز قديم)
