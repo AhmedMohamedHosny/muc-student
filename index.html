@@ -5,9 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MUC - تسجيل حضور المحاضرة</title>
 <!-- أيقونة الجامعة الرسمية لماسح الكاميرا والمتصفح -->
+<!-- أيقونة الجامعة الرسمية لجميع كاميرات الموبايل وقارئ الـ QR -->
     <link rel="icon" type="image/jpeg" href="logo.jpg">
-    <link rel="shortcut icon" href="logo.jpg">
+    <link rel="shortcut icon" type="image/jpeg" href="logo.jpg">
     <link rel="apple-touch-icon" href="logo.jpg">
+    <link rel="icon" sizes="192x192" href="logo.jpg">
+    <meta property="og:title" content="MUC Attendance">
+    <meta property="og:image" content="logo.jpg">
+    <link rel="manifest" href="data:application/manifest+json;charset=utf-8,%7B%22name%22%3A%22MUC%20Attendance%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22logo.jpg%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%2Fjpeg%22%7D%5D%7D">
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
@@ -193,18 +198,9 @@ const form = document.getElementById("attendance-form");
         // قراءة الرقم الجامعي المحفوظ مسبقاً في هذا الهاتف
         const savedStudentId = localStorage.getItem("muc_saved_student_id");
 
-        if (savedStudentId) {
+if (savedStudentId) {
             inputId.value = savedStudentId;
             changeIdBtn.classList.remove("d-none");
-
-            // إذا دخل الطالب برابط يحتوي على جلسة وتوكن صالح، نسجل له فوراً وتلقائياً
-            if (sessionId && token) {
-                btn.disabled = true;
-                btn.innerHTML = `<i class="fa-solid fa-bolt fa-fade"></i> جاري تسجيل حضورك تلقائياً...`;
-                setTimeout(() => {
-                    executeAttendance(savedStudentId);
-                }, 400); // تأخير بسيط لضمان تهيئة الصفحة
-            }
         }
 
         // إتاحة تغيير الرقم المحفوظ بضغطة زر
