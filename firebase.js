@@ -131,10 +131,11 @@ const t = sessionData.currentToken || {};
 
 // 2. تسجيل الحضور محلياً أوفلاين مع حفظ رقم المحاضرة وتاريخ اليوم
 export async function queueOfflineAttendance({ studentId, studentName, sessionId, courseId, courseName, lectureNumber, timeSlot, hash }) {
-    // ⏱️ فحص الفاصل الزمني للباركود
+// ⏱️ فحص الفاصل الزمني المرن للباركود (سماحية 5 دقائق للطالب لكتابة رقمه الجامعي)
     if (timeSlot) {
         const currentSlot = Math.floor(Date.now() / 15000);
-        if (Math.abs(currentSlot - timeSlot) > 1) {
+        // السماح بـ 20 شريحة زمنية (توازي 5 دقائق كاملة بين مسح الكود والضغط على تأكيد الحضور)
+        if (Math.abs(currentSlot - timeSlot) > 20) {
             throw new Error("⚠️ انتهت صلاحية هذا الرمز! صوّب الكاميرا والتقط الرمز الحي الجديد من الشاشة.");
         }
     }
