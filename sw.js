@@ -1,14 +1,13 @@
 // sw.js - MUC Student Offline Engine
-const CACHE_NAME = "muc-student-offline-v2";
+const CACHE_NAME = "muc-student-offline-v3";
 
-// الملفات الأساسية التي يتم حفظها فوراً
 const STATIC_ASSETS = [
   "./",
   "./index.html",
   "./firebase.js",
   "./config.js",
   "./logo.jpg",
-  "https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js",
+  "https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js",
   "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
 ];
 
@@ -30,18 +29,14 @@ self.addEventListener("activate", (e) => {
   self.clients.claim();
 });
 
-// الاستراتيجية الذكية: حفظ أي مكتبة (فايربيز، خطوط، قارئ الكاميرا) تلقائياً في الكاش
 self.addEventListener("fetch", (e) => {
-  // استثناء اتصالات قاعدة بيانات فايربيز المباشرة
   if (e.request.url.includes("firestore.googleapis.com")) return;
 
   e.respondWith(
-    // ignoreSearch: true تضمن فتح الصفحة حتى مع وجود ?session= في الرابط
     caches.match(e.request, { ignoreSearch: true }).then((cachedResponse) => {
       if (cachedResponse) return cachedResponse;
 
       return fetch(e.request).then((networkResponse) => {
-        // تخزين أي ملف يتم تحميله بنجاح (مثل مكتبات فايربيز من سيرفرات جوجل)
         if (networkResponse && networkResponse.status === 200) {
           const clone = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
@@ -50,7 +45,6 @@ self.addEventListener("fetch", (e) => {
         }
         return networkResponse;
       }).catch(() => {
-        // عند انقطاع الإنترنت بالكامل وطلب فتح الصفحة
         if (e.request.mode === "navigate") {
           return caches.match("./index.html");
         }
