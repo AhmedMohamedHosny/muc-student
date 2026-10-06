@@ -338,6 +338,9 @@ async function startCameraScanner() {
     }
 
     try {
+if (html5QrScanner) {
+            try { await html5QrScanner.clear(); } catch(e) {}
+        }
         html5QrScanner = new Html5Qrcode("qr-reader");
         await html5QrScanner.start(
             { facingMode: "environment" },
@@ -588,20 +591,27 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
             document.getElementById("status-msg").innerText = msg;
         }
 
-document.getElementById("btn-retry").addEventListener("click", () => {
+document.getElementById("btn-retry").addEventListener("click", async () => {
     resultStep.classList.add("d-none");
 
     if (isExpiredQrError) {
-        // إذا كان الخطأ هو "انتهت صلاحية الرمز" -> التوجيه المباشر للكاميرا وقراءتها فوراً
         isExpiredQrError = false;
+        offlinePayload = null;
+        activeSessionId = null;
+        activeToken = null;
+
+        // إرجاع واجهة الكاميرا
+        inputStep.classList.add("d-none");
         scannerStep.classList.remove("d-none");
         btnTriggerCam.classList.remove("d-none");
         qrBox.classList.add("d-none");
-        
-        // تشغيل الكاميرا تلقائياً لمسح الباركود الجديد
+
+        // تنظيف القارئ القديم وتشغيل الكاميرا من جديد
+        if (html5QrScanner) {
+            try { await html5QrScanner.clear(); } catch(e) {}
+        }
         btnTriggerCam.click();
     } else {
-        // الأخطاء الأخرى (مثل الرقم غير مقيد) -> العودة لشاشة إدخال الرقم الجامعي
         inputStep.classList.remove("d-none");
     }
 });
