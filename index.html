@@ -191,7 +191,7 @@ background: #FDF2F3;
     </style>
 </head>
 <body>
-
+<body style="padding-bottom: 50px;">
     <div class="card">
         <img src="logo.jpg" alt="MUC Logo" class="logo">
         <div id="course-badge" class="session-badge">تسجيل الحضور الذكي المباشر</div>
@@ -356,12 +356,17 @@ async function startCameraScanner() {
                         activeSessionId = offlinePayload.s;
                         detectedCourse.innerText = offlinePayload.cn || "المقرر الدراسي";
                         courseBadge.innerText = `محاضرة: ${offlinePayload.cn || ''}`;
-                    } else if (decodedText.includes("session=")) {
-                        const parsed = new URL(decodedText);
-                        activeSessionId = parsed.searchParams.get("session");
-                        activeToken = parsed.searchParams.get("token");
-                        detectedCourse.innerText = "محاضرة مباشرة (سحابية)";
-                    } else {
+} else if (decodedText.includes("session=")) {
+    // فحص شبكة الهاتف إذا كانت المحاضرة سحابية
+    if (!navigator.onLine) {
+        alert("⚠️ تنبيه مهم:\n\nهذه المحاضرة سحابية (Online) وتتطلب اتصالاً بالإنترنت لتسجيل الحضور المباشر!\nيرجى تفعيل الواي فاي أو شبكة البيانات (Data) على هاتفك ثم مسح الكود مرة أخرى.");
+        throw new Error("المحاضرة تتطلب إنترنت");
+    }
+    const parsed = new URL(decodedText);
+    activeSessionId = parsed.searchParams.get("session");
+    activeToken = parsed.searchParams.get("token");
+    detectedCourse.innerText = "محاضرة مباشرة (سحابية)";
+} else {
                         throw new Error("رمز غير صالح!");
                     }
 
@@ -587,5 +592,39 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
         // مزامنة أي حضور قديم تلقائياً
         syncPendingAttendance();
     </script>
+<!-- الشريط الثابت لحقوق التصميم والتطوير (داعم للغتين العربية والإنجليزية تلقائياً) -->
+<div id="app-footer-credits" style="position: fixed; bottom: 0; left: 0; right: 0; text-align: center; padding: 0.5rem 1rem; font-size: 0.85rem; font-weight: 700; background: #0F172A; border-top: 1px solid rgba(197, 155, 39, 0.3); z-index: 9999; box-shadow: 0 -4px 15px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; gap: 8px;">
+    
+    <!-- النص العربي -->
+    <div class="footer-ar" style="display: flex; align-items: center; gap: 8px; color: #C59B27;">
+        <span style="color: #C59B27; font-weight: 800;">&lt;/&gt;</span>
+        <span>تم تصميم وتنفيذ البرنامج بواسطة فريق عمل من كلية الهندسة جامعة مايو بالقاهرة</span>
+        <span style="color: #C59B27; font-weight: 800;">&lt;/&gt;</span>
+    </div>
+
+    <!-- النص الإنجليزي (مطابق لشاشتك بالضبط) -->
+    <div class="footer-en" style="display: none; align-items: center; gap: 8px;">
+        <span style="color: #C59B27; font-weight: 800;">&lt;/&gt;</span>
+        <span style="color: #93131E;">Designed and developed by Faculty of Engineering, May University in Cairo</span>
+        <span style="color: #C59B27; font-weight: 800;">&lt;/&gt;</span>
+    </div>
+
+</div>
+
+<!-- تنسيقات التبديل التلقائي حسب لغة الصفحة -->
+<style>
+    /* إذا كانت الصفحة بالإنجليزية (dir="ltr" أو lang="en") */
+    html[dir="ltr"] .footer-ar,
+    html[lang="en"] .footer-ar,
+    body.lang-en .footer-ar {
+        display: none !important;
+    }
+
+    html[dir="ltr"] .footer-en,
+    html[lang="en"] .footer-en,
+    body.lang-en .footer-en {
+        display: flex !important;
+    }
+</style>
 </body>
 </html>
