@@ -182,38 +182,28 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
     return record;
 }
 
-// 2. محرك المزامنة التلقائي مع Firestore عند توفر الشبكة
 export async function syncPendingAttendance() {
     if (!navigator.onLine) return;
     const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
     if (queue.length === 0) return;
 
     if (!auth.currentUser) {
-        try { 
-            await signInAnonymously(auth); 
-        } catch (e) { 
-            console.error("خطأ في تسجيل الدخول المجهول أثناء المزامنة:", e);
-            return; 
-        }
+        try { await signInAnonymously(auth); } catch (e) { return; }
     }
 
     const remaining = [];
     for (const item of queue) {
         try {
-            const recordId = `${item.sessionId}_${item.studentId}`;
-
             // جلب اسم الطالب الحقيقي من قاعدة البيانات فور توفر الإنترنت
             let realStudentName = item.studentName && item.studentName !== "طالب" ? item.studentName : "طالب";
             try {
-                const studentSnap = await getDoc(doc(db, "students", item.studentId));
-                if (studentSnap.exists()) {
-                    realStudentName = studentSnap.data().name || realStudentName;
+                const stdSnap = await getDoc(doc(db, "students", item.studentId));
+                if (stdSnap.exists()) {
+                    realStudentName = stdSnap.data().name || realStudentName;
                 }
-            } catch (e) {
-                console.warn("تعذر جلب اسم الطالب أثناء المزامنة:", e);
-            }
-            
-            // 1. بناء السجل وتنظيف الحقول من أي undefined
+            } catch (e) { console.warn(e); }
+
+            const recordId = `${item.sessionId}_${item.studentId}`;
             const recordData = {
                 recordId: recordId,
                 sessionId: item.sessionId,
@@ -231,10 +221,10 @@ export async function syncPendingAttendance() {
             if (item.timeSlot) recordData.timeSlot = item.timeSlot;
             if (item.hash) recordData.hash = item.hash;
 
-            // رفع السجل الفردي إلى attendance_records
+            // 1. رفع سجل الحضور الفردي
             await setDoc(doc(db, "attendance_records", recordId), recordData, { merge: true });
 
-            // 2. تحديث قائمة الحضور في الجلسة عبر arrayUnion لضمان ظهور علامة (✔) في شيت الدكتور فوراً
+            // 2. إدراج الطالب في مصفوفة الجلسة الحية لدكتور المادة لظهور علامة (✔) في الشيت
             const sessionRef = doc(db, "attendance_sessions", item.sessionId);
             await setDoc(sessionRef, {
                 sessionId: item.sessionId,
@@ -243,7 +233,7 @@ export async function syncPendingAttendance() {
                 presentStudents: arrayUnion(item.studentId)
             }, { merge: true });
 
-            console.log(`☁️ تمت مزامنة حضور الطالب (${item.studentId} - ${realStudentName}) وظهوره في شيت الدكتور بنجاح! ✅`);
+            console.log(`☁️ تمت المزامنة بنجاح للطالب (${item.studentId} - ${realStudentName})!`);
         } catch (err) {
             console.error("فشل رفع سجل الطالب:", item.studentId, err);
             remaining.push(item);
