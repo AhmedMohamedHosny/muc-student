@@ -199,7 +199,6 @@ background: #FDF2F3;
     <div class="receipt-row"><span>اسم الطالب:</span><strong id="rcpt-name">--</strong></div>
     <div class="receipt-row"><span>الرقم الجامعي:</span><strong id="rcpt-id">--</strong></div>
     <div class="receipt-row"><span>المقرر الدراسي:</span><strong id="rcpt-course">--</strong></div>
-    <div class="receipt-row"><span>المحاضرة / الجلسة:</span><strong id="rcpt-session-num" style="color: var(--primary);">--</strong></div>
     <div class="receipt-row"><span>تاريخ الجلسة:</span><strong id="rcpt-date">--</strong></div>
     <div class="receipt-row"><span>وقت التسجيل:</span><strong id="rcpt-time">--</strong></div>
     <div class="receipt-row"><span>الحالة:</span><strong id="rcpt-status" style="color: var(--success);">حاضر (Present)</strong></div>
@@ -325,7 +324,7 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance 
             }
         }
 
-// 3. تأكيد الحضور المعدل بالكامل
+// 3. تأكيد الحضور (معدل للربط المباشر وتفادي اسم "طالب")
 document.getElementById("attendance-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const sid = inputId.value.trim();
@@ -338,17 +337,31 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
     try {
         localStorage.setItem("muc_saved_student_id", sid);
 
-        // جلب اسم الطالب المحفوظ على الهاتف
-        const cachedStudentName = localStorage.getItem(`muc_student_name_${sid}`) || localStorage.getItem("muc_saved_student_name") || "طالب";
+        // جلب اسم الطالب الحقيقي فوراً من الفايربيز إذا كان النت شغال
+        let studentRealName = localStorage.getItem(`muc_student_name_${sid}`) || localStorage.getItem("muc_saved_student_name") || "طالب";
 
-        // تنسيق اسم المحاضرة وتجنب ظهور أرقام الجلسة المبتورة مثل #9057
-        const lectureTitle = offlinePayload?.cn || offlinePayload?.courseName || (offlinePayload?.c ? `محاضرة ${offlinePayload.c.toUpperCase()}` : "المحاضرة الحالية");
+        if (navigator.onLine) {
+            try {
+                const { db } = await import("./firebase.js");
+                const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+                const stdSnap = await getDoc(doc(db, "students", sid));
+                if (stdSnap.exists()) {
+                    studentRealName = stdSnap.data().name;
+                    localStorage.setItem(`muc_student_name_${sid}`, studentRealName);
+                    localStorage.setItem("muc_saved_student_name", studentRealName);
+                } else {
+                    throw new Error(`الرقم الجامعي (${sid}) غير مقيد بقاعدة البيانات.`);
+                }
+            } catch (err) {
+                if (err.message.includes("غير مقيد")) throw err;
+            }
+        }
 
-        // أ. إذا كان الطالب أوفلاين
+        // أ. التسجيل أوفلاين
         if (offlinePayload) {
             await queueOfflineAttendance({
                 studentId: sid,
-                studentName: cachedStudentName,
+                studentName: studentRealName,
                 sessionId: offlinePayload.s,
                 courseId: offlinePayload.c,
                 courseName: offlinePayload.cn,
@@ -358,10 +371,9 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
 
             showResult(true, "تم تثبيت الحضور بنجاح!", "محفوظ على هاتفك وسيرتفع تلقائياً للسيرفر فور التقاط الشبكة.");
             
-            document.getElementById("rcpt-name").innerText = cachedStudentName;
+            document.getElementById("rcpt-name").innerText = studentRealName;
             document.getElementById("rcpt-id").innerText = sid;
             document.getElementById("rcpt-course").innerText = offlinePayload.cn || "المقرر الدراسي";
-            document.getElementById("rcpt-session-num").innerText = lectureTitle;
             document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("ar-EG");
             document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("ar-EG");
             document.getElementById("rcpt-status").innerText = navigator.onLine ? "متزامن سحابياً ✅" : "محفوظ أوفلاين ⏳";
@@ -369,13 +381,12 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
             return;
         }
 
-        // ب. إذا كان الطالب أونلاين
+        // ب. التسجيل أونلاين المباشر
         let deviceId = localStorage.getItem("muc_device_fingerprint") || ("dev_" + Math.random().toString(36).substring(2));
         localStorage.setItem("muc_device_fingerprint", deviceId);
 
         const res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
         
-        // حفظ الاسم الحقيقي فوراً لاستخدامه أوفلاين لاحقاً
         if (res.studentName) {
             localStorage.setItem(`muc_student_name_${sid}`, res.studentName);
             localStorage.setItem("muc_saved_student_name", res.studentName);
@@ -385,7 +396,6 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
         document.getElementById("rcpt-name").innerText = res.studentName;
         document.getElementById("rcpt-id").innerText = res.studentId;
         document.getElementById("rcpt-course").innerText = res.courseName;
-        document.getElementById("rcpt-session-num").innerText = res.sessionType || "محاضرة مباشرة";
         document.getElementById("rcpt-date").innerText = res.date;
         document.getElementById("rcpt-time").innerText = res.time;
         document.getElementById("rcpt-status").innerText = res.status === "Present" ? "حاضر (Present)" : "متأخر (Late)";
