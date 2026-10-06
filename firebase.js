@@ -73,11 +73,11 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
             throw new Error(`⚠️ حماية أمنية: تم تسجيل حضور مسبقاً من هذا الهاتف لطالب آخر! لا يمكن تسجيل الحضور لزميلك.`);
         }
 
-        // فحص الرمز وقيد المقرر
-        const t = sessionData.currentToken || {};
-        if (!clientToken || (t.token !== clientToken && t.prevToken !== clientToken)) {
-            throw new Error("انتهت صلاحية الرمز، يرجى مسح الباركود المحدث من الشاشة.");
-        }
+const t = sessionData.currentToken || {};
+            // مطابقة حصرية وصارمة مع الرمز الحالي فقط، مع إلغاء قبول الرمز السابق
+            if (!clientToken || t.token !== clientToken) {
+                throw new Error("⚠️ انتهت صلاحية هذا الرمز! صوّب الكاميرا نحو الشاشة والتقط الرمز الجديد بسرعة.");
+            }
 
         if (!(studentData.enrolledCourses || []).includes(sessionData.courseId)) {
             throw new Error(`عفواً يا ${studentData.name}، أنت غير مقيد في هذا المقرر.`);
@@ -131,6 +131,15 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
 
 // 2. تسجيل الحضور محلياً أوفلاين مع الحماية من التكرار وتسجيل الصحاب
 export async function queueOfflineAttendance({ studentId, studentName, sessionId, courseId, courseName, timeSlot, hash }) {
+    // ⏱️ فحص الفاصل الزمني للأوفلاين (الـ QR يتغير كل 15 ثانية)
+    if (timeSlot) {
+        const currentSlot = Math.floor(Date.now() / 15000);
+        // رفض التسجيل إذا كان الفارق الزمني أكبر من فترة الصلاحية الحالية
+        if (Math.abs(currentSlot - timeSlot) > 1) {
+            throw new Error("⚠️ انتهت صلاحية هذا الرمز الأوفلاين! صوّب الكاميرا والتقط الرمز الحي الجديد من الشاشة.");
+        }
+    }
+
     const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
     const deviceId = getLocalDeviceId();
 
