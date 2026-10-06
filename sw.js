@@ -1,19 +1,18 @@
-// sw.js - MUC Student Offline Service Worker
-const CACHE_NAME = "muc-student-offline-v1";
-const ASSETS_TO_CACHE = [
+// sw.js - MUC Student Offline Engine
+const CACHE_NAME = "muc-student-offline-v2";
+
+// الملفات الأساسية التي يتم حفظها فوراً
+const STATIC_ASSETS = [
   "./",
   "./index.html",
   "./firebase.js",
   "./config.js",
-  "./logo.jpg",
-  "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css",
-  "https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap",
-  "https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"
+  "./logo.jpg"
 ];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS_TO_CACHE))
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
   );
   self.skipWaiting();
 });
@@ -29,8 +28,31 @@ self.addEventListener("activate", (e) => {
   self.clients.claim();
 });
 
+// الاستراتيجية الذكية: حفظ أي مكتبة (فايربيز، خطوط، قارئ الكاميرا) تلقائياً في الكاش
 self.addEventListener("fetch", (e) => {
+  // استثناء اتصالات قاعدة بيانات فايربيز المباشرة
+  if (e.request.url.includes("firestore.googleapis.com")) return;
+
   e.respondWith(
-    caches.match(e.request).then((cached) => cached || fetch(e.request).catch(() => cached))
+    // ignoreSearch: true تضمن فتح الصفحة حتى مع وجود ?session= في الرابط
+    caches.match(e.request, { ignoreSearch: true }).then((cachedResponse) => {
+      if (cachedResponse) return cachedResponse;
+
+      return fetch(e.request).then((networkResponse) => {
+        // تخزين أي ملف يتم تحميله بنجاح (مثل مكتبات فايربيز من سيرفرات جوجل)
+        if (networkResponse && networkResponse.status === 200) {
+          const clone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(e.request, clone);
+          });
+        }
+        return networkResponse;
+      }).catch(() => {
+        // عند انقطاع الإنترنت بالكامل وطلب فتح الصفحة
+        if (e.request.mode === "navigate") {
+          return caches.match("./index.html");
+        }
+      });
+    })
   );
 });
