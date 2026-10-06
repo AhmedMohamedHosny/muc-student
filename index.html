@@ -196,13 +196,14 @@ background: #FDF2F3;
             </button>
 
 <div id="receipt-box" class="receipt d-none">
-                <div class="receipt-row"><span>اسم الطالب:</span><strong id="rcpt-name">--</strong></div>
-                <div class="receipt-row"><span>الرقم الجامعي:</span><strong id="rcpt-id">--</strong></div>
-                <div class="receipt-row"><span>المقرر الدراسي:</span><strong id="rcpt-course">--</strong></div>
-                <div class="receipt-row"><span>تاريخ الجلسة:</span><strong id="rcpt-date">--</strong></div>
-                <div class="receipt-row"><span>وقت التسجيل:</span><strong id="rcpt-time">--</strong></div>
-                <div class="receipt-row"><span>الحالة:</span><strong id="rcpt-status" style="color: var(--success);">حاضر (Present)</strong></div>
-            </div>
+    <div class="receipt-row"><span>اسم الطالب:</span><strong id="rcpt-name">--</strong></div>
+    <div class="receipt-row"><span>الرقم الجامعي:</span><strong id="rcpt-id">--</strong></div>
+    <div class="receipt-row"><span>المقرر الدراسي:</span><strong id="rcpt-course">--</strong></div>
+    <div class="receipt-row"><span>المحاضرة / الجلسة:</span><strong id="rcpt-session-num" style="color: var(--primary);">--</strong></div>
+    <div class="receipt-row"><span>تاريخ الجلسة:</span><strong id="rcpt-date">--</strong></div>
+    <div class="receipt-row"><span>وقت التسجيل:</span><strong id="rcpt-time">--</strong></div>
+    <div class="receipt-row"><span>الحالة:</span><strong id="rcpt-status" style="color: var(--success);">حاضر (Present)</strong></div>
+</div>
         </div>
     </div>
 
@@ -325,60 +326,76 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance 
         }
 
         // 3. تأكيد الحضور
-        document.getElementById("attendance-form").addEventListener("submit", async (e) => {
-            e.preventDefault();
-            const sid = inputId.value.trim();
-            if (!sid) return;
+// 3. تأكيد الحضور
+document.getElementById("attendance-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const sid = inputId.value.trim();
+    if (!sid) return;
 
-            const btn = document.getElementById("btn-submit");
-            btn.disabled = true;
-            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> جاري التثبيت...`;
+    const btn = document.getElementById("btn-submit");
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> جاري التثبيت...`;
 
-            try {
-                localStorage.setItem("muc_saved_student_id", sid);
+    try {
+        localStorage.setItem("muc_saved_student_id", sid);
 
-                // أ. لو أوفلاين
-                if (offlinePayload) {
-                    await queueOfflineAttendance({
-                        studentId: sid,
-                        sessionId: offlinePayload.s,
-                        courseId: offlinePayload.c,
-                        courseName: offlinePayload.cn,
-                        timeSlot: offlinePayload.t,
-                        hash: offlinePayload.h
-                    });
+        // جلب الاسم المحفوظ سابقاً للموبايل أو إظهار "طالب" لو أول مرة يسجل أوفلاين
+        const cachedStudentName = localStorage.getItem(`muc_student_name_${sid}`) || localStorage.getItem("muc_saved_student_name") || "طالب";
+        const sessionNumLabel = offlinePayload?.sn || offlinePayload?.sessionName || (offlinePayload?.s ? `جلسة #${offlinePayload.s.slice(-4)}` : "محاضرة مباشرة");
 
-                    showResult(true, "تم تثبيت الحضور بنجاح!", "محفوظ على هاتفك وسيرتفع تلقائياً للسيرفر فور التقاط الشبكة.");
-                    document.getElementById("rcpt-name").innerText = "طالب";
-                    document.getElementById("rcpt-id").innerText = sid;
-                    document.getElementById("rcpt-course").innerText = offlinePayload.cn || "المقرر";
-                    document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("ar-EG");
-                    document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("ar-EG");
-                    document.getElementById("rcpt-status").innerText = navigator.onLine ? "متزامن سحابياً ✅" : "محفوظ أوفلاين ⏳";
-                    document.getElementById("receipt-box").classList.remove("d-none");
-                    return;
-                }
+        // أ. لو أوفلاين
+        if (offlinePayload) {
+            await queueOfflineAttendance({
+                studentId: sid,
+                studentName: cachedStudentName,
+                sessionId: offlinePayload.s,
+                courseId: offlinePayload.c,
+                courseName: offlinePayload.cn,
+                timeSlot: offlinePayload.t,
+                hash: offlinePayload.h
+            });
 
-                // ب. لو أونلاين
-                let deviceId = localStorage.getItem("muc_device_fingerprint") || ("dev_" + Math.random().toString(36).substring(2));
-                localStorage.setItem("muc_device_fingerprint", deviceId);
+            showResult(true, "تم تثبيت الحضور بنجاح!", "محفوظ على هاتفك وسيرتفع تلقائياً للسيرفر فور التقاط الشبكة.");
+            
+            document.getElementById("rcpt-name").innerText = cachedStudentName;
+            document.getElementById("rcpt-id").innerText = sid;
+            document.getElementById("rcpt-course").innerText = offlinePayload.cn || "المقرر الدراسي";
+            document.getElementById("rcpt-session-num").innerText = sessionNumLabel;
+            document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("ar-EG");
+            document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("ar-EG");
+            document.getElementById("rcpt-status").innerText = navigator.onLine ? "متزامن سحابياً ✅" : "محفوظ أوفلاين ⏳";
+            document.getElementById("receipt-box").classList.remove("d-none");
+            return;
+        }
 
-                const res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
-                showResult(true, "تم تسجيل الحضور في السجل المباشر!", `تم ظهور اسمك الآن على شاشة المحاضرة.`);
-                document.getElementById("rcpt-name").innerText = res.studentName;
-                document.getElementById("rcpt-id").innerText = res.studentId;
-                document.getElementById("rcpt-course").innerText = res.courseName;
-                document.getElementById("rcpt-date").innerText = res.date;
-                document.getElementById("rcpt-time").innerText = res.time;
-                document.getElementById("rcpt-status").innerText = res.status === "Present" ? "حاضر (Present)" : "متأخر (Late)";
-                document.getElementById("receipt-box").classList.remove("d-none");
+        // ب. لو أونلاين
+        let deviceId = localStorage.getItem("muc_device_fingerprint") || ("dev_" + Math.random().toString(36).substring(2));
+        localStorage.setItem("muc_device_fingerprint", deviceId);
 
-            } catch (err) {
-                showResult(false, "تم رفض التسجيل", err.message);
-                btn.disabled = false;
-                btn.innerHTML = `<span>تأكيد الحضور الآن</span> <i class="fa-solid fa-arrow-left"></i>`;
-            }
-        });
+        const res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
+        
+        // حفظ اسم الطالب الحقيقي من الفايربيز في الموبايل لاستخدامه مستقبلاً في الأوفلاين
+        if (res.studentName) {
+            localStorage.setItem(`muc_student_name_${sid}`, res.studentName);
+            localStorage.setItem("muc_saved_student_name", res.studentName);
+        }
+
+        showResult(true, "تم تسجيل الحضور في السجل المباشر!", `تم ظهور اسمك الآن على شاشة المحاضرة.`);
+        document.getElementById("rcpt-name").innerText = res.studentName;
+        document.getElementById("rcpt-id").innerText = res.studentId;
+        document.getElementById("rcpt-course").innerText = res.courseName;
+        document.getElementById("rcpt-session-num").innerText = res.sessionType || "محاضرة مباشرة";
+        document.getElementById("rcpt-date").innerText = res.date;
+        document.getElementById("rcpt-time").innerText = res.time;
+        document.getElementById("rcpt-status").innerText = res.status === "Present" ? "حاضر (Present)" : "متأخر (Late)";
+        document.getElementById("receipt-box").classList.remove("d-none");
+
+    } catch (err) {
+        showResult(false, "تم رفض التسجيل", err.message);
+        btn.disabled = false;
+        btn.innerHTML = `<span>تأكيد الحضور الآن</span> <i class="fa-solid fa-arrow-left"></i>`;
+    }
+});
 
         function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
             inputStep.classList.add("d-none");
