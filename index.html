@@ -206,7 +206,7 @@ background: #FDF2F3;
 <div id="camera-tools" class="camera-tools d-none">
     <div class="zoom-box">
         <i class="fa-solid fa-magnifying-glass-minus"></i>
-        <input type="range" id="zoom-range" min="1" max="5" step="0.1" value="1">
+<input type="range" id="zoom-range" min="1" max="10" step="0.1" value="1">
         <i class="fa-solid fa-magnifying-glass-plus"></i>
         <span id="zoom-val" style="min-width: 32px; text-align: left;">1x</span>
     </div>
@@ -376,13 +376,13 @@ async function startCameraScanner() {
             },
             () => {}
         );
-
 // ==========================================
-        // 🔍 تفعيل محرك الزوم والكشاف المباشر للهاتف (معدل 100%)
+        // 🔍 محرك الزوم الذكي (10x + Pinch to Zoom بأصبعين)
         // ==========================================
         setTimeout(() => {
             try {
                 const videoElem = document.querySelector("#qr-reader video");
+                const qrContainer = document.getElementById("qr-reader");
                 const stream = videoElem ? videoElem.srcObject : null;
                 const track = (stream && stream.getVideoTracks) ? stream.getVideoTracks()[0] : null;
 
@@ -393,29 +393,69 @@ async function startCameraScanner() {
 
                 if (cameraTools) cameraTools.classList.remove("d-none");
 
-                // أ. تفعيل التقريب (الزوم البصري + هاردوير الموبايل)
-                if (zoomRange && videoElem) {
-                    zoomRange.oninput = async (e) => {
-                        const zVal = parseFloat(e.target.value);
-                        if (zoomVal) zoomVal.innerText = `${zVal.toFixed(1)}x`;
+                let currentZoom = 1;
 
-                        // 1. تقريب رقمي مباشر على شاشة الكاميرا (شغال على كل الهواتف بلا استثناء)
-                        videoElem.style.transform = `scale(${zVal})`;
+                // دالة توحيد تطبيق الزوم
+                const applyZoom = async (val) => {
+                    currentZoom = Math.min(Math.max(val, 1), 10); // تحديد المجال بين 1x و 10x
+                    
+                    if (zoomRange) zoomRange.value = currentZoom;
+                    if (zoomVal) zoomVal.innerText = `${currentZoom.toFixed(1)}x`;
+
+                    // 1. تقريب مباشر بـ CSS على الفيديو (شغال 100% على الآيفون والأندرويد)
+                    if (videoElem) {
+                        videoElem.style.transform = `scale(${currentZoom})`;
                         videoElem.style.transformOrigin = "center center";
+                    }
 
-                        // 2. تقريب عدسة الموبايل (Hardware Zoom) إذا كان الهاردوير يدعمها
-                        if (track && track.getCapabilities) {
-                            const caps = track.getCapabilities();
-                            if (caps.zoom) {
-                                try {
-                                    await track.applyConstraints({ advanced: [{ zoom: zVal }] });
-                                } catch (err) { console.warn("HW Zoom error:", err); }
-                            }
+                    // 2. تقريب عدسة الموبايل (Hardware Zoom) إن وُجدت
+                    if (track && track.getCapabilities) {
+                        const caps = track.getCapabilities();
+                        if (caps.zoom) {
+                            try {
+                                const hwZoom = Math.min(currentZoom, caps.zoom.max || 10);
+                                await track.applyConstraints({ advanced: [{ zoom: hwZoom }] });
+                            } catch (e) { /* ignore constraint error */ }
                         }
-                    };
+                    }
+                };
+
+                // أ. ربط شريط الزوم (Slider)
+                if (zoomRange) {
+                    zoomRange.oninput = (e) => applyZoom(parseFloat(e.target.value));
                 }
 
-                // ب. تفعيل الكشاف (Torch) للأجهزة التي تدعم فلاش الكاميرا عبر المتصفح
+                // ب. تفعيل التكبير باللمس بأصبعين على شاشة الكاميرا (Pinch to Zoom)
+                if (qrContainer) {
+                    let initialDist = null;
+
+                    qrContainer.addEventListener("touchstart", (e) => {
+                        if (e.touches.length === 2) {
+                            initialDist = Math.hypot(
+                                e.touches[0].pageX - e.touches[1].pageX,
+                                e.touches[0].pageY - e.touches[1].pageY
+                            );
+                        }
+                    }, { passive: true });
+
+                    qrContainer.addEventListener("touchmove", (e) => {
+                        if (e.touches.length === 2 && initialDist) {
+                            const currentDist = Math.hypot(
+                                e.touches[0].pageX - e.touches[1].pageX,
+                                e.touches[0].pageY - e.touches[1].pageY
+                            );
+                            const diff = (currentDist - initialDist) / 120; // حساسية الحركة
+                            applyZoom(currentZoom + diff);
+                            initialDist = currentDist;
+                        }
+                    }, { passive: true });
+
+                    qrContainer.addEventListener("touchend", () => {
+                        initialDist = null;
+                    });
+                }
+
+                // ج. تفعيل الكشاف للمواصفات التي تدعمه
                 if (track && track.getCapabilities) {
                     const capabilities = track.getCapabilities();
                     if (capabilities.torch && btnTorch) {
