@@ -281,7 +281,7 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance 
         let activeSessionId = urlParams.get("session");
         let activeToken = urlParams.get("token");
         let offlinePayload = null;
-
+let isExpiredQrError = false; // متغير لتحديد ما إذا كان الخطأ انتهاء صلاحية الرمز
         // توليد أو جلب بصمة الهاتف
         let deviceId = localStorage.getItem("muc_device_fingerprint");
         if (!deviceId) {
@@ -565,7 +565,10 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
         document.getElementById("rcpt-status").innerText = res.status === "Present" ? "حاضر (Present)" : "متأخر (Late)";
         document.getElementById("receipt-box").classList.remove("d-none");
 
-    } catch (err) {
+} catch (err) {
+        // فحص ما إذا كانت المشكلة هي انتهاء صلاحية الرمز تحديداً
+        isExpiredQrError = err.message.includes("انتهت صلاحية الرمز") || err.message.includes("QR_EXPIRED");
+
         showResult(false, "تم رفض التسجيل", err.message);
         btn.disabled = false;
         btn.innerHTML = `<span>تأكيد الحضور الآن</span> <i class="fa-solid fa-arrow-left"></i>`;
@@ -584,10 +587,23 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
             document.getElementById("status-msg").innerText = msg;
         }
 
-        document.getElementById("btn-retry").addEventListener("click", () => {
-            resultStep.classList.add("d-none");
-            inputStep.classList.remove("d-none");
-        });
+document.getElementById("btn-retry").addEventListener("click", () => {
+    resultStep.classList.add("d-none");
+
+    if (isExpiredQrError) {
+        // إذا كان الخطأ هو "انتهت صلاحية الرمز" -> التوجيه المباشر للكاميرا وقراءتها فوراً
+        isExpiredQrError = false;
+        scannerStep.classList.remove("d-none");
+        btnTriggerCam.classList.remove("d-none");
+        qrBox.classList.add("d-none");
+        
+        // تشغيل الكاميرا تلقائياً لمسح الباركود الجديد
+        btnTriggerCam.click();
+    } else {
+        // الأخطاء الأخرى (مثل الرقم غير مقيد) -> العودة لشاشة إدخال الرقم الجامعي
+        inputStep.classList.remove("d-none");
+    }
+});
 
         // مزامنة أي حضور قديم تلقائياً
         syncPendingAttendance();
