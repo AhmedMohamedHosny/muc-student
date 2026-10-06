@@ -526,13 +526,16 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
 
 // أ. التسجيل أوفلاين وتمرير رقم المحاضرة وتاريخ اليوم
         if (offlinePayload) {
+// قراءة رقم المحاضرة الحقيقي المتشفّر داخل باركود الدكتور
+            const realLectureNum = Number(offlinePayload.l ?? offlinePayload.ln ?? offlinePayload.lectureNumber ?? 1);
+
             await queueOfflineAttendance({
                 studentId: sid,
                 studentName: studentRealName,
                 sessionId: offlinePayload.s,
                 courseId: offlinePayload.c,
                 courseName: offlinePayload.cn,
-                lectureNumber: offlinePayload.l || 1, // رقم المحاضرة الفعلي (مثلاً 4)
+                lectureNumber: realLectureNum, // الرقم الحقيقي القادم من شاشة الدكتور
                 timeSlot: offlinePayload.t,
                 hash: offlinePayload.h
             });
