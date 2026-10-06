@@ -147,6 +147,7 @@ background: #FDF2F3;
     width: 100% !important; 
     height: 100% !important; 
     object-fit: cover !important; 
+    transition: transform 0.1s ease-out; /* تجعل تحريك الزوم سلس جداً */
 }
 
 /* أدوات التحكم بالكاميرا (الزوم والكشاف) */
@@ -376,55 +377,64 @@ async function startCameraScanner() {
             () => {}
         );
 
+// ==========================================
+        // 🔍 تفعيل محرك الزوم والكشاف المباشر للهاتف (معدل 100%)
         // ==========================================
-        // 🔍 تفعيل محرك الزوم والكشاف المباشر للهاتف
-        // ==========================================
-        try {
-            const track = html5QrScanner.getRunningTrack();
-            const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+        setTimeout(() => {
+            try {
+                const videoElem = document.querySelector("#qr-reader video");
+                const stream = videoElem ? videoElem.srcObject : null;
+                const track = (stream && stream.getVideoTracks) ? stream.getVideoTracks()[0] : null;
 
-            const cameraTools = document.getElementById("camera-tools");
-            const zoomRange = document.getElementById("zoom-range");
-            const zoomVal = document.getElementById("zoom-val");
-            const btnTorch = document.getElementById("btn-torch");
+                const cameraTools = document.getElementById("camera-tools");
+                const zoomRange = document.getElementById("zoom-range");
+                const zoomVal = document.getElementById("zoom-val");
+                const btnTorch = document.getElementById("btn-torch");
 
-            cameraTools.classList.remove("d-none");
+                if (cameraTools) cameraTools.classList.remove("d-none");
 
-            // أ. تفعيل تقريب الكاميرا (Zoom)
-            if (capabilities.zoom) {
-                zoomRange.min = capabilities.zoom.min || 1;
-                zoomRange.max = Math.min(capabilities.zoom.max || 5, 8);
-                zoomRange.step = capabilities.zoom.step || 0.1;
-                zoomRange.value = track.getSettings().zoom || 1;
-                zoomVal.innerText = `${parseFloat(zoomRange.value).toFixed(1)}x`;
+                // أ. تفعيل التقريب (الزوم البصري + هاردوير الموبايل)
+                if (zoomRange && videoElem) {
+                    zoomRange.oninput = async (e) => {
+                        const zVal = parseFloat(e.target.value);
+                        if (zoomVal) zoomVal.innerText = `${zVal.toFixed(1)}x`;
 
-                zoomRange.oninput = async (e) => {
-                    const zVal = parseFloat(e.target.value);
-                    zoomVal.innerText = `${zVal.toFixed(1)}x`;
-                    try {
-                        await track.applyConstraints({ advanced: [{ zoom: zVal }] });
-                    } catch (err) { console.warn("Zoom constraint error:", err); }
-                };
-            } else {
-                zoomVal.innerText = "1x";
+                        // 1. تقريب رقمي مباشر على شاشة الكاميرا (شغال على كل الهواتف بلا استثناء)
+                        videoElem.style.transform = `scale(${zVal})`;
+                        videoElem.style.transformOrigin = "center center";
+
+                        // 2. تقريب عدسة الموبايل (Hardware Zoom) إذا كان الهاردوير يدعمها
+                        if (track && track.getCapabilities) {
+                            const caps = track.getCapabilities();
+                            if (caps.zoom) {
+                                try {
+                                    await track.applyConstraints({ advanced: [{ zoom: zVal }] });
+                                } catch (err) { console.warn("HW Zoom error:", err); }
+                            }
+                        }
+                    };
+                }
+
+                // ب. تفعيل الكشاف (Torch) للأجهزة التي تدعم فلاش الكاميرا عبر المتصفح
+                if (track && track.getCapabilities) {
+                    const capabilities = track.getCapabilities();
+                    if (capabilities.torch && btnTorch) {
+                        btnTorch.classList.remove("d-none");
+                        let torchOn = false;
+                        btnTorch.onclick = async () => {
+                            torchOn = !torchOn;
+                            try {
+                                await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+                                btnTorch.style.background = torchOn ? "#F59E0B" : "#334155";
+                                btnTorch.style.color = torchOn ? "#000" : "#F59E0B";
+                            } catch (e) { console.warn("Torch error:", e); }
+                        };
+                    }
+                }
+            } catch (err) {
+                console.warn("تعذر تشغيل أدوات الكاميرا المتقدمة:", err);
             }
-
-            // ب. تفعيل تشغيل الكشاف في المدرجات المظلمة
-            if (capabilities.torch) {
-                btnTorch.classList.remove("d-none");
-                let torchOn = false;
-                btnTorch.onclick = async () => {
-                    torchOn = !torchOn;
-                    try {
-                        await track.applyConstraints({ advanced: [{ torch: torchOn }] });
-                        btnTorch.style.background = torchOn ? "#F59E0B" : "#334155";
-                        btnTorch.style.color = torchOn ? "#000" : "#F59E0B";
-                    } catch (e) { console.warn("Torch error:", e); }
-                };
-            }
-        } catch (err) {
-            console.warn("إمكانيات التحكم بالميديا غير مدعومة بالكامل في هذا المتصفح:", err);
-        }
+        }, 400);
 
     } catch (err) {
         alert("يرجى إعطاء المتصفح إذن الوصول للكاميرا.");
