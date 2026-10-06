@@ -42,16 +42,7 @@
             justify-content: center;
             padding: 1rem;
         }
-        .card {
-            background: #ffffff;
-            color: #0F172A;
-            width: 100%;
-            max-width: 420px;
-            border-top: 5px solid var(--accent);
-            padding: 2rem 1.5rem;
-            text-align: center;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
-        }
+
         .logo { height: 75px; object-fit: contain; margin-bottom: 0.75rem; }
         .session-badge {
 background: #FDF2F3;
@@ -130,18 +121,71 @@ background: #FDF2F3;
     border-radius: 10px !important;
     margin-bottom: 0.75rem;
 }
+.card {
+    background: #ffffff;
+    color: #0F172A;
+    width: 100%;
+    max-width: 460px; /* تكبير عرض الكارت ليلائم الشاشات */
+    border-top: 5px solid var(--accent);
+    padding: 1.25rem 1rem; /* تقليل الهوامش الداخلية لاستغلال المساحة */
+    text-align: center;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+    border-radius: 16px;
+}
+
 #qr-reader { 
     width: 100% !important; 
-    border-radius: 14px; 
+    min-height: 380px !important; /* زيادة ارتفاع الكاميرا لملء شاشة الموبايل */
+    border-radius: 16px; 
     overflow: hidden; 
-    border: 2px solid var(--accent); 
+    border: 3px solid var(--accent); 
     background: #000;
+    position: relative;
 }
+
 #qr-reader video { 
     width: 100% !important; 
     height: 100% !important; 
     object-fit: cover !important; 
-    border-radius: 12px;
+}
+
+/* أدوات التحكم بالكاميرا (الزوم والكشاف) */
+.camera-tools {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: #1E293B;
+    padding: 8px 12px;
+    border-radius: 10px;
+    margin-top: 10px;
+}
+.zoom-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    color: #fff;
+    font-size: 0.82rem;
+    font-weight: bold;
+}
+.zoom-box input[type="range"] {
+    width: 100%;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+.btn-torch {
+    background: #334155;
+    color: #F59E0B;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-weight: 700;
+    cursor: pointer;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    gap: 5px;
 }
     </style>
 </head>
@@ -157,6 +201,18 @@ background: #FDF2F3;
                 <span>مسح كود البروجيكتور بالكاميرا</span>
             </button>
             <div id="qr-reader" class="d-none"></div>
+            <!-- شريط الزوم وزر الكشاف لتسهيل المسح من المدرجات الكبيرة -->
+<div id="camera-tools" class="camera-tools d-none">
+    <div class="zoom-box">
+        <i class="fa-solid fa-magnifying-glass-minus"></i>
+        <input type="range" id="zoom-range" min="1" max="5" step="0.1" value="1">
+        <i class="fa-solid fa-magnifying-glass-plus"></i>
+        <span id="zoom-val" style="min-width: 32px; text-align: left;">1x</span>
+    </div>
+    <button type="button" id="btn-torch" class="btn-torch d-none">
+        <i class="fa-solid fa-bolt"></i> <span>كشاف</span>
+    </button>
+</div>
             <p style="font-size: 0.78rem; color: #94A3B8; margin-top: 0.5rem;">
                 <i class="fa-solid fa-wifi-slash"></i> مسح فوري يعمل أوفلاين 100% بدون إنترنت
             </p>
@@ -272,57 +328,110 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance 
             startCameraScanner();
         });
 
-        async function startCameraScanner() {
-            if (typeof Html5Qrcode === "undefined") {
-                alert("جاري تجهيز الكاميرا، تأكد من فتح الصفحة بالإنترنت لمرة واحدة.");
-                btnTriggerCam.classList.remove("d-none");
-                qrBox.classList.add("d-none");
-                return;
+async function startCameraScanner() {
+    if (typeof Html5Qrcode === "undefined") {
+        alert("جاري تجهيز الكاميرا، تأكد من فتح الصفحة بالإنترنت لمرة واحدة.");
+        btnTriggerCam.classList.remove("d-none");
+        qrBox.classList.add("d-none");
+        return;
+    }
+
+    try {
+        html5QrScanner = new Html5Qrcode("qr-reader");
+        await html5QrScanner.start(
+            { facingMode: "environment" },
+            { 
+                fps: 25,
+                qrbox: (w, h) => {
+                    // زيادة مساحة مربع الفحص إلى 90% من حجم الكاميرا للقط السريع من بعيد
+                    const size = Math.floor(Math.min(w, h) * 0.90);
+                    return { width: size, height: size };
+                }
+            },
+            async (decodedText) => {
+                try {
+                    if (decodedText.startsWith("{")) {
+                        offlinePayload = JSON.parse(decodedText);
+                        activeSessionId = offlinePayload.s;
+                        detectedCourse.innerText = offlinePayload.cn || "المقرر الدراسي";
+                        courseBadge.innerText = `محاضرة: ${offlinePayload.cn || ''}`;
+                    } else if (decodedText.includes("session=")) {
+                        const parsed = new URL(decodedText);
+                        activeSessionId = parsed.searchParams.get("session");
+                        activeToken = parsed.searchParams.get("token");
+                        detectedCourse.innerText = "محاضرة مباشرة (سحابية)";
+                    } else {
+                        throw new Error("رمز غير صالح!");
+                    }
+
+                    document.getElementById("camera-tools").classList.add("d-none");
+                    await html5QrScanner.stop();
+                    scannerStep.classList.add("d-none");
+                    inputStep.classList.remove("d-none");
+                    inputId.focus();
+                } catch (e) {
+                    alert("رمز QR غير صالح، صوّب الكاميرا نحو باركود الشاشة.");
+                }
+            },
+            () => {}
+        );
+
+        // ==========================================
+        // 🔍 تفعيل محرك الزوم والكشاف المباشر للهاتف
+        // ==========================================
+        try {
+            const track = html5QrScanner.getRunningTrack();
+            const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+
+            const cameraTools = document.getElementById("camera-tools");
+            const zoomRange = document.getElementById("zoom-range");
+            const zoomVal = document.getElementById("zoom-val");
+            const btnTorch = document.getElementById("btn-torch");
+
+            cameraTools.classList.remove("d-none");
+
+            // أ. تفعيل تقريب الكاميرا (Zoom)
+            if (capabilities.zoom) {
+                zoomRange.min = capabilities.zoom.min || 1;
+                zoomRange.max = Math.min(capabilities.zoom.max || 5, 8);
+                zoomRange.step = capabilities.zoom.step || 0.1;
+                zoomRange.value = track.getSettings().zoom || 1;
+                zoomVal.innerText = `${parseFloat(zoomRange.value).toFixed(1)}x`;
+
+                zoomRange.oninput = async (e) => {
+                    const zVal = parseFloat(e.target.value);
+                    zoomVal.innerText = `${zVal.toFixed(1)}x`;
+                    try {
+                        await track.applyConstraints({ advanced: [{ zoom: zVal }] });
+                    } catch (err) { console.warn("Zoom constraint error:", err); }
+                };
+            } else {
+                zoomVal.innerText = "1x";
             }
 
-            try {
-                html5QrScanner = new Html5Qrcode("qr-reader");
-                await html5QrScanner.start(
-                    { facingMode: "environment" },
-                    { 
-                        fps: 25,
-                        qrbox: (w, h) => {
-                            const size = Math.floor(Math.min(w, h) * 0.85);
-                            return { width: size, height: size };
-                        }
-                    },
-                    async (decodedText) => {
-                        try {
-                            if (decodedText.startsWith("{")) {
-                                offlinePayload = JSON.parse(decodedText);
-                                activeSessionId = offlinePayload.s;
-                                detectedCourse.innerText = offlinePayload.cn || "المقرر الدراسي";
-                                courseBadge.innerText = `محاضرة: ${offlinePayload.cn || ''}`;
-                            } else if (decodedText.includes("session=")) {
-                                const parsed = new URL(decodedText);
-                                activeSessionId = parsed.searchParams.get("session");
-                                activeToken = parsed.searchParams.get("token");
-                                detectedCourse.innerText = "محاضرة مباشرة (سحابية)";
-                            } else {
-                                throw new Error("رمز غير صالح!");
-                            }
-
-                            await html5QrScanner.stop();
-                            scannerStep.classList.add("d-none");
-                            inputStep.classList.remove("d-none");
-                            inputId.focus();
-                        } catch (e) {
-                            alert("رمز QR غير صالح، صوّب الكاميرا نحو باركود الشاشة.");
-                        }
-                    },
-                    () => {}
-                );
-            } catch (err) {
-                alert("يرجى إعطاء المتصفح إذن الوصول للكاميرا.");
-                btnTriggerCam.classList.remove("d-none");
-                qrBox.classList.add("d-none");
+            // ب. تفعيل تشغيل الكشاف في المدرجات المظلمة
+            if (capabilities.torch) {
+                btnTorch.classList.remove("d-none");
+                let torchOn = false;
+                btnTorch.onclick = async () => {
+                    torchOn = !torchOn;
+                    try {
+                        await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+                        btnTorch.style.background = torchOn ? "#F59E0B" : "#334155";
+                        btnTorch.style.color = torchOn ? "#000" : "#F59E0B";
+                    } catch (e) { console.warn("Torch error:", e); }
+                };
             }
+        } catch (err) {
+            console.warn("إمكانيات التحكم بالميديا غير مدعومة بالكامل في هذا المتصفح:", err);
         }
+
+    } catch (err) {
+        alert("يرجى إعطاء المتصفح إذن الوصول للكاميرا.");
+        btnTriggerCam.classList.remove("d-none");
+        qrBox.classList.add("d-none");
+    }
+}
 
 // 3. تأكيد الحضور (معدل للربط المباشر وتفادي اسم "طالب")
 document.getElementById("attendance-form").addEventListener("submit", async (e) => {
