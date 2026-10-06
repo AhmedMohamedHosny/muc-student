@@ -14,7 +14,8 @@ import {
     collection,
     runTransaction, 
     arrayUnion,
-    serverTimestamp 
+    serverTimestamp,
+    Timestamp 
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { CONFIG } from "./config.js";
 
@@ -176,7 +177,7 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
     return record;
 }
 
-// 3. المزامنة التلقائية لرفع الحضور وتسميع المحاضرة برقمها وتاريخها عند الدكتور
+// 3. المزامنة التلقائية مع إصلاح ربط المحاضرة L4 والتاريخ الرسمي
 export async function syncPendingAttendance() {
     if (!navigator.onLine) return;
     const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
@@ -216,17 +217,20 @@ export async function syncPendingAttendance() {
             if (item.timeSlot) recordData.timeSlot = item.timeSlot;
             if (item.hash) recordData.hash = item.hash;
 
-            // 1. رفع السجل الفردي
+            // 1. رفع السجل الفردي للطالب
             await setDoc(doc(db, "attendance_records", recordId), recordData, { merge: true });
 
-            // 2. تحديث مستند الجلسة الرئيسي بالرقم الحقيقي وتاريخ اليوم حتى تظهر L4 بالتاريخ الصحيح عند الدكتور
+            // 2. تحديث مستند الجلسة الرئيسي بـ Timestamp حقيقي وتمرير رقم المحاضرة الفعلي (مثلاً L4)
             const sessionRef = doc(db, "attendance_sessions", item.sessionId);
+            const scanTimestamp = Timestamp.fromDate(new Date(item.scannedAt || Date.now()));
+
             await setDoc(sessionRef, {
                 sessionId: item.sessionId,
                 courseId: item.courseId || "MUC_COURSE",
                 courseName: item.courseName || "المقرر الدراسي",
-                lectureNumber: Number(item.lectureNumber) || 1, // يثبت رقم المحاضرة كـ L4
-                startedAtDate: item.startedAtDate || new Date(item.scannedAt || Date.now()).toLocaleDateString("en-CA"), // يثبت تاريخ المحاضرة
+lectureNumber: Number(item.lectureNumber) || 1, // يرسل رقم المحاضرة الحقيقي المسجل من باركود الدكتور
+                startTime: scanTimestamp, // إنشاء Timestamp حقيقي لظهور تاريخ 10-07 فوق العمود
+                startedAtDate: new Date(item.scannedAt || Date.now()).toLocaleDateString("en-CA"),
                 sessionType: "lecture",
                 hostRole: "doctor",
                 status: "closed",
@@ -242,7 +246,7 @@ export async function syncPendingAttendance() {
                 createdAt: serverTimestamp()
             }, { merge: true });
 
-            console.log(`☁️ تمت المزامنة بنجاح للطالب (${item.studentId}) في محاضرة #${item.lectureNumber}!`);
+            console.log(`☁️️ تمت المزامنة بنجاح للطالب (${item.studentId}) في محاضرة L${item.lectureNumber || 4}!`);
         } catch (err) {
             console.error("فشل رفع سجل الطالب:", item.studentId, err);
             remaining.push(item);
