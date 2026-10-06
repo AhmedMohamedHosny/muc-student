@@ -258,6 +258,8 @@ export async function syncPendingAttendance() {
     for (const item of queue) {
         try {
             const recordId = `${item.sessionId}_${item.studentId}`;
+            
+            // 1. تسجيل السجل الفردي في attendance_records
             await setDoc(doc(db, "attendance_records", recordId), {
                 recordId: recordId,
                 sessionId: item.sessionId,
@@ -273,7 +275,30 @@ export async function syncPendingAttendance() {
                 offlineScannedAt: new Date(item.scannedAt).toISOString()
             }, { merge: true });
 
-            console.log(`☁️ تمت مزامنة حضور الطالب (${item.studentId}) بنجاح.`);
+            // 2. تحديث مستند الجلسة الرئيسي في attendance_sessions لضمان ظهور علامة (✔) في شيت الدكتور فوراً
+            const sessionRef = doc(db, "attendance_sessions", item.sessionId);
+            const sessionSnap = await getDoc(sessionRef);
+
+            if (sessionSnap.exists()) {
+                const currentData = sessionSnap.data();
+                const presents = currentData.presentStudents || [];
+                if (!presents.includes(item.studentId)) {
+                    presents.push(item.studentId);
+                    await setDoc(sessionRef, { presentStudents: presents }, { merge: true });
+                }
+            } else {
+                // لو الجلسة لم تكن مرفوعة، يتم إنشاؤها سحابياً بالكامل
+                await setDoc(sessionRef, {
+                    sessionId: item.sessionId,
+                    courseId: item.courseId,
+                    courseName: item.courseName,
+                    status: "closed",
+                    presentStudents: [item.studentId],
+                    createdAt: serverTimestamp()
+                }, { merge: true });
+            }
+
+            console.log(`☁️ تمت مزامنة حضور الطالب (${item.studentId}) وظهوره في جدول الدكتور بنجاح! ✅`);
         } catch (err) {
             console.error("فشل رفع سجل:", err);
             remaining.push(item);
