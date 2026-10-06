@@ -123,32 +123,42 @@ background: #FDF2F3;
         .icon-success { background: #ECFDF5; color: var(--success); }
         .icon-danger { background: #FEF2F2; color: var(--danger); }
         .d-none { display: none !important; }
-        .btn-scan { background: #1E293B !important; margin-top: 0.75rem; }
-#qr-reader { width: 100%; border-radius: 8px; overflow: hidden; margin-top: 0.75rem; border: 2px solid var(--accent); }
+.btn-scan { 
+    background: #1E293B !important; 
+    padding: 1rem !important; 
+    font-size: 1.05rem !important; 
+    border-radius: 10px !important;
+    margin-bottom: 0.75rem;
+}
+#qr-reader { 
+    width: 100% !important; 
+    border-radius: 14px; 
+    overflow: hidden; 
+    border: 2px solid var(--accent); 
+    background: #000;
+}
+#qr-reader video { 
+    width: 100% !important; 
+    height: 100% !important; 
+    object-fit: cover !important; 
+    border-radius: 12px;
+}
     </style>
 </head>
 <body>
 
     <div class="card">
         <img src="logo.jpg" alt="MUC Logo" class="logo">
-        <h2 style="font-size: 1.3rem; font-weight: 800; color: #7A0C16;">جامعة مايو بالقاهرة</h2>
         <div id="course-badge" class="session-badge">تسجيل الحضور الذكي المباشر</div>
-<!-- 1. شاشة الكاميرا المباشرة (تفتح فوراً) -->
+<!-- زرار فتح الكاميرا المباشر لضمان أمان المتصفح -->
         <div id="scanner-step">
-            <p style="color: #64748B; font-size: 0.9rem; margin-bottom: 0.85rem;">
-                <i class="fa-solid fa-camera"></i> وجّه الكاميرا نحو باركود البروجيكتور في المدرج
-            </p>
-            
-            <!-- نافذة شاشة الكاميرا بارتفاع ثابت ومؤشر تحميل -->
-            <div id="qr-reader" style="width: 100%; min-height: 280px; background: #0F172A; border-radius: 12px; overflow: hidden; border: 2px solid var(--accent); margin-bottom: 1rem; display: flex; align-items: center; justify-content: center;">
-                <div id="qr-loading-status" style="color: #fff; padding: 1.5rem; text-align: center;">
-                    <i class="fa-solid fa-spinner fa-spin" style="font-size: 2.2rem; color: var(--accent); margin-bottom: 8px;"></i>
-                    <p style="font-size: 0.9rem;">جاري تشغيل الكاميرا...</p>
-                </div>
-            </div>
-
-            <p style="font-size: 0.75rem; color: #94A3B8;">
-                <i class="fa-solid fa-wifi-slash"></i> تعمل الكاميرا أوفلاين بالكامل بدون الحاجة لإنترنت
+            <button type="button" id="btn-trigger-cam" class="btn btn-scan">
+                <i class="fa-solid fa-camera" style="font-size: 1.3rem;"></i> 
+                <span>مسح كود البروجيكتور بالكاميرا</span>
+            </button>
+            <div id="qr-reader" class="d-none"></div>
+            <p style="font-size: 0.78rem; color: #94A3B8; margin-top: 0.5rem;">
+                <i class="fa-solid fa-wifi-slash"></i> مسح فوري يعمل أوفلاين 100% بدون إنترنت
             </p>
         </div>
 
@@ -263,44 +273,48 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance 
         }
 
 let html5QrScanner = null;
+let html5QrScanner = null;
         async function startCameraScanner() {
-            if (typeof Html5Qrcode === "undefined") {
-                document.getElementById("qr-loading-status").innerHTML = `
-                    <p style="color:#EF4444; font-size:0.85rem;">تعذر تحميل مكتبة الكاميرا. تأكد من فتح الصفحة بالإنترنت لمرة واحدة.</p>
-                `;
-                return;
-            }
+            const qrContainer = document.getElementById("qr-reader");
+            if (!qrContainer) return;
+
+            // مسح نص التحميل القديم وإتاحة المساحة الكاملة للفيديو
+            qrContainer.innerHTML = "";
+            qrContainer.style.display = "block";
 
             try {
                 html5QrScanner = new Html5Qrcode("qr-reader");
-                
-                // تشغيل الكاميرا الخلفية تلقائياً
+
                 await html5QrScanner.start(
                     { facingMode: "environment" },
                     { 
-                        fps: 15, 
-                        qrbox: { width: 240, height: 240 },
-                        aspectRatio: 1.0
+                        fps: 25,
+                        // جعل أبعاد الكاميرا واسعة وتملأ الشاشة بالكامل زي كاميرا الفون
+                        qrbox: (viewfinderWidth, viewfinderHeight) => {
+                            const minSize = Math.min(viewfinderWidth, viewfinderHeight);
+                            const boxSize = Math.floor(minSize * 0.85);
+                            return { width: boxSize, height: boxSize };
+                        }
                     },
                     async (decodedText) => {
                         try {
-                            // 1. فحص كود الأوفلاين
+                            // 1. فحص كود الأوفلاين المشفر
                             if (decodedText.startsWith("{")) {
                                 offlinePayload = JSON.parse(decodedText);
                                 activeSessionId = offlinePayload.s;
                                 detectedCourse.innerText = offlinePayload.cn || "المقرر الدراسي";
-                                courseBadge.innerText = `محاضرة أوفلاين: ${offlinePayload.cn || ''}`;
+                                courseBadge.innerText = `محاضرة: ${offlinePayload.cn || ''}`;
                             } else if (decodedText.includes("session=")) {
-                                // 2. فحص كود الأونلاين المباشر
+                                // 2. فحص كود الأونلاين
                                 const parsed = new URL(decodedText);
                                 activeSessionId = parsed.searchParams.get("session");
                                 activeToken = parsed.searchParams.get("token");
-                                detectedCourse.innerText = "محاضرة مباشرة (أونلاين)";
+                                detectedCourse.innerText = "محاضرة مباشرة (سحابية)";
                             } else {
                                 throw new Error("رمز غير صالح!");
                             }
 
-                            // إيقاف الكاميرا فور التقاط الكود وفتح خانة الـ ID
+                            // إيقاف الكاميرا والانتقال فوراً لخانة كتابة الـ ID
                             await html5QrScanner.stop();
                             scannerStep.classList.add("d-none");
                             inputStep.classList.remove("d-none");
@@ -313,14 +327,20 @@ let html5QrScanner = null;
                     (err) => {}
                 );
             } catch (err) {
-                console.error("Camera start error:", err);
-                document.getElementById("qr-loading-status").innerHTML = `
-                    <i class="fa-solid fa-triangle-exclamation" style="font-size:2rem; color:#EF4444; margin-bottom:8px;"></i>
-                    <p style="font-size:0.88rem; font-weight:700;">يرجى السماح بصلاحية الكاميرا لمسح الباركود.</p>
-                    <button type="button" onclick="startCameraScanner()" class="btn" style="margin-top:10px; padding:6px 14px; font-size:0.8rem; width:auto;">
-                        إعادة المحاولة
-                    </button>
+                // حل حماية كروم: إظهار زرار تشغيل مباشر فوري باللمس لو المتصفح رفض الفتح التلقائي
+                console.warn("Camera auto-start blocked by browser gesture policy:", err);
+                qrContainer.innerHTML = `
+                    <div style="padding: 2.5rem 1rem; text-align: center; color: #fff; background: #0F172A; border-radius: 12px;">
+                        <i class="fa-solid fa-camera" style="font-size: 2.8rem; color: #C59B27; margin-bottom: 12px;"></i>
+                        <p style="font-size: 0.95rem; font-weight: 700; margin-bottom: 14px;">اضغط هنا لتشغيل الكاميرا ومسح الباركود</p>
+                        <button type="button" id="btn-manual-trigger" class="btn" style="background: #C59B27; color: #000; font-weight: 800; padding: 0.8rem 1.8rem; width: auto; margin: auto; border-radius: 8px;">
+                            <i class="fa-solid fa-camera"></i> فتح الكاميرا الآن
+                        </button>
+                    </div>
                 `;
+                document.getElementById("btn-manual-trigger")?.addEventListener("click", () => {
+                    startCameraScanner();
+                });
             }
         }
 
