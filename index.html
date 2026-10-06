@@ -21,6 +21,8 @@
     <meta property="og:image:height" content="512">
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- قارئ الـ QR بكاميرا الهاتف بدون إنترنت -->
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <style>
         :root {
             --primary: #7A0C16;
@@ -121,6 +123,8 @@ background: #FDF2F3;
         .icon-success { background: #ECFDF5; color: var(--success); }
         .icon-danger { background: #FEF2F2; color: var(--danger); }
         .d-none { display: none !important; }
+        .btn-scan { background: #1E293B !important; margin-top: 0.75rem; }
+#qr-reader { width: 100%; border-radius: 8px; overflow: hidden; margin-top: 0.75rem; border: 2px solid var(--accent); }
     </style>
 </head>
 <body>
@@ -145,6 +149,10 @@ background: #FDF2F3;
                     </div>
                     <input type="text" id="student-id" placeholder="مثال: 20250123" inputmode="numeric" required autofocus>
                 </div>
+                <button type="button" id="btn-scan-offline" class="btn btn-scan">
+    <i class="fa-solid fa-camera"></i> <span>مسح كود البروجيكتور بالكاميرا (بدون نت)</span>
+</button>
+<div id="qr-reader" class="d-none"></div>
                 <button type="submit" id="btn-submit" class="btn">
                     <span>تأكيد الحضور الآن</span>
                     <i class="fa-solid fa-check"></i>
@@ -181,8 +189,7 @@ background: #FDF2F3;
 
     <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
     <script type="module">
-        import { recordStudentAttendance } from "./firebase.js";
-
+import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance } from "./firebase.js";
         const urlParams = new URLSearchParams(window.location.search);
         const sessionId = urlParams.get("session");
         const token = urlParams.get("token");
@@ -285,6 +292,64 @@ if (savedStudentId) {
             document.getElementById("result-step").classList.add("d-none");
             document.getElementById("input-step").classList.remove("d-none");
         });
+        // تشغيل مسح كود البروجيكتور الأوفلاين بالكاميرا
+const btnScan = document.getElementById("btn-scan-offline");
+const qrBox = document.getElementById("qr-reader");
+let qrScanner = null;
+
+btnScan?.addEventListener("click", async () => {
+    const sid = inputId.value.trim();
+    if (!sid) {
+        alert("يرجى كتابة رقمك الجامعي أولاً!");
+        inputId.focus();
+        return;
+    }
+    localStorage.setItem("muc_saved_student_id", sid);
+
+    qrBox.classList.remove("d-none");
+    btnScan.classList.add("d-none");
+
+    qrScanner = new Html5Qrcode("qr-reader");
+    await qrScanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        async (decodedText) => {
+            try {
+                const payload = JSON.parse(decodedText);
+                if (!payload.muc || !payload.s) throw new Error("كود غير صالح!");
+
+                await qrScanner.stop();
+                qrBox.classList.add("d-none");
+
+                // حفظ الحضور أوفلاين
+                await queueOfflineAttendance({
+                    studentId: sid,
+                    sessionId: payload.s,
+                    courseId: payload.c,
+                    courseName: payload.cn,
+                    timeSlot: payload.t,
+                    hash: payload.h
+                });
+
+                showResult(true, "تم تسجيل الحضور محلياً بنجاح!", "محفوظ على هاتفك وسيرتفع تلقائياً للسيرفر فور التقاط الإنترنت.");
+                document.getElementById("receipt-box").classList.remove("d-none");
+                document.getElementById("rcpt-name").innerText = "طالب";
+                document.getElementById("rcpt-id").innerText = sid;
+                document.getElementById("rcpt-course").innerText = payload.cn || "المقرر";
+                document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("ar-EG");
+                document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("ar-EG");
+                document.getElementById("rcpt-status").innerText = navigator.onLine ? "متزامن سحابياً ✅" : "محفوظ أوفلاين ⏳";
+
+            } catch (err) {
+                alert(err.message || "رمز QR غير صالح!");
+            }
+        },
+        (err) => {}
+    );
+});
+
+// فحص ومزامنة البيانات العالقة عند فتح الصفحة
+syncPendingAttendance();
     </script>
 </body>
 </html>
