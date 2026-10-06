@@ -233,10 +233,24 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance 
             });
         }
 
+// 🚀 تسجيل الـ Service Worker لتشغيل التطبيق أوفلاين
+        if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.register("./sw.js").then(() => {
+                console.log("Service Worker Active ✅");
+            });
+        }
+
         const urlParams = new URLSearchParams(window.location.search);
         let activeSessionId = urlParams.get("session");
         let activeToken = urlParams.get("token");
         let offlinePayload = null;
+
+        // توليد أو جلب بصمة الهاتف
+        let deviceId = localStorage.getItem("muc_device_fingerprint");
+        if (!deviceId) {
+            deviceId = "dev_" + Math.random().toString(36).substring(2) + "_" + Date.now();
+            localStorage.setItem("muc_device_fingerprint", deviceId);
+        }
 
         const scannerStep = document.getElementById("scanner-step");
         const inputStep = document.getElementById("input-step");
@@ -244,6 +258,8 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance 
         const inputId = document.getElementById("student-id");
         const courseBadge = document.getElementById("course-badge");
         const detectedCourse = document.getElementById("detected-course-name");
+        const btnTriggerCam = document.getElementById("btn-trigger-cam");
+        const qrBox = document.getElementById("qr-reader");
 
         // استرجاع الرقم الجامعي إن كان مسجلاً سابقاً
         const savedStudentId = localStorage.getItem("muc_saved_student_id");
@@ -260,52 +276,49 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance 
             }
         });
 
-        // 🎯 فحص السيناريو: هل الطالب مسح بالرابط (أونلاين) أم فتح التطبيق مباشرة (أوفلاين)؟
+        // إذا دخل الطالب برابط مسح مسبقاً (أونلاين)
         if (activeSessionId && activeToken) {
-            // حالة الأونلاين (تم المسح مسبقاً بكاميرا الموبايل العادية) -> توجيه فوري لإدخال الـ ID
             scannerStep.classList.add("d-none");
             inputStep.classList.remove("d-none");
             courseBadge.innerText = "جلسة مباشرة (Online)";
             detectedCourse.innerText = "محاضرة مباشرة";
-        } else {
-            // حالة الأوفلاين في المدرج -> فتح كاميرا التطبيق فوراً
-            startCameraScanner();
         }
 
-let html5QrScanner = null;
-let html5QrScanner = null;
-        async function startCameraScanner() {
-            const qrContainer = document.getElementById("qr-reader");
-            if (!qrContainer) return;
+        // تشغيل الكاميرا فور الضغط على الزرار
+        let html5QrScanner = null;
+        btnTriggerCam?.addEventListener("click", async () => {
+            btnTriggerCam.classList.add("d-none");
+            qrBox.classList.remove("d-none");
+            startCameraScanner();
+        });
 
-            // مسح نص التحميل القديم وإتاحة المساحة الكاملة للفيديو
-            qrContainer.innerHTML = "";
-            qrContainer.style.display = "block";
+        async function startCameraScanner() {
+            if (typeof Html5Qrcode === "undefined") {
+                alert("جاري تجهيز الكاميرا، تأكد من فتح الصفحة بالإنترنت لمرة واحدة.");
+                btnTriggerCam.classList.remove("d-none");
+                qrBox.classList.add("d-none");
+                return;
+            }
 
             try {
                 html5QrScanner = new Html5Qrcode("qr-reader");
-
                 await html5QrScanner.start(
                     { facingMode: "environment" },
                     { 
                         fps: 25,
-                        // جعل أبعاد الكاميرا واسعة وتملأ الشاشة بالكامل زي كاميرا الفون
-                        qrbox: (viewfinderWidth, viewfinderHeight) => {
-                            const minSize = Math.min(viewfinderWidth, viewfinderHeight);
-                            const boxSize = Math.floor(minSize * 0.85);
-                            return { width: boxSize, height: boxSize };
+                        qrbox: (w, h) => {
+                            const size = Math.floor(Math.min(w, h) * 0.85);
+                            return { width: size, height: size };
                         }
                     },
                     async (decodedText) => {
                         try {
-                            // 1. فحص كود الأوفلاين المشفر
                             if (decodedText.startsWith("{")) {
                                 offlinePayload = JSON.parse(decodedText);
                                 activeSessionId = offlinePayload.s;
                                 detectedCourse.innerText = offlinePayload.cn || "المقرر الدراسي";
                                 courseBadge.innerText = `محاضرة: ${offlinePayload.cn || ''}`;
                             } else if (decodedText.includes("session=")) {
-                                // 2. فحص كود الأونلاين
                                 const parsed = new URL(decodedText);
                                 activeSessionId = parsed.searchParams.get("session");
                                 activeToken = parsed.searchParams.get("token");
@@ -314,33 +327,20 @@ let html5QrScanner = null;
                                 throw new Error("رمز غير صالح!");
                             }
 
-                            // إيقاف الكاميرا والانتقال فوراً لخانة كتابة الـ ID
                             await html5QrScanner.stop();
                             scannerStep.classList.add("d-none");
                             inputStep.classList.remove("d-none");
                             inputId.focus();
-
                         } catch (e) {
                             alert("رمز QR غير صالح، صوّب الكاميرا نحو باركود الشاشة.");
                         }
                     },
-                    (err) => {}
+                    () => {}
                 );
             } catch (err) {
-                // حل حماية كروم: إظهار زرار تشغيل مباشر فوري باللمس لو المتصفح رفض الفتح التلقائي
-                console.warn("Camera auto-start blocked by browser gesture policy:", err);
-                qrContainer.innerHTML = `
-                    <div style="padding: 2.5rem 1rem; text-align: center; color: #fff; background: #0F172A; border-radius: 12px;">
-                        <i class="fa-solid fa-camera" style="font-size: 2.8rem; color: #C59B27; margin-bottom: 12px;"></i>
-                        <p style="font-size: 0.95rem; font-weight: 700; margin-bottom: 14px;">اضغط هنا لتشغيل الكاميرا ومسح الباركود</p>
-                        <button type="button" id="btn-manual-trigger" class="btn" style="background: #C59B27; color: #000; font-weight: 800; padding: 0.8rem 1.8rem; width: auto; margin: auto; border-radius: 8px;">
-                            <i class="fa-solid fa-camera"></i> فتح الكاميرا الآن
-                        </button>
-                    </div>
-                `;
-                document.getElementById("btn-manual-trigger")?.addEventListener("click", () => {
-                    startCameraScanner();
-                });
+                alert("يرجى إعطاء المتصفح إذن الوصول للكاميرا.");
+                btnTriggerCam.classList.remove("d-none");
+                qrBox.classList.add("d-none");
             }
         }
 
