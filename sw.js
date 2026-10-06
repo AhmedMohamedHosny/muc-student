@@ -7,7 +7,9 @@ const STATIC_ASSETS = [
   "./index.html",
   "./firebase.js",
   "./config.js",
-  "./logo.jpg"
+  "./logo.jpg",
+  "https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js",
+  "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
 ];
 
 self.addEventListener("install", (e) => {
