@@ -209,3 +209,80 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
         throw err;
     }
 }
+// ==========================================
+// 📴 محرك حفظ ومزامنة الحضور أوفلاين (إضافة جديدة)
+// ==========================================
+
+// 1. تسجيل الحضور محلياً داخل ذاكرة الهاتف عند انقطاع الشبكة
+export async function queueOfflineAttendance({ studentId, studentName, sessionId, courseId, courseName, timeSlot, hash }) {
+    const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
+    
+    // منع تكرار نفس الطالب لنفس الجلسة
+    const exists = queue.some(q => q.sessionId === sessionId && q.studentId === studentId);
+    if (exists) throw new Error("تم تسجيل حضورك لهذه المحاضرة بالفعل ومحفوظ على هاتفك!");
+
+    const record = {
+        studentId: String(studentId).trim(),
+        studentName: studentName || "طالب",
+        sessionId: sessionId,
+        courseId: courseId || "MUC_COURSE",
+        courseName: courseName || "المقرر الدراسي",
+        timeSlot: timeSlot,
+        hash: hash,
+        deviceId: getLocalDeviceId(),
+        scannedAt: Date.now()
+    };
+
+    queue.push(record);
+    localStorage.setItem("muc_pending_records", JSON.stringify(queue));
+
+    // إذا وُجد إنترنت حالياً يرفعه فوراً
+    if (navigator.onLine) {
+        syncPendingAttendance();
+    }
+
+    return record;
+}
+
+// 2. محرك المزامنة التلقائي مع Firestore أول ما الهاتف يلقط شبكة
+export async function syncPendingAttendance() {
+    if (!navigator.onLine) return;
+    const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
+    if (queue.length === 0) return;
+
+    if (!auth.currentUser) {
+        try { await signInAnonymously(auth); } catch (e) { return; }
+    }
+
+    const remaining = [];
+    for (const item of queue) {
+        try {
+            const recordId = `${item.sessionId}_${item.studentId}`;
+            await setDoc(doc(db, "attendance_records", recordId), {
+                recordId: recordId,
+                sessionId: item.sessionId,
+                courseId: item.courseId,
+                courseName: item.courseName,
+                studentId: item.studentId,
+                studentName: item.studentName,
+                deviceId: item.deviceId,
+                status: "Present",
+                method: "OFFLINE_QR_SYNC",
+                timeSlot: item.timeSlot,
+                recordedAt: serverTimestamp(),
+                offlineScannedAt: new Date(item.scannedAt).toISOString()
+            }, { merge: true });
+
+            console.log(`☁️ تمت مزامنة حضور الطالب (${item.studentId}) بنجاح.`);
+        } catch (err) {
+            console.error("فشل رفع سجل:", err);
+            remaining.push(item);
+        }
+    }
+    localStorage.setItem("muc_pending_records", JSON.stringify(remaining));
+}
+
+// تشغيل المزامنة تلقائياً عند عودة الإنترنت
+window.addEventListener("online", () => {
+    syncPendingAttendance();
+});
