@@ -21,8 +21,8 @@
     <meta property="og:image:height" content="512">
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <!-- قارئ الـ QR بكاميرا الهاتف بدون إنترنت -->
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<!-- مكتبة قارئ الـ QR السريعة المعتمدة في مصر -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
     <style>
         :root {
             --primary: #7A0C16;
@@ -133,12 +133,20 @@ background: #FDF2F3;
         <img src="logo.jpg" alt="MUC Logo" class="logo">
         <h2 style="font-size: 1.3rem; font-weight: 800; color: #7A0C16;">جامعة مايو بالقاهرة</h2>
         <div id="course-badge" class="session-badge">تسجيل الحضور الذكي المباشر</div>
-<!-- 1. شاشة الكاميرا المباشرة (تفتح أول ما الطالب يفتح التطبيق) -->
+<!-- 1. شاشة الكاميرا المباشرة (تفتح فوراً) -->
         <div id="scanner-step">
             <p style="color: #64748B; font-size: 0.9rem; margin-bottom: 0.85rem;">
                 <i class="fa-solid fa-camera"></i> وجّه الكاميرا نحو باركود البروجيكتور في المدرج
             </p>
-            <div id="qr-reader" style="width: 100%; border-radius: 12px; overflow: hidden; border: 2px solid var(--accent); margin-bottom: 1rem;"></div>
+            
+            <!-- نافذة شاشة الكاميرا بارتفاع ثابت ومؤشر تحميل -->
+            <div id="qr-reader" style="width: 100%; min-height: 280px; background: #0F172A; border-radius: 12px; overflow: hidden; border: 2px solid var(--accent); margin-bottom: 1rem; display: flex; align-items: center; justify-content: center;">
+                <div id="qr-loading-status" style="color: #fff; padding: 1.5rem; text-align: center;">
+                    <i class="fa-solid fa-spinner fa-spin" style="font-size: 2.2rem; color: var(--accent); margin-bottom: 8px;"></i>
+                    <p style="font-size: 0.9rem;">جاري تشغيل الكاميرا...</p>
+                </div>
+            </div>
+
             <p style="font-size: 0.75rem; color: #94A3B8;">
                 <i class="fa-solid fa-wifi-slash"></i> تعمل الكاميرا أوفلاين بالكامل بدون الحاجة لإنترنت
             </p>
@@ -254,44 +262,66 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance 
             startCameraScanner();
         }
 
-        let html5QrScanner = null;
-        function startCameraScanner() {
-            html5QrScanner = new Html5Qrcode("qr-reader");
-            html5QrScanner.start(
-                { facingMode: "environment" },
-                { fps: 10, qrbox: { width: 250, height: 250 } },
-                async (decodedText) => {
-                    try {
-                        // 1. هل الكود أوفلاين مشفر (JSON)؟
-                        if (decodedText.startsWith("{")) {
-                            offlinePayload = JSON.parse(decodedText);
-                            activeSessionId = offlinePayload.s;
-                            detectedCourse.innerText = offlinePayload.cn || "المقرر الدراسي";
-                            courseBadge.innerText = `محاضرة أوفلاين: ${offlinePayload.cn || ''}`;
-                        } else if (decodedText.includes("session=")) {
-                            // 2. هل الطالب مسح رابط الأونلاين بكاميرا التطبيق؟
-                            const parsed = new URL(decodedText);
-                            activeSessionId = parsed.searchParams.get("session");
-                            activeToken = parsed.searchParams.get("token");
-                            detectedCourse.innerText = "محاضرة مباشرة (سحابية)";
-                        } else {
-                            throw new Error("رمز غير صالح!");
+let html5QrScanner = null;
+        async function startCameraScanner() {
+            if (typeof Html5Qrcode === "undefined") {
+                document.getElementById("qr-loading-status").innerHTML = `
+                    <p style="color:#EF4444; font-size:0.85rem;">تعذر تحميل مكتبة الكاميرا. تأكد من فتح الصفحة بالإنترنت لمرة واحدة.</p>
+                `;
+                return;
+            }
+
+            try {
+                html5QrScanner = new Html5Qrcode("qr-reader");
+                
+                // تشغيل الكاميرا الخلفية تلقائياً
+                await html5QrScanner.start(
+                    { facingMode: "environment" },
+                    { 
+                        fps: 15, 
+                        qrbox: { width: 240, height: 240 },
+                        aspectRatio: 1.0
+                    },
+                    async (decodedText) => {
+                        try {
+                            // 1. فحص كود الأوفلاين
+                            if (decodedText.startsWith("{")) {
+                                offlinePayload = JSON.parse(decodedText);
+                                activeSessionId = offlinePayload.s;
+                                detectedCourse.innerText = offlinePayload.cn || "المقرر الدراسي";
+                                courseBadge.innerText = `محاضرة أوفلاين: ${offlinePayload.cn || ''}`;
+                            } else if (decodedText.includes("session=")) {
+                                // 2. فحص كود الأونلاين المباشر
+                                const parsed = new URL(decodedText);
+                                activeSessionId = parsed.searchParams.get("session");
+                                activeToken = parsed.searchParams.get("token");
+                                detectedCourse.innerText = "محاضرة مباشرة (أونلاين)";
+                            } else {
+                                throw new Error("رمز غير صالح!");
+                            }
+
+                            // إيقاف الكاميرا فور التقاط الكود وفتح خانة الـ ID
+                            await html5QrScanner.stop();
+                            scannerStep.classList.add("d-none");
+                            inputStep.classList.remove("d-none");
+                            inputId.focus();
+
+                        } catch (e) {
+                            alert("رمز QR غير صالح، صوّب الكاميرا نحو باركود الشاشة.");
                         }
-
-                        // إيقاف الكاميرا والانتقال فوراً لخانة كتابة الـ ID
-                        await html5QrScanner.stop();
-                        scannerStep.classList.add("d-none");
-                        inputStep.classList.remove("d-none");
-                        inputId.focus();
-
-                    } catch (e) {
-                        alert("رمز QR غير صالح، تأكد من تصويب الكاميرا نحو الشاشة.");
-                    }
-                },
-                (err) => {}
-            ).catch(err => {
-                scannerStep.innerHTML = `<p style="color:#DC2626; padding:1rem;">يرجى السماح بصلاحية الكاميرا لمسح الباركود.</p>`;
-            });
+                    },
+                    (err) => {}
+                );
+            } catch (err) {
+                console.error("Camera start error:", err);
+                document.getElementById("qr-loading-status").innerHTML = `
+                    <i class="fa-solid fa-triangle-exclamation" style="font-size:2rem; color:#EF4444; margin-bottom:8px;"></i>
+                    <p style="font-size:0.88rem; font-weight:700;">يرجى السماح بصلاحية الكاميرا لمسح الباركود.</p>
+                    <button type="button" onclick="startCameraScanner()" class="btn" style="margin-top:10px; padding:6px 14px; font-size:0.8rem; width:auto;">
+                        إعادة المحاولة
+                    </button>
+                `;
+            }
         }
 
         // 3. تأكيد الحضور
