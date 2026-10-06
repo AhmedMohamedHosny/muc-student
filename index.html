@@ -521,7 +521,7 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
             }
         }
 
-        // أ. التسجيل أوفلاين
+// أ. التسجيل أوفلاين وتمرير رقم المحاضرة وتاريخ اليوم
         if (offlinePayload) {
             await queueOfflineAttendance({
                 studentId: sid,
@@ -529,6 +529,7 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
                 sessionId: offlinePayload.s,
                 courseId: offlinePayload.c,
                 courseName: offlinePayload.cn,
+                lectureNumber: offlinePayload.l || 1, // رقم المحاضرة الفعلي (مثلاً 4)
                 timeSlot: offlinePayload.t,
                 hash: offlinePayload.h
             });
