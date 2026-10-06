@@ -213,27 +213,7 @@ background: #FDF2F3;
     <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
     <script type="module">
 import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance } from "./firebase.js";
-        const urlParams = new URLSearchParams(window.location.search);
-        const sessionId = urlParams.get("session");
-        const token = urlParams.get("token");
-
-        // استخراج أو توليد بصمة فريدة لهاتف الطالب
-        let deviceId = localStorage.getItem("muc_device_fingerprint");
-        if (!deviceId) {
-            deviceId = "dev_" + Math.random().toString(36).substring(2) + "_" + Date.now();
-            localStorage.setItem("muc_device_fingerprint", deviceId);
-        }
-
-
-
-// 🚀 تسجيل الـ Service Worker عشان الموبايل يفتح أوفلاين في أي وقت
-        if ("serviceWorker" in navigator) {
-            navigator.serviceWorker.register("./sw.js").then(() => {
-                console.log("Service Worker Active ✅");
-            });
-        }
-
-// 🚀 تسجيل الـ Service Worker لتشغيل التطبيق أوفلاين
+// 🚀 تسجيل الـ Service Worker عشان الموبايل يفتح أوفلاين
         if ("serviceWorker" in navigator) {
             navigator.serviceWorker.register("./sw.js").then(() => {
                 console.log("Service Worker Active ✅");
