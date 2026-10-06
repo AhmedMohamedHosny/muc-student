@@ -325,8 +325,7 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance 
             }
         }
 
-        // 3. تأكيد الحضور
-// 3. تأكيد الحضور
+// 3. تأكيد الحضور المعدل بالكامل
 document.getElementById("attendance-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const sid = inputId.value.trim();
@@ -339,11 +338,13 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
     try {
         localStorage.setItem("muc_saved_student_id", sid);
 
-        // جلب الاسم المحفوظ سابقاً للموبايل أو إظهار "طالب" لو أول مرة يسجل أوفلاين
+        // جلب اسم الطالب المحفوظ على الهاتف
         const cachedStudentName = localStorage.getItem(`muc_student_name_${sid}`) || localStorage.getItem("muc_saved_student_name") || "طالب";
-        const sessionNumLabel = offlinePayload?.sn || offlinePayload?.sessionName || (offlinePayload?.s ? `جلسة #${offlinePayload.s.slice(-4)}` : "محاضرة مباشرة");
 
-        // أ. لو أوفلاين
+        // تنسيق اسم المحاضرة وتجنب ظهور أرقام الجلسة المبتورة مثل #9057
+        const lectureTitle = offlinePayload?.cn || offlinePayload?.courseName || (offlinePayload?.c ? `محاضرة ${offlinePayload.c.toUpperCase()}` : "المحاضرة الحالية");
+
+        // أ. إذا كان الطالب أوفلاين
         if (offlinePayload) {
             await queueOfflineAttendance({
                 studentId: sid,
@@ -360,7 +361,7 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
             document.getElementById("rcpt-name").innerText = cachedStudentName;
             document.getElementById("rcpt-id").innerText = sid;
             document.getElementById("rcpt-course").innerText = offlinePayload.cn || "المقرر الدراسي";
-            document.getElementById("rcpt-session-num").innerText = sessionNumLabel;
+            document.getElementById("rcpt-session-num").innerText = lectureTitle;
             document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("ar-EG");
             document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("ar-EG");
             document.getElementById("rcpt-status").innerText = navigator.onLine ? "متزامن سحابياً ✅" : "محفوظ أوفلاين ⏳";
@@ -368,13 +369,13 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
             return;
         }
 
-        // ب. لو أونلاين
+        // ب. إذا كان الطالب أونلاين
         let deviceId = localStorage.getItem("muc_device_fingerprint") || ("dev_" + Math.random().toString(36).substring(2));
         localStorage.setItem("muc_device_fingerprint", deviceId);
 
         const res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
         
-        // حفظ اسم الطالب الحقيقي من الفايربيز في الموبايل لاستخدامه مستقبلاً في الأوفلاين
+        // حفظ الاسم الحقيقي فوراً لاستخدامه أوفلاين لاحقاً
         if (res.studentName) {
             localStorage.setItem(`muc_student_name_${sid}`, res.studentName);
             localStorage.setItem("muc_saved_student_name", res.studentName);
@@ -396,7 +397,6 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
         btn.innerHTML = `<span>تأكيد الحضور الآن</span> <i class="fa-solid fa-arrow-left"></i>`;
     }
 });
-
         function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
             inputStep.classList.add("d-none");
             resultStep.classList.remove("d-none");
