@@ -1,5 +1,5 @@
 // sw.js - MUC Student Offline Engine
-const CACHE_NAME = "muc-student-offline-v8";
+const CACHE_NAME = "muc-student-offline-v9";
 
 const STATIC_ASSETS = [
   "./",
