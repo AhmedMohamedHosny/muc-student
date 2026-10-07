@@ -130,27 +130,26 @@ const t = sessionData.currentToken || {};
     });
 }
 
-// 2. تسجيل الحضور محلياً أوفلاين مع حفظ رقم المحاضرة وتاريخ اليوم
+// 2. تسجيل الحضور محلياً أوفلاين مع حفظ رقم المحاضرة وتاريخ اليوم (معالجة أمنية فورية)
 export async function queueOfflineAttendance({ studentId, studentName, sessionId, courseId, courseName, lectureNumber, timeSlot, hash }) {
-// ⏱️ فحص الفاصل الزمني المرن للباركود (سماحية 5 دقائق للطالب لكتابة رقمه الجامعي)
-    if (timeSlot) {
-        const currentSlot = Math.floor(Date.now() / 15000);
-        // السماح بـ 20 شريحة زمنية (توازي 5 دقائق كاملة بين مسح الكود والضغط على تأكيد الحضور)
-        if (Math.abs(currentSlot - timeSlot) > 20) {
-            throw new Error("⚠️ انتهت صلاحية هذا الرمز! صوّب الكاميرا والتقط الرمز الحي الجديد من الشاشة.");
-        }
+    if (!sessionId) {
+        throw new Error("⚠️ رمز الحضور غير صالح، يرجى مسح الباركود مرة أخرى.");
     }
 
     const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
     const deviceId = getLocalDeviceId();
 
-    // منع تكرار نفس الطالب لنفس الجلسة أوفلاين
+    // 🔒 1. حماية أمنية: منع تكرار تسجيل نفس الطالب في نفس الجلسة
     const studentExists = queue.some(q => q.sessionId === sessionId && q.studentId === studentId);
-    if (studentExists) throw new Error("تم تسجيل حضورك لهذه المحاضرة بالفعل ومحفوظ على هاتفك!");
+    if (studentExists) {
+        throw new Error("تم تسجيل حضورك لهذه المحاضرة بالفعل ومحفوظ على هاتفك!");
+    }
 
-    // منع استخدام نفس الهاتف لتسجيل طالب آخر
+    // 🔒 2. حماية أمنية: قفل بصمة الهاتف (منع تسجيل الزميل من نفس الهاتف أوفلاين)
     const deviceExists = queue.some(q => q.sessionId === sessionId && q.deviceId === deviceId);
-    if (deviceExists) throw new Error("⚠️ حماية أمنية: تم استخدام هذا الهاتف لتسجيل طالب آخر في هذه المحاضرة!");
+    if (deviceExists) {
+        throw new Error("⚠️ حماية أمنية: تم استخدام هذا الهاتف لتسجيل طالب آخر في هذه المحاضرة!");
+    }
 
     const record = {
         studentId: String(studentId).trim(),
@@ -158,18 +157,18 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
         sessionId: String(sessionId).trim(),
         courseId: courseId || "MUC_COURSE",
         courseName: courseName || "المقرر الدراسي",
-        lectureNumber: Number(lectureNumber) || 1, // حفظ رقم المحاضرة
-        startedAtDate: new Date().toLocaleDateString("en-CA"), // حفظ تاريخ اليوم (مثل 2026-10-07)
+        lectureNumber: Number(lectureNumber) || 1,
+        startedAtDate: new Date().toLocaleDateString("en-CA"),
         deviceId: deviceId,
+        timeSlot: timeSlot || 0,
+        hash: hash || "",
         scannedAt: Date.now()
     };
-
-    if (timeSlot) record.timeSlot = timeSlot;
-    if (hash) record.hash = hash;
 
     queue.push(record);
     localStorage.setItem("muc_pending_records", JSON.stringify(queue));
 
+    // إذا كان الهاتف متصلاً بالإنترنت حالياً، يرفع الحضور فوراً
     if (navigator.onLine) {
         await syncPendingAttendance();
     }
