@@ -196,10 +196,11 @@ function removeFromQueue(item) {
 }
 
 export async function syncPendingAttendance() {
-    if (isSyncing || !navigator.onLine) return;
+    if (isSyncing || !navigator.onLine) return -1;
     const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
-    if (queue.length === 0) return;
+    if (queue.length === 0) return 0;
 
+    let uploaded = 0;
     isSyncing = true;
     try {
         if (!auth.currentUser) await withTimeout(signInAnonymously(auth));
@@ -263,6 +264,7 @@ export async function syncPendingAttendance() {
                 } catch (e) { console.warn(e.message); }
 
                 removeFromQueue(item); // يتشال من الطابور فور نجاحه
+                uploaded++;
             } catch (err) {
                 console.error("فشل رفع سجل الطالب:", item.studentId, err);
             }
@@ -272,6 +274,11 @@ export async function syncPendingAttendance() {
     } finally {
         isSyncing = false;
     }
+    return uploaded;
+}
+
+export function getPendingCount() {
+    return JSON.parse(localStorage.getItem("muc_pending_records") || "[]").length;
 }
 
 window.addEventListener("online", () => syncPendingAttendance());
