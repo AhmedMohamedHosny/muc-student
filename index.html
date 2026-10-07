@@ -573,13 +573,14 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
         document.getElementById("receipt-box").classList.remove("d-none");
 
 } catch (err) {
-        // فحص ما إذا كانت المشكلة هي انتهاء صلاحية الرمز تحديداً
-        isExpiredQrError = err.message.includes("انتهت صلاحية الرمز") || err.message.includes("QR_EXPIRED");
+    // فحص ذكي يلتقط أي رسالة تخص انتهاء صلاحية الباركود
+    const errMsg = String(err.message || "");
+    isExpiredQrError = errMsg.includes("صلاحية") || errMsg.includes("QR_EXPIRED") || errMsg.includes("expired");
 
-        showResult(false, "تم رفض التسجيل", err.message);
-        btn.disabled = false;
-        btn.innerHTML = `<span>تأكيد الحضور الآن</span> <i class="fa-solid fa-arrow-left"></i>`;
-    }
+    showResult(false, "تم رفض التسجيل", err.message);
+    btn.disabled = false;
+    btn.innerHTML = `<span>تأكيد الحضور الآن</span> <i class="fa-solid fa-arrow-left"></i>`;
+}
 });
         function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
             inputStep.classList.add("d-none");
@@ -593,7 +594,6 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
             document.getElementById("status-title").innerText = title;
             document.getElementById("status-msg").innerText = msg;
         }
-
 document.getElementById("btn-retry").addEventListener("click", async () => {
     resultStep.classList.add("d-none");
 
@@ -603,19 +603,24 @@ document.getElementById("btn-retry").addEventListener("click", async () => {
         activeSessionId = null;
         activeToken = null;
 
-        // إرجاع واجهة الكاميرا
+        // إخفاء حقل الإدخال وإظهار الكاميرا
         inputStep.classList.add("d-none");
         scannerStep.classList.remove("d-none");
-        btnTriggerCam.classList.remove("d-none");
-        qrBox.classList.add("d-none");
+        btnTriggerCam.classList.add("d-none");
+        qrBox.classList.remove("d-none");
 
-        // تنظيف القارئ القديم وتشغيل الكاميرا من جديد
+        // إيقاف أي فحص قديم وتشغيل الكاميرا فوراً لتلقط الرمز الحي
         if (html5QrScanner) {
-            try { await html5QrScanner.clear(); } catch(e) {}
+            try { 
+                await html5QrScanner.stop(); 
+                await html5QrScanner.clear(); 
+            } catch(e) {}
         }
-        btnTriggerCam.click();
+        startCameraScanner();
     } else {
+        // لو الخطأ ليس انتهاء رمز (مثل رقم جامعي خطأ)، يرجع لخانة تعديل الرقم
         inputStep.classList.remove("d-none");
+        inputId.focus();
     }
 });
 
