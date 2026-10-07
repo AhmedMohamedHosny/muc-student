@@ -353,6 +353,12 @@ if (html5QrScanner) {
                 try {
                     if (decodedText.startsWith("{")) {
                         offlinePayload = JSON.parse(decodedText);
+                        const dur = Number(offlinePayload.dur) || 10;
+                        const nowSlot = Math.floor(Date.now() / (dur * 1000));
+                        if (Math.abs(nowSlot - Number(offlinePayload.t)) > 2) {
+                            offlinePayload = null;
+                            throw new Error("expired");
+                        }
                         activeSessionId = offlinePayload.s;
                         detectedCourse.innerText = offlinePayload.cn || "المقرر الدراسي";
                         courseBadge.innerText = `محاضرة: ${offlinePayload.cn || ''}`;
@@ -534,7 +540,12 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
                 courseName: offlinePayload.cn,
                 lectureNumber: realLectureNum, // الرقم الحقيقي القادم من شاشة الدكتور
                 timeSlot: offlinePayload.t,
-                hash: offlinePayload.h
+                hash: offlinePayload.h,
+                sessionStart: offlinePayload.ts,
+                sessionType: offlinePayload.st,
+                group: offlinePayload.g,
+                hostRole: offlinePayload.hr,
+                doctorId: offlinePayload.d
             });
 
             showResult(true, "تم تثبيت الحضور بنجاح!", "محفوظ على هاتفك وسيرتفع تلقائياً للسيرفر فور التقاط الشبكة.");
@@ -544,7 +555,7 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
             document.getElementById("rcpt-course").innerText = offlinePayload.cn || "المقرر الدراسي";
             document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("ar-EG");
             document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("ar-EG");
-            document.getElementById("rcpt-status").innerText = navigator.onLine ? "متزامن سحابياً ✅" : "محفوظ أوفلاين ⏳";
+            document.getElementById("rcpt-status").innerText = "محفوظ على هاتفك ⏳ (يُرفع تلقائياً عند توفر الإنترنت)";
             document.getElementById("receipt-box").classList.remove("d-none");
             return;
         }
