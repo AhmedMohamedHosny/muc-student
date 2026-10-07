@@ -1,5 +1,5 @@
 // sw.js - MUC Student Offline Engine
-const CACHE_NAME = "muc-student-offline-v9";
+const CACHE_NAME = "muc-student-offline-v10";
 
 const STATIC_ASSETS = [
   "./",
@@ -8,6 +8,9 @@ const STATIC_ASSETS = [
   "./config.js",
   "./logo.jpg",
   "https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js",
+    "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+  "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js",
+  "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js",
   "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
 ];
 
@@ -30,25 +33,20 @@ self.addEventListener("activate", (e) => {
 });
 
 self.addEventListener("fetch", (e) => {
-  if (e.request.url.includes("firestore.googleapis.com")) return;
+  const req = e.request;
+  if (req.method !== "GET") return;
+  if (/firestore\.googleapis\.com|identitytoolkit\.googleapis\.com|securetoken\.googleapis\.com/.test(req.url)) return;
 
   e.respondWith(
-    caches.match(e.request, { ignoreSearch: true }).then((cachedResponse) => {
-      if (cachedResponse) return cachedResponse;
-
-      return fetch(e.request).then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200) {
-          const clone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(e.request, clone);
-          });
+    caches.match(req, { ignoreSearch: true }).then((cached) => {
+      const fetching = fetch(req).then((res) => {
+        if (res && res.status === 200) {
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then((c) => c.put(req, clone));
         }
-        return networkResponse;
-      }).catch(() => {
-        if (e.request.mode === "navigate") {
-          return caches.match("./index.html");
-        }
-      });
+        return res;
+      }).catch(() => cached || (req.mode === "navigate" ? caches.match("./index.html") : undefined));
+      return cached || fetching;
     })
   );
 });
