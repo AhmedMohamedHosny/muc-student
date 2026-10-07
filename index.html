@@ -194,7 +194,19 @@ background: #FDF2F3;
 <body style="padding-bottom: 50px;">
     <div class="card">
         <img src="logo.jpg" alt="MUC Logo" class="logo">
-        <div id="course-badge" class="session-badge">تسجيل الحضور الذكي المباشر</div>
+                <div id="course-badge" class="session-badge">تسجيل الحضور الذكي المباشر</div>
+
+        <div id="pending-banner" class="d-none" style="background:#FEF3C7; border:1px solid #F59E0B; color:#92400E; border-radius:10px; padding:10px 12px; margin-bottom:12px; text-align:right;">
+            <div style="font-weight:700; font-size:0.88rem; margin-bottom:8px;">
+                <i class="fa-solid fa-clock"></i>
+                عندك <span id="pending-count">0</span> حضور محفوظ على هاتفك ولسه ما اترفعش
+            </div>
+            <button type="button" id="btn-sync-now" class="btn" style="background:#C59B27; color:#000; padding:0.7rem; font-size:0.95rem;">
+                <i class="fa-solid fa-cloud-arrow-up"></i>
+                <span id="btn-sync-text">ارفع الحضور الآن</span>
+            </button>
+            <p id="sync-feedback" style="font-size:0.78rem; margin-top:6px; font-weight:700;"></p>
+        </div>
 <!-- زرار فتح الكاميرا المباشر لضمان أمان المتصفح -->
         <div id="scanner-step">
             <button type="button" id="btn-trigger-cam" class="btn btn-scan">
@@ -266,8 +278,8 @@ background: #FDF2F3;
 
     <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
     <script type="module">
-import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance } from "./firebase.js";
-// 🚀 تسجيل الـ Service Worker عشان الموبايل يفتح أوفلاين
+import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount } from "./firebase.js";
+        // 🚀 تسجيل الـ Service Worker عشان الموبايل يفتح أوفلاين
         if ("serviceWorker" in navigator) {
             navigator.serviceWorker.register("./sw.js").then(() => {
                 console.log("Service Worker Active ✅");
@@ -548,8 +560,8 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
                 doctorId: offlinePayload.d
             });
 
-            showResult(true, "تم تثبيت الحضور بنجاح!", "محفوظ على هاتفك وسيرتفع تلقائياً للسيرفر فور التقاط الشبكة.");
-            
+            refreshPendingBanner();
+            showResult(true, "تم تثبيت الحضور بنجاح!", "محفوظ على هاتفك. اترك الصفحة مفتوحة أو افتحها وسجّل رفع الحضور عندما يتوفر الإنترنت.");            
             document.getElementById("rcpt-name").innerText = studentRealName;
             document.getElementById("rcpt-id").innerText = sid;
             document.getElementById("rcpt-course").innerText = offlinePayload.cn || "المقرر الدراسي";
@@ -632,8 +644,52 @@ document.getElementById("btn-retry").addEventListener("click", async () => {
     }
 });
 
-        // مزامنة أي حضور قديم تلقائياً
-        syncPendingAttendance();
+        // ===== بانر الحضور المعلّق + زرار الرفع اليدوي =====
+        function refreshPendingBanner() {
+            const n = getPendingCount();
+            document.getElementById("pending-count").innerText = n;
+            document.getElementById("pending-banner").classList.toggle("d-none", n === 0);
+        }
+
+        async function runSync(manual) {
+            const btn = document.getElementById("btn-sync-now");
+            const txt = document.getElementById("btn-sync-text");
+            const fb = document.getElementById("sync-feedback");
+
+            if (manual) {
+                btn.disabled = true;
+                txt.innerText = "جاري الرفع...";
+                fb.innerText = "";
+            }
+
+            const result = await syncPendingAttendance();
+            refreshPendingBanner();
+
+            if (manual) {
+                btn.disabled = false;
+                txt.innerText = "ارفع الحضور الآن";
+                if (getPendingCount() === 0) {
+                    fb.style.color = "#15803D";
+                    fb.innerText = "✅ تم رفع حضورك بنجاح";
+                } else if (result === -1 && !navigator.onLine) {
+                    fb.style.color = "#B91C1C";
+                    fb.innerText = "لا يوجد اتصال بالإنترنت، فعّل الواي فاي أو الداتا وحاول تاني";
+                } else {
+                    fb.style.color = "#B91C1C";
+                    fb.innerText = "الإنترنت ضعيف أو غير متاح فعلياً، حاول مرة أخرى";
+                }
+            }
+        }
+
+        document.getElementById("btn-sync-now").addEventListener("click", () => runSync(true));
+        window.addEventListener("online", () => runSync(false));
+        document.addEventListener("visibilitychange", () => {
+            if (document.visibilityState === "visible") runSync(false);
+        });
+        setInterval(refreshPendingBanner, 3000);
+
+        refreshPendingBanner();
+        runSync(false);
     </script>
 <!-- الشريط الثابت لحقوق التصميم والتطوير (داعم للغتين العربية والإنجليزية تلقائياً) -->
 <div id="app-footer-credits" style="position: fixed; bottom: 0; left: 0; right: 0; text-align: center; padding: 0.35rem 0.75rem; font-size: 0.76rem; font-weight: 600; background: rgba(0, 0, 0, 0.22); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); border-top: 1px solid rgba(255, 255, 255, 0.08); z-index: 9999; display: flex; align-items: center; justify-content: center; gap: 6px; opacity: 0.82;">    
