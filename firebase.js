@@ -279,3 +279,18 @@ document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") syncPendingAttendance();
 });
 setInterval(syncPendingAttendance, 20000); // محاولة كل 20 ثانية والصفحة مفتوحة
+export function subscribeToCourseAttendance(courseId, onChange) {
+    let sessions = null, records = null;
+    const fire = () => { if (sessions && records) onChange({ sessions, records }); };
+
+    const u1 = onSnapshot(query(collection(db, "attendance_sessions"), where("courseId", "==", courseId)), (s) => {
+        sessions = s.docs.map(d => ({ id: d.id, ...d.data() }))
+            .sort((a, b) => ((a.startTime && a.startTime.seconds) || 0) - ((b.startTime && b.startTime.seconds) || 0));
+        fire();
+    });
+    const u2 = onSnapshot(query(collection(db, "attendance_records"), where("courseId", "==", courseId)), (s) => {
+        records = s.docs.map(d => ({ id: d.id, ...d.data() }));
+        fire();
+    });
+    return () => { u1(); u2(); };
+}
