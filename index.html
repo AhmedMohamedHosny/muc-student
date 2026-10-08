@@ -379,28 +379,44 @@ if (html5QrScanner) {
             },
             async (decodedText) => {
                 try {
-                    if (decodedText.startsWith("{")) {
+if (decodedText.startsWith("{")) {
                         offlinePayload = JSON.parse(decodedText);
-                        const dur = Number(offlinePayload.dur) || 10;
-                        const nowSlot = Math.floor(Date.now() / (dur * 1000));
-                        if (Math.abs(nowSlot - Number(offlinePayload.t)) > 2) {
-                            offlinePayload = null;
-                            throw new Error("expired");
-                        }
                         activeSessionId = offlinePayload.s;
                         detectedCourse.innerText = offlinePayload.cn || "المقرر الدراسي";
-                        courseBadge.innerText = `محاضرة: ${offlinePayload.cn || ''}`;
-} else if (decodedText.includes("session=")) {
-    // فحص شبكة الهاتف إذا كانت المحاضرة سحابية
-    if (!navigator.onLine) {
-        alert("⚠️ تنبيه مهم:\n\nهذه المحاضرة سحابية (Online) وتتطلب اتصالاً بالإنترنت لتسجيل الحضور المباشر!\nيرجى تفعيل الواي فاي أو شبكة البيانات (Data) على هاتفك ثم مسح الكود مرة أخرى.");
-        throw new Error("المحاضرة تتطلب إنترنت");
-    }
-    const parsed = new URL(decodedText);
-    activeSessionId = parsed.searchParams.get("session");
-    activeToken = parsed.searchParams.get("token");
-    detectedCourse.innerText = "محاضرة مباشرة (سحابية)";
-} else {
+                        courseBadge.innerText = `محاضرة أوفلاين: ${offlinePayload.cn || ''}`;
+                    } else if (decodedText.includes("session=")) {
+                        const parsed = new URL(decodedText);
+                        const isOffline = parsed.searchParams.get("offline") === "1" || (parsed.searchParams.get("token") || "").startsWith("OFF_");
+
+                        if (isOffline) {
+                            // ✅ معالجة فورية لباركود الأوفلاين بدون طلب إنترنت نهائياً
+                            activeSessionId = parsed.searchParams.get("session");
+                            activeToken = parsed.searchParams.get("token");
+                            const cName = parsed.searchParams.get("cname") || parsed.searchParams.get("course") || "جلسة أوفلاين";
+                            
+                            offlinePayload = {
+                                s: activeSessionId,
+                                c: parsed.searchParams.get("course") || "MUC_COURSE",
+                                cn: decodeURIComponent(cName),
+                                l: Number(parsed.searchParams.get("lec") || 1),
+                                t: Math.floor(Date.now() / 10000),
+                                h: activeToken,
+                                ts: Number(parsed.searchParams.get("ts") || Date.now())
+                            };
+                            
+                            detectedCourse.innerText = offlinePayload.cn;
+                            courseBadge.innerText = "حضور أوفلاين (Offline Mode)";
+                        } else {
+                            // محاضرة أونلاين عادية
+                            if (!navigator.onLine) {
+                                alert("⚠️ هذه المحاضرة تتطلب اتصالاً بالإنترنت لمسح الرمز المباشر.");
+                                throw new Error("المحاضرة تتطلب إنترنت");
+                            }
+                            activeSessionId = parsed.searchParams.get("session");
+                            activeToken = parsed.searchParams.get("token");
+                            detectedCourse.innerText = "محاضرة مباشرة (سحابية)";
+                        }
+                    } else {
                         throw new Error("رمز غير صالح!");
                     }
 
