@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
+<html lang="en" dir="ltr">
+    <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MUC - تسجيل حضور المحاضرة</title>
@@ -192,65 +192,72 @@ background: #FDF2F3;
 </head>
 <body>
 <body style="padding-bottom: 50px;">
-    <div class="card">
-        <img src="logo.jpg" alt="MUC Logo" class="logo">
-                <div id="course-badge" class="session-badge">تسجيل الحضور الذكي المباشر</div>
+<div class="card">
+        <!-- زر تحويل اللغة في أعلى الكارت -->
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 0.5rem;">
+            <button type="button" id="btn-lang-toggle" style="background: rgba(0,0,0,0.06); border: 1px solid #CBD5E1; padding: 4px 12px; border-radius: 20px; font-weight: 700; font-size: 0.8rem; cursor: pointer;">
+                🌐 العربية
+            </button>
+        </div>
 
-        <div id="pending-banner" class="d-none" style="background:#FEF3C7; border:1px solid #F59E0B; color:#92400E; border-radius:10px; padding:10px 12px; margin-bottom:12px; text-align:right;">
+        <img src="logo.jpg" alt="MUC Logo" class="logo">
+        <div id="course-badge" class="session-badge">Smart Live Attendance</div>
+
+<div id="pending-banner" class="d-none" style="background:#FEF3C7; border:1px solid #F59E0B; color:#92400E; border-radius:10px; padding:10px 12px; margin-bottom:12px; text-align:left;">
             <div style="font-weight:700; font-size:0.88rem; margin-bottom:8px;">
                 <i class="fa-solid fa-clock"></i>
-                عندك <span id="pending-count">0</span> حضور محفوظ على هاتفك ولسه ما اترفعش
+                You have <span id="pending-count">0</span> offline attendance record(s) pending sync
             </div>
             <button type="button" id="btn-sync-now" class="btn" style="background:#C59B27; color:#000; padding:0.7rem; font-size:0.95rem;">
                 <i class="fa-solid fa-cloud-arrow-up"></i>
-                <span id="btn-sync-text">ارفع الحضور الآن</span>
+                <span id="btn-sync-text">Sync Attendance Now</span>
             </button>
             <p id="sync-feedback" style="font-size:0.78rem; margin-top:6px; font-weight:700;"></p>
         </div>
 <!-- زرار فتح الكاميرا المباشر لضمان أمان المتصفح -->
-        <div id="scanner-step">
+<div id="scanner-step">
             <button type="button" id="btn-trigger-cam" class="btn btn-scan">
                 <i class="fa-solid fa-camera" style="font-size: 1.3rem;"></i> 
-                <span>مسح كود البروجيكتور بالكاميرا</span>
+                <span>Scan Projector QR Code</span>
             </button>
             <div id="qr-reader" class="d-none"></div>
-            <!-- شريط الزوم وزر الكشاف لتسهيل المسح من المدرجات الكبيرة -->
-<div id="camera-tools" class="camera-tools d-none">
-    <div class="zoom-box">
-        <i class="fa-solid fa-magnifying-glass-minus"></i>
-<input type="range" id="zoom-range" min="1" max="10" step="0.1" value="1">
-        <i class="fa-solid fa-magnifying-glass-plus"></i>
-        <span id="zoom-val" style="min-width: 32px; text-align: left;">1x</span>
-    </div>
-    <button type="button" id="btn-torch" class="btn-torch d-none">
-        <i class="fa-solid fa-bolt"></i> <span>كشاف</span>
-    </button>
-</div>
+            
+            <div id="camera-tools" class="camera-tools d-none">
+                <div class="zoom-box">
+                    <i class="fa-solid fa-magnifying-glass-minus"></i>
+                    <input type="range" id="zoom-range" min="1" max="10" step="0.1" value="1">
+                    <i class="fa-solid fa-magnifying-glass-plus"></i>
+                    <span id="zoom-val" style="min-width: 32px; text-align: left;">1x</span>
+                </div>
+                <button type="button" id="btn-torch" class="btn-torch d-none">
+                    <i class="fa-solid fa-bolt"></i> <span>Torch</span>
+                </button>
+            </div>
             <p style="font-size: 0.78rem; color: #94A3B8; margin-top: 0.5rem;">
-                <i class="fa-solid fa-wifi-slash"></i> مسح فوري يعمل أوفلاين 100% بدون إنترنت
+                <i class="fa-solid fa-wifi-slash"></i> Instant scan - 100% Offline compatible
             </p>
         </div>
 
         <!-- 2. نموذج إدخال الرقم الجامعي (يظهر تلقائياً بعد لقط الباركود) -->
-        <div id="input-step" class="d-none">
+<div id="input-step" class="d-none">
             <div style="background: #ECFDF5; border: 1px solid #A7F3D0; padding: 8px 12px; border-radius: 8px; margin-bottom: 1rem;">
                 <span style="font-size: 0.82rem; color: #065F46; font-weight: 700;">
-                    <i class="fa-solid fa-circle-check"></i> تم مسح المحاضرة: <strong id="detected-course-name">--</strong>
+                    <i class="fa-solid fa-circle-check"></i> Scanned Lecture: <strong id="detected-course-name">--</strong>
                 </span>
             </div>
             <form id="attendance-form">
-                <div class="form-group">
+                <div class="form-group" style="text-align: left;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
-                        <label style="margin-bottom:0;"><i class="fa-solid fa-id-card"></i> الرقم الجامعي (Student ID)</label>
+                        <label style="margin-bottom:0;"><i class="fa-solid fa-id-card"></i> Student ID Number</label>
                         <button type="button" id="btn-change-saved-id" class="d-none" style="background: none; border: none; color: #DC2626; font-size: 0.78rem; font-weight: 700; cursor: pointer;">
-                            <i class="fa-solid fa-pen-to-square"></i> تغيير الرقم
+                            <i class="fa-solid fa-pen-to-square"></i> Change ID
                         </button>
                     </div>
-                    <input type="text" id="student-id" placeholder="مثال: 25120905" inputmode="numeric" required>
+                    <input type="text" id="student-id" placeholder="e.g. 25120905" inputmode="numeric" required>
                 </div>
                 <button type="submit" id="btn-submit" class="btn">
-                    <span>تأكيد الحضور الآن</span>
-                    <i class="fa-solid fa-arrow-left"></i>
+                    <span>Confirm Attendance Now</span>
+                    <i class="fa-solid fa-arrow-right"></i>
                 </button>
             </form>
         </div>
@@ -260,18 +267,18 @@ background: #FDF2F3;
             <div id="status-icon" class="icon-circle"></div>
             <h3 id="status-title" style="font-size: 1.2rem; margin-bottom: 0.5rem;"></h3>
             <p id="status-msg" style="color: #64748B; font-size: 0.9rem;"></p>
-                        <button type="button" id="btn-retry" class="btn d-none" style="margin-top:1rem;">
-                <i class="fa-solid fa-rotate-right"></i><span>إعادة المحاولة</span>
+<button type="button" id="btn-retry" class="btn d-none" style="margin-top:1rem;">
+                <i class="fa-solid fa-rotate-right"></i><span>Try Again</span>
             </button>
 
-<div id="receipt-box" class="receipt d-none">
-    <div class="receipt-row"><span>اسم الطالب:</span><strong id="rcpt-name">--</strong></div>
-    <div class="receipt-row"><span>الرقم الجامعي:</span><strong id="rcpt-id">--</strong></div>
-    <div class="receipt-row"><span>المقرر الدراسي:</span><strong id="rcpt-course">--</strong></div>
-    <div class="receipt-row"><span>تاريخ الجلسة:</span><strong id="rcpt-date">--</strong></div>
-    <div class="receipt-row"><span>وقت التسجيل:</span><strong id="rcpt-time">--</strong></div>
-    <div class="receipt-row"><span>الحالة:</span><strong id="rcpt-status" style="color: var(--success);">حاضر (Present)</strong></div>
-</div>
+            <div id="receipt-box" class="receipt d-none" style="text-align: left;">
+                <div class="receipt-row"><span>Student Name:</span><strong id="rcpt-name">--</strong></div>
+                <div class="receipt-row"><span>Student ID:</span><strong id="rcpt-id">--</strong></div>
+                <div class="receipt-row"><span>Course:</span><strong id="rcpt-course">--</strong></div>
+                <div class="receipt-row"><span>Date:</span><strong id="rcpt-date">--</strong></div>
+                <div class="receipt-row"><span>Time:</span><strong id="rcpt-time">--</strong></div>
+                <div class="receipt-row"><span>Status:</span><strong id="rcpt-status" style="color: var(--success);">Present</strong></div>
+            </div>
         </div>
     </div>
 
@@ -279,6 +286,20 @@ background: #FDF2F3;
     <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
     <script type="module">
 import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount } from "./firebase.js";
+        // 🌐 Language Switcher Logic
+        let currentLang = "en";
+        document.getElementById("btn-lang-toggle")?.addEventListener("click", () => {
+            currentLang = currentLang === "en" ? "ar" : "en";
+            const isAr = currentLang === "ar";
+            
+            document.documentElement.dir = isAr ? "rtl" : "ltr";
+            document.documentElement.lang = currentLang;
+            document.getElementById("btn-lang-toggle").innerText = isAr ? "🌐 English" : "🌐 العربية";
+            
+            document.querySelectorAll(".form-group, .receipt, #pending-banner").forEach(el => {
+                el.style.textAlign = isAr ? "right" : "left";
+            });
+        });
         // 🚀 تسجيل الـ Service Worker عشان الموبايل يفتح أوفلاين
         if ("serviceWorker" in navigator) {
             navigator.serviceWorker.register("./sw.js").then(() => {
@@ -315,7 +336,7 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
         }
 
         document.getElementById("btn-change-saved-id")?.addEventListener("click", () => {
-            const newId = prompt("أدخل الرقم الجامعي الجديد:", inputId.value);
+const newId = prompt("Enter new Student ID:", inputId.value);
             if (newId && newId.trim()) {
                 localStorage.setItem("muc_saved_student_id", newId.trim());
                 inputId.value = newId.trim();
@@ -514,8 +535,7 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
 
     const btn = document.getElementById("btn-submit");
     btn.disabled = true;
-    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> جاري التثبيت...`;
-
+btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Confirming...`;
     try {
         localStorage.setItem("muc_saved_student_id", sid);
 
@@ -560,14 +580,14 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
                 doctorId: offlinePayload.d
             });
 
-            refreshPendingBanner();
-            showResult(true, "تم تثبيت الحضور بنجاح!", "محفوظ على هاتفك. اترك الصفحة مفتوحة أو افتحها وسجّل رفع الحضور عندما يتوفر الإنترنت.");            
+refreshPendingBanner();
+            showResult(true, "Attendance Saved Successfully!", "Saved locally on your device. It will upload automatically once internet is available.");            
             document.getElementById("rcpt-name").innerText = studentRealName;
             document.getElementById("rcpt-id").innerText = sid;
-            document.getElementById("rcpt-course").innerText = offlinePayload.cn || "المقرر الدراسي";
-            document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("ar-EG");
-            document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("ar-EG");
-            document.getElementById("rcpt-status").innerText = "محفوظ على هاتفك ⏳ (يُرفع تلقائياً عند توفر الإنترنت)";
+            document.getElementById("rcpt-course").innerText = offlinePayload.cn || "Course";
+            document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
+            document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
+            document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
             document.getElementById("receipt-box").classList.remove("d-none");
             return;
         }
@@ -655,28 +675,27 @@ document.getElementById("btn-retry").addEventListener("click", async () => {
             const btn = document.getElementById("btn-sync-now");
             const txt = document.getElementById("btn-sync-text");
             const fb = document.getElementById("sync-feedback");
-
-            if (manual) {
+if (manual) {
                 btn.disabled = true;
-                txt.innerText = "جاري الرفع...";
+                txt.innerText = "Syncing...";
                 fb.innerText = "";
             }
 
             const result = await syncPendingAttendance();
             refreshPendingBanner();
 
-            if (manual) {
+if (manual) {
                 btn.disabled = false;
-                txt.innerText = "ارفع الحضور الآن";
+                txt.innerText = "Sync Attendance Now";
                 if (getPendingCount() === 0) {
                     fb.style.color = "#15803D";
-                    fb.innerText = "✅ تم رفع حضورك بنجاح";
+                    fb.innerText = "✅ Attendance uploaded successfully";
                 } else if (result === -1 && !navigator.onLine) {
                     fb.style.color = "#B91C1C";
-                    fb.innerText = "لا يوجد اتصال بالإنترنت، فعّل الواي فاي أو الداتا وحاول تاني";
+                    fb.innerText = "No internet connection. Enable Wi-Fi or Mobile Data and try again.";
                 } else {
                     fb.style.color = "#B91C1C";
-                    fb.innerText = "الإنترنت ضعيف أو غير متاح فعلياً، حاول مرة أخرى";
+                    fb.innerText = "Internet connection is weak. Please try again.";
                 }
             }
         }
