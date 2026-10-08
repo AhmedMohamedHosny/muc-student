@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
-    <head>
+<html lang="ar" dir="rtl">
+<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MUC - تسجيل حضور المحاضرة</title>
@@ -192,56 +192,6 @@ background: #FDF2F3;
 </head>
 <body>
 <body style="padding-bottom: 50px;">
-    <!-- 🌐 Top Language Switcher -->
-<div style="display: flex; justify-content: flex-end; margin-bottom: 0.5rem;">
-    <button type="button" id="btn-lang-toggle" style="background: rgba(0,0,0,0.06); border: 1px solid #CBD5E1; padding: 4px 10px; border-radius: 20px; font-weight: 700; font-size: 0.8rem; cursor: pointer;">
-        🌐 العربية
-    </button>
-</div>
-
-<!-- 🆕 1. First-Time Setup Step (Shows ONLY on first launch) -->
-<div id="setup-step" class="d-none">
-    <h2 id="st-title" style="font-size: 1.2rem; color: var(--primary); margin-bottom: 0.5rem;">Welcome to MUC Attendance</h2>
-    <p id="st-desc" style="font-size: 0.85rem; color: #64748B; margin-bottom: 1.25rem;">Please enter your Student ID to register this device for offline scanning.</p>
-    
-    <form id="setup-form">
-        <div class="form-group" style="text-align: left;">
-            <label id="lbl-sid" style="font-size: 0.85rem; font-weight: 700;"><i class="fa-solid fa-id-card"></i> Student ID Number</label>
-            <input type="text" id="setup-student-id" placeholder="e.g. 25120905" inputmode="numeric" required style="direction: ltr;">
-        </div>
-        <button type="submit" id="btn-verify-id" class="btn">
-            <span id="txt-verify">Verify & Activate Offline Mode</span>
-            <i class="fa-solid fa-arrow-right"></i>
-        </button>
-    </form>
-
-    <!-- Success & Rules Box (Hidden until ID verified) -->
-    <div id="setup-success-box" class="d-none" style="margin-top: 1rem; text-align: left;">
-        <div style="background: #ECFDF5; border: 1px solid #10B981; border-radius: 10px; padding: 10px 12px; margin-bottom: 1rem;">
-            <div style="color: #065F46; font-weight: 800; font-size: 0.95rem; margin-bottom: 4px;">
-                <i class="fa-solid fa-circle-check"></i> <span id="txt-reg-success">Device Successfully Registered!</span>
-            </div>
-            <div style="font-size: 0.85rem; color: #047857;">
-                <span id="lbl-name-tag">Student Name:</span> <strong id="setup-res-name">--</strong><br>
-                <span id="lbl-id-tag">Student ID:</span> <strong id="setup-res-id">--</strong>
-            </div>
-        </div>
-
-        <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px; font-size: 0.8rem; color: #334155; margin-bottom: 1.25rem;">
-            <strong id="lbl-rules-title" style="color: var(--primary); display: block; margin-bottom: 4px;">📌 Program Rules & Offline System:</strong>
-            <ul style="padding-left: 1.2rem; margin: 0; line-height: 1.5;">
-                <li id="rule-1">Scan the lecture QR code using your camera.</li>
-                <li id="rule-2">Attendance is saved locally on your phone even without internet.</li>
-                <li id="rule-3">Records sync automatically once internet connection is available.</li>
-            </ul>
-        </div>
-
-        <button type="button" id="btn-finish-setup" class="btn" style="background: var(--success);">
-            <span id="txt-start-app">Start Using App</span>
-            <i class="fa-solid fa-check"></i>
-        </button>
-    </div>
-</div>
     <div class="card">
         <img src="logo.jpg" alt="MUC Logo" class="logo">
                 <div id="course-badge" class="session-badge">تسجيل الحضور الذكي المباشر</div>
@@ -328,92 +278,6 @@ background: #FDF2F3;
 
     <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
     <script type="module">
-        // ==========================================
-// 1. فحص التسجيل لأول مرة (First-Time Onboarding Check)
-// ==========================================
-const isRegistered = localStorage.getItem("muc_student_registered");
-const setupStep = document.getElementById("setup-step");
-const setupForm = document.getElementById("setup-form");
-const setupSuccessBox = document.getElementById("setup-success-box");
-
-if (!isRegistered) {
-    // إخفاء الكاميرا وإظهار شاشة التسجيل لأول مرة
-    scannerStep.classList.add("d-none");
-    setupStep.classList.remove("d-none");
-}
-
-// معالجة نموذج التثبيت لأول مرة
-setupForm?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const sid = document.getElementById("setup-student-id").value.trim();
-    if (!sid) return;
-
-    const btn = document.getElementById("btn-verify-id");
-    btn.disabled = true;
-    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Checking Database...`;
-
-    let studentName = "Student";
-
-    // جلب الاسم إن توفر الإنترنت
-    if (navigator.onLine) {
-        try {
-            const { db } = await import("./firebase.js");
-            const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
-            const stdSnap = await getDoc(doc(db, "students", sid));
-            if (stdSnap.exists()) {
-                studentName = stdSnap.data().name;
-            }
-        } catch (err) { console.warn("Network check skipped:", err); }
-    }
-
-    // حفظ البيانات محلياً للموبايل
-    localStorage.setItem("muc_saved_student_id", sid);
-    localStorage.setItem(`muc_student_name_${sid}`, studentName);
-    localStorage.setItem("muc_saved_student_name", studentName);
-    inputId.value = sid;
-
-    document.getElementById("setup-res-name").innerText = studentName;
-    document.getElementById("setup-res-id").innerText = sid;
-
-    setupForm.classList.add("d-none");
-    setupSuccessBox.classList.remove("d-none");
-});
-
-// عند الضغط على "بدء استخدام البرنامج"
-document.getElementById("btn-finish-setup")?.addEventListener("click", () => {
-    localStorage.setItem("muc_student_registered", "true");
-    setupStep.classList.add("d-none");
-    scannerStep.classList.remove("d-none");
-});
-
-// ==========================================
-// 2. محرك التبديل بين العربية والإنجليزية (Language Toggle)
-// ==========================================
-let currentLang = "en";
-const btnLangToggle = document.getElementById("btn-lang-toggle");
-
-btnLangToggle?.addEventListener("click", () => {
-    currentLang = currentLang === "en" ? "ar" : "en";
-    const isAr = currentLang === "ar";
-    
-    document.documentElement.dir = isAr ? "rtl" : "ltr";
-    document.documentElement.lang = currentLang;
-    btnLangToggle.innerText = isAr ? "🌐 English" : "🌐 العربية";
-
-    // ترجمة النصوص الرئيسية
-    document.getElementById("st-title").innerText = isAr ? "مرحباً بك في نظام حضور جامعة مايو" : "Welcome to MUC Attendance";
-    document.getElementById("st-desc").innerText = isAr ? "يرجى إدخال الرقم الجامعي لتسجيل هذا الهاتف للعمل أوفلاين." : "Please enter your Student ID to register this device for offline scanning.";
-    document.getElementById("lbl-sid").innerHTML = isAr ? `<i class="fa-solid fa-id-card"></i> الرقم الجامعي` : `<i class="fa-solid fa-id-card"></i> Student ID Number`;
-    document.getElementById("txt-verify").innerText = isAr ? "التحقق وتفعيل الوضع الأوفلاين" : "Verify & Activate Offline Mode";
-    document.getElementById("txt-reg-success").innerText = isAr ? "تم تسجيل الجهاز للعمل أوفلاين بنجاح!" : "Device Successfully Registered!";
-    document.getElementById("lbl-name-tag").innerText = isAr ? "اسم الطالب:" : "Student Name:";
-    document.getElementById("lbl-id-tag").innerText = isAr ? "الرقم الجامعي:" : "Student ID:";
-    document.getElementById("lbl-rules-title").innerText = isAr ? "📌 قواعد البرنامج والعمل بدون إنترنت:" : "📌 Program Rules & Offline System:";
-    document.getElementById("rule-1").innerText = isAr ? "قم بمسح كود البروجيكتور باستخدام الكاميرا." : "Scan the lecture QR code using your camera.";
-    document.getElementById("rule-2").innerText = isAr ? "يتم حفظ الحضور محلياً على هاتفك حتى بدون إنترنت." : "Attendance is saved locally on your phone even without internet.";
-    document.getElementById("rule-3").innerText = isAr ? "تُرفع السجلات تلقائياً فور توفر الاتصال بالإنترنت." : "Records sync automatically once internet connection is available.";
-    document.getElementById("txt-start-app").innerText = isAr ? "بدء استخدام البرنامج الآن" : "Start Using App";
-});
 import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount } from "./firebase.js";
         // 🚀 تسجيل الـ Service Worker عشان الموبايل يفتح أوفلاين
         if ("serviceWorker" in navigator) {
