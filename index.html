@@ -671,15 +671,19 @@ document.getElementById("btn-retry").addEventListener("click", async () => {
             document.getElementById("pending-banner").classList.toggle("d-none", n === 0);
         }
 
-        async function runSync(manual) {
+async function runSync(manual) {
             const btn = document.getElementById("btn-sync-now");
             const txt = document.getElementById("btn-sync-text");
             const fb = document.getElementById("sync-feedback");
-if (manual) {
+
+            if (manual) {
                 btn.disabled = true;
-                txt.innerText = "Syncing...";
+                txt.innerText = currentLang === "en" ? "Connecting to server..." : "جاري الاتصال بالسيرفر...";
                 fb.innerText = "";
             }
+
+            // انتظار بسيط لضمان استقرار شبكة الموبايل
+            if (manual) await new Promise(r => setTimeout(r, 800));
 
             const result = await syncPendingAttendance();
             refreshPendingBanner();
