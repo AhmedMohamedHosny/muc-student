@@ -203,7 +203,25 @@ export async function syncPendingAttendance() {
     let uploaded = 0;
     isSyncing = true;
     try {
-        if (!auth.currentUser) await withTimeout(signInAnonymously(auth));
+        // 🔄 محاولة الاتصال بالفايربيز حتى 3 مرات أوتوماتيكياً للغلب على تأخير شبكة الموبايل
+        let connected = false;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                if (!auth.currentUser) {
+                    await withTimeout(signInAnonymously(auth), 5000);
+                }
+                connected = true;
+                break; // نجاح الاتصال، اخرج من الحلقة
+            } catch (err) {
+                if (attempt < 3) {
+                    await new Promise(res => setTimeout(res, 1500)); // انتظار ثانية ونصف قبل إعادة المحاولة
+                }
+            }
+        }
+
+        if (!connected && !auth.currentUser) {
+            throw new Error("Network connection pending");
+        }
 
         for (const item of queue) {
             try {
