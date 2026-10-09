@@ -471,26 +471,34 @@ if (decodedText.startsWith("{")) {
                             courseBadge.innerText = "حضور أوفلاين (Offline Mode)";
                         } else {
                             // محاضرة أونلاين عادية
-if (!navigator.onLine) {
-    await showCustomAlert("Online Session", "This live lecture requires an active internet connection to check in.");
-    throw new Error("Online connection required");
-}
-                            activeSessionId = parsed.searchParams.get("session");
-                            activeToken = parsed.searchParams.get("token");
-                            detectedCourse.innerText = "محاضرة مباشرة (سحابية)";
+} else {
+                        // محاضرة أونلاين عادية
+                        if (!navigator.onLine) {
+                            await showCustomAlert("Online Connection Required", "This live lecture requires an active internet connection to check in. Please connect to mobile data or Wi-Fi.");
+                            return; // خروج نظيف بدون رمي Error يمنع ظهور رسالة Invalid QR المزدوجة
                         }
-                    } else {
-                        throw new Error("رمز غير صالح!");
+                        activeSessionId = parsed.searchParams.get("session");
+                        activeToken = parsed.searchParams.get("token");
+                        detectedCourse.innerText = "Live Lecture (Cloud)";
+                        courseBadge.innerText = "Live Online Session";
                     }
-
-                    document.getElementById("camera-tools").classList.add("d-none");
-                    await html5QrScanner.stop();
-                    scannerStep.classList.add("d-none");
-                    inputStep.classList.remove("d-none");
-                    inputId.focus();
-                } catch (e) {
-await showCustomAlert("Invalid QR Code", "Please point your camera directly at the screen's QR code.");
+                } else {
+                    throw new Error("INVALID_QR");
                 }
+
+                document.getElementById("camera-tools")?.classList.add("d-none");
+                if (html5QrScanner) {
+                    try { await html5QrScanner.stop(); } catch(e) {}
+                }
+                scannerStep.classList.add("d-none");
+                inputStep.classList.remove("d-none");
+                inputId.focus();
+            } catch (e) {
+                // تظهر فقط إذا كان الباركود نفسه تالفاً أو غير مقروء
+                if (e && e.message === "INVALID_QR") {
+                    await showCustomAlert("Invalid QR Code", "Please point your camera directly at the screen's QR code.");
+                }
+            }
             },
             () => {}
         );
