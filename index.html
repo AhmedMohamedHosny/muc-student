@@ -277,7 +277,23 @@ background: #FDF2F3;
         </div>
     </div>
 
-
+<!-- Custom In-App Modal Dialog (Prevents browser popup with URL) -->
+    <div id="custom-app-modal" class="d-none" style="position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:99999; display:flex; align-items:center; justify-content:center; padding:1.25rem; backdrop-filter:blur(4px);">
+        <div style="background:#fff; color:#0F172A; border-radius:14px; width:100%; max-width:360px; padding:1.4rem; text-align:center; box-shadow:0 20px 40px rgba(0,0,0,0.4); border-top:4px solid var(--accent);">
+            <div id="modal-app-icon" style="width:50px; height:50px; border-radius:50%; background:#FEF3C7; color:#B45309; display:flex; align-items:center; justify-content:center; margin:0 auto 10px; font-size:1.4rem;">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+            <h4 id="modal-app-title" style="margin:0 0 6px; font-size:1.1rem; font-weight:800;">Notice</h4>
+            <p id="modal-app-message" style="margin:0 0 14px; font-size:0.88rem; color:#64748B; line-height:1.5;"></p>
+            <div id="modal-app-input-container" class="d-none" style="margin-bottom:14px;">
+                <input type="text" id="modal-app-input" style="width:100%; padding:0.7rem; border:2px solid #CBD5E1; border-radius:8px; font-weight:700; text-align:center; font-size:1rem;">
+            </div>
+            <div style="display:flex; gap:8px;">
+                <button type="button" id="btn-modal-app-cancel" class="btn d-none" style="background:#E2E8F0; color:#334155; padding:0.6rem; font-size:0.9rem;">Cancel</button>
+                <button type="button" id="btn-modal-app-ok" class="btn" style="padding:0.6rem; font-size:0.95rem;">OK</button>
+            </div>
+        </div>
+    </div>
     <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
     <script type="module">
 import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount } from "./firebase.js";
@@ -289,7 +305,6 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance,
             
             document.documentElement.dir = isAr ? "rtl" : "ltr";
             document.documentElement.lang = currentLang;
-            document.getElementById("btn-lang-toggle").innerText = isAr ? "🌐 English" : "🌐 العربية";
             
             document.querySelectorAll(".form-group, .receipt, #pending-banner").forEach(el => {
                 el.style.textAlign = isAr ? "right" : "left";
@@ -323,15 +338,63 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
         const btnTriggerCam = document.getElementById("btn-trigger-cam");
         const qrBox = document.getElementById("qr-reader");
 
-        // استرجاع الرقم الجامعي إن كان مسجلاً سابقاً
+// دالة عرض التنبيهات الأنيقة بدون اسم الموقع
+        function showCustomAlert(title, message, isDanger = true) {
+            return new Promise((resolve) => {
+                const modal = document.getElementById("custom-app-modal");
+                document.getElementById("modal-app-title").innerText = title;
+                document.getElementById("modal-app-message").innerText = message;
+                document.getElementById("modal-app-input-container").classList.add("d-none");
+                document.getElementById("btn-modal-app-cancel").classList.add("d-none");
+
+                const icon = document.getElementById("modal-app-icon");
+                icon.className = "";
+                icon.style.background = isDanger ? "#FEE2E2" : "#FEF3C7";
+                icon.style.color = isDanger ? "#DC2626" : "#B45309";
+                icon.innerHTML = `<i class="fa-solid ${isDanger ? 'fa-circle-xmark' : 'fa-triangle-exclamation'}"></i>`;
+
+                modal.classList.remove("d-none");
+                document.getElementById("btn-modal-app-ok").onclick = () => {
+                    modal.classList.add("d-none");
+                    resolve();
+                };
+            });
+        }
+
+        // دالة إدخال البيانات الأنيقة بدون prompt
+        function showCustomPrompt(title, message, defaultValue = "") {
+            return new Promise((resolve) => {
+                const modal = document.getElementById("custom-app-modal");
+                const input = document.getElementById("modal-app-input");
+                document.getElementById("modal-app-title").innerText = title;
+                document.getElementById("modal-app-message").innerText = message;
+                document.getElementById("modal-app-input-container").classList.remove("d-none");
+                document.getElementById("btn-modal-app-cancel").classList.remove("d-none");
+
+                input.value = defaultValue;
+                modal.classList.remove("d-none");
+                setTimeout(() => input.focus(), 50);
+
+                document.getElementById("btn-modal-app-ok").onclick = () => {
+                    modal.classList.add("d-none");
+                    resolve(input.value.trim());
+                };
+                document.getElementById("btn-modal-app-cancel").onclick = () => {
+                    modal.classList.add("d-none");
+                    resolve(null);
+                };
+            });
+        }
+
+        // استرجاع وتغيير الرقم الجامعي بدون prompt
         const savedStudentId = localStorage.getItem("muc_saved_student_id");
         if (savedStudentId) {
             inputId.value = savedStudentId;
             document.getElementById("btn-change-saved-id")?.classList.remove("d-none");
         }
 
-        document.getElementById("btn-change-saved-id")?.addEventListener("click", () => {
-const newId = prompt("Enter new Student ID:", inputId.value);
+        document.getElementById("btn-change-saved-id")?.addEventListener("click", async () => {
+            const newId = await showCustomPrompt("Change Student ID", "Enter your new academic ID number:", inputId.value);
             if (newId && newId.trim()) {
                 localStorage.setItem("muc_saved_student_id", newId.trim());
                 inputId.value = newId.trim();
@@ -356,7 +419,7 @@ const newId = prompt("Enter new Student ID:", inputId.value);
 
 async function startCameraScanner() {
     if (typeof Html5Qrcode === "undefined") {
-        alert("جاري تجهيز الكاميرا، تأكد من فتح الصفحة بالإنترنت لمرة واحدة.");
+await showCustomAlert("Camera Initializing", "Please make sure you have opened the page online at least once.");
         btnTriggerCam.classList.remove("d-none");
         qrBox.classList.add("d-none");
         return;
@@ -408,10 +471,10 @@ if (decodedText.startsWith("{")) {
                             courseBadge.innerText = "حضور أوفلاين (Offline Mode)";
                         } else {
                             // محاضرة أونلاين عادية
-                            if (!navigator.onLine) {
-                                alert("⚠️ هذه المحاضرة تتطلب اتصالاً بالإنترنت لمسح الرمز المباشر.");
-                                throw new Error("المحاضرة تتطلب إنترنت");
-                            }
+if (!navigator.onLine) {
+    await showCustomAlert("Online Session", "This live lecture requires an active internet connection to check in.");
+    throw new Error("Online connection required");
+}
                             activeSessionId = parsed.searchParams.get("session");
                             activeToken = parsed.searchParams.get("token");
                             detectedCourse.innerText = "محاضرة مباشرة (سحابية)";
@@ -426,7 +489,7 @@ if (decodedText.startsWith("{")) {
                     inputStep.classList.remove("d-none");
                     inputId.focus();
                 } catch (e) {
-                    alert("رمز QR غير صالح، صوّب الكاميرا نحو باركود الشاشة.");
+await showCustomAlert("Invalid QR Code", "Please point your camera directly at the screen's QR code.");
                 }
             },
             () => {}
@@ -532,7 +595,7 @@ if (decodedText.startsWith("{")) {
         }, 400);
 
     } catch (err) {
-        alert("يرجى إعطاء المتصفح إذن الوصول للكاميرا.");
+await showCustomAlert("Permission Denied", "Please allow camera access in your browser settings to scan.");
         btnTriggerCam.classList.remove("d-none");
         qrBox.classList.add("d-none");
     }
@@ -614,23 +677,22 @@ refreshPendingBanner();
             localStorage.setItem("muc_saved_student_name", res.studentName);
         }
 
-        showResult(true, "تم تسجيل الحضور في السجل المباشر!", `تم ظهور اسمك الآن على شاشة المحاضرة.`);
+showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been recorded on the live classroom screen.");
         document.getElementById("rcpt-name").innerText = res.studentName;
         document.getElementById("rcpt-id").innerText = res.studentId;
         document.getElementById("rcpt-course").innerText = res.courseName;
         document.getElementById("rcpt-date").innerText = res.date;
         document.getElementById("rcpt-time").innerText = res.time;
-        document.getElementById("rcpt-status").innerText = res.status === "Present" ? "حاضر (Present)" : "متأخر (Late)";
+        document.getElementById("rcpt-status").innerText = res.status === "Present" ? "Present" : "Late";
         document.getElementById("receipt-box").classList.remove("d-none");
 
 } catch (err) {
-    // فحص ذكي يلتقط أي رسالة تخص انتهاء صلاحية الباركود
     const errMsg = String(err.message || "");
-    isExpiredQrError = errMsg.includes("صلاحية") || errMsg.includes("QR_EXPIRED") || errMsg.includes("expired");
+    isExpiredQrError = errMsg.includes("expired") || errMsg.includes("صلاحية");
 
-    showResult(false, "تم رفض التسجيل", err.message);
+    showResult(false, "Check-in Failed", err.message);
     btn.disabled = false;
-    btn.innerHTML = `<span>تأكيد الحضور الآن</span> <i class="fa-solid fa-arrow-left"></i>`;
+    btn.innerHTML = `<span>Confirm Attendance Now</span> <i class="fa-solid fa-arrow-right"></i>`;
 }
 });
         function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
