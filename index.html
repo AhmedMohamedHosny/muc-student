@@ -401,17 +401,39 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
             }
         });
 
-        // إذا دخل الطالب برابط مسح مسبقاً (أونلاين)
-        if (activeSessionId && activeToken) {
-            scannerStep.classList.add("d-none");
-            inputStep.classList.remove("d-none");
-            courseBadge.innerText = "جلسة مباشرة (Online)";
-            detectedCourse.innerText = "محاضرة مباشرة";
+// 🔒 رادار الحظر الأمني: منع Google Lens والكاميرات الخارجية وروابط الواتساب تماماً
+        const isAppMode = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+        if (activeSessionId || activeToken) {
+            // مسح معرّفات الجلسة فوراً وتطهير شريط الرابط لمنع استغلاله
+            window.history.replaceState({}, document.title, window.location.pathname);
+            activeSessionId = null;
+            activeToken = null;
+
+            setTimeout(async () => {
+                await showCustomAlert(
+                    "Security Alert: External Scan Blocked",
+                    "⚠️ غير مسموح بالمسح عبر Google Lens أو الكاميرا الخارجية أو الروابط المباشرة لمنع التلاعب!\n\nيجب فتح تطبيق MUC والمسح حصرياً باستخدام زر [Scan Projector QR Code] الداخلي داخل التطبيق.",
+                    true
+                );
+            }, 300);
         }
 
-        // تشغيل الكاميرا فور الضغط على الزرار
+// تشغيل الكاميرا مع فحص أمان وضع التطبيق (Standalone PWA Check)
         let html5QrScanner = null;
         btnTriggerCam?.addEventListener("click", async () => {
+            const isInstalledApp = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+            // إذا كان الطالب فاتح من متصفح عادي ولم يثبت التطبيق على هاتفه
+            if (!isInstalledApp && !window.location.hostname.includes("localhost")) {
+                await showCustomAlert(
+                    "MUC App Required",
+                    "⚠️ للحفاظ على نزاهة الحضور: يجب تثبيت البرنامج على هاتفك أولاً (Install App / إضافة إلى الشاشة الرئيسية) وفتحه كتطبيق مستقل لتسجيل الحضور!",
+                    false
+                );
+                return;
+            }
+
             btnTriggerCam.classList.add("d-none");
             qrBox.classList.remove("d-none");
             startCameraScanner();
