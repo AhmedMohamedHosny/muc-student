@@ -470,8 +470,6 @@ if (decodedText.startsWith("{")) {
                             detectedCourse.innerText = offlinePayload.cn;
                             courseBadge.innerText = "حضور أوفلاين (Offline Mode)";
                         } else {
-                            // محاضرة أونلاين عادية
-} else {
                         // محاضرة أونلاين عادية
                         if (!navigator.onLine) {
                             await showCustomAlert("Online Connection Required", "This live lecture requires an active internet connection to check in. Please connect to mobile data or Wi-Fi.");

@@ -126,15 +126,7 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
         console.warn("Device log skipped:", e.message);
     }
 
-    // 7. تحديث مصفوفة الجلسة (محاولة إضافية إن سمحت الصلاحيات دون إيقاف العملية)
-    try {
-        await setDoc(sessionRef, {
-            presentStudents: arrayUnion(cleanedStudentId)
-        }, { merge: true });
-    } catch (e) {
-        console.warn("Session doc update skipped:", e.message);
-    }
-
+// تم فك الاختناق: الطالب يكتب سجله المستقل فقط ولا يلمس مستند الجلسة
     const now = new Date();
     return {
         success: true,
@@ -266,29 +258,18 @@ export async function syncPendingAttendance() {
                 if (item.timeSlot) recordData.timeSlot = item.timeSlot;
                 if (item.hash) recordData.hash = item.hash;
 
-                // 1) الأهم: سجل الطالب
+// 1) تسجيل حضور الطالب في مستنده المنفصل فقط
                 await withTimeout(setDoc(doc(db, "attendance_records", recordId), recordData, { merge: true }));
 
-                // 2) مستند الجلسة (محاولة إضافية — لو الـRules رفضتها السجل أعلاه محفوظ)
+                // 2) توثيق بصمة الجهاز لمنع التكرار
                 try {
-                    const sessionData = {
+                    await withTimeout(setDoc(doc(db, "attendance_devices", `${item.sessionId}_${item.deviceId}`), {
                         sessionId: item.sessionId,
-                        courseId: item.courseId || "MUC_COURSE",
-                        courseName: item.courseName || "المقرر الدراسي",
-                        lectureNumber: Number(item.lectureNumber) || 1,
-                        startTime: Timestamp.fromMillis(startMs),
-                        startedAtDate: new Date(startMs).toLocaleDateString("en-CA"),
-                        sessionType: item.sessionType || "lecture",
-                        hostRole: item.hostRole || "doctor",
-                        status: "closed",
-                        presentStudents: arrayUnion(item.studentId)
-                    };
-                    if (item.group) sessionData.group = item.group;
-                    if (item.doctorId) sessionData.doctorId = item.doctorId;
-                    await withTimeout(setDoc(doc(db, "attendance_sessions", item.sessionId), sessionData, { merge: true }));
-                } catch (e) { console.warn("session merge skipped:", e.message); }
-
-                // 3) بصمة الجهاز
+                        deviceId: item.deviceId,
+                        studentId: item.studentId,
+                        createdAt: serverTimestamp()
+                    }, { merge: true }));
+                } catch (e) { console.warn(e.message); }
                 try {
                     await withTimeout(setDoc(doc(db, "attendance_devices", `${item.sessionId}_${item.deviceId}`), {
                         sessionId: item.sessionId,
