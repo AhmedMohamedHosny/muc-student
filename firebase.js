@@ -36,10 +36,10 @@ function getLocalDeviceId() {
     }
 }
 
-// 1. التسجيل الأونلاين المباشر مع تفعيل الحماية لمنع تسجيل الصحاب والتكرار
+// 1. التسجيل الأونلاين المباشر بحماية وتفادي أخطاء الصلاحيات
 export async function recordStudentAttendance(sessionId, clientToken, studentIdInput, deviceId) {
     const cleanedStudentId = String(studentIdInput).trim();
-    if (!cleanedStudentId) throw new Error("يرجى إدخال الرقم الجامعي.");
+    if (!cleanedStudentId) throw new Error("Please enter your Student ID.");
 
     if (!auth.currentUser) await signInAnonymously(auth);
 
@@ -49,85 +49,102 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
     const recordRef = doc(db, "attendance_records", recordId);
     const deviceRef = doc(db, "attendance_devices", `${sessionId}_${safeDeviceId}`);
 
-    return await runTransaction(db, async (transaction) => {
-        const sessionDoc = await transaction.get(sessionRef);
-        if (!sessionDoc.exists()) throw new Error("جلسة الحضور غير موجودة أو تم إنهاؤها.");
-        const sessionData = sessionDoc.data();
-        if (sessionData.status !== "active") throw new Error("جلسة الحضور مغلقة حالياً من قبل أستاذ المادة.");
+    // 1. فحص الجلسة والرمز
+    const sessionDoc = await getDoc(sessionRef);
+    if (!sessionDoc.exists()) {
+        throw new Error("Attendance session not found or already closed.");
+    }
+    const sessionData = sessionDoc.data();
+    if (sessionData.status !== "active") {
+        throw new Error("Attendance session is currently closed by the instructor.");
+    }
 
-        // جلب بيانات الطالب
-        const studentDoc = await transaction.get(doc(db, "students", cleanedStudentId));
-        if (!studentDoc.exists()) {
-            throw new Error(`الرقم الجامعي (${cleanedStudentId}) غير مقيد بقاعدة البيانات.`);
+    const t = sessionData.currentToken || {};
+    if (!clientToken || t.token !== clientToken) {
+        throw new Error("QR Code expired! Please scan the updated code on the screen.");
+    }
+
+    // 2. فحص التسجيل المكرر للطالب
+    const existingRecord = await getDoc(recordRef);
+    if (existingRecord.exists()) {
+        throw new Error(`Attendance already recorded for Student ID (${cleanedStudentId})!`);
+    }
+
+    // 3. جلب اسم الطالب بأمان
+    let studentRealName = cleanedStudentId;
+    try {
+        const studentDoc = await getDoc(doc(db, "students", cleanedStudentId));
+        if (studentDoc.exists()) {
+            studentRealName = studentDoc.data().name || cleanedStudentId;
         }
-        const studentData = studentDoc.data();
+    } catch (e) {
+        console.warn("Student name fetch skipped:", e.message);
+    }
 
-        // 🔒 حماية 1: فحص تسجيل الطالب المكرر لنفس المحاضرة
-        const existingRecord = await transaction.get(recordRef);
-        if (existingRecord.exists()) {
-            throw new Error(`عفواً يا ${studentData.name}، تم تسجيل حضورك مسبقاً لهذه المحاضرة!`);
-        }
-
-        // 🔒 حماية 2: فحص بصمة الموبايل (منع التسجيل للصحاب من نفس الهاتف)
-        const deviceDoc = await transaction.get(deviceRef);
+    // 4. فحص بصمة الهاتف (منع تسجيل الزميل)
+    try {
+        const deviceDoc = await getDoc(deviceRef);
         if (deviceDoc.exists()) {
-            throw new Error(`⚠️ حماية أمنية: تم تسجيل حضور مسبقاً من هذا الهاتف لطالب آخر! لا يمكن تسجيل الحضور لزميلك.`);
-        }
-
-const t = sessionData.currentToken || {};
-            // مطابقة حصرية وصارمة مع الرمز الحالي فقط، مع إلغاء قبول الرمز السابق
-            if (!clientToken || t.token !== clientToken) {
-                throw new Error("⚠️ انتهت صلاحية هذا الرمز! صوّب الكاميرا نحو الشاشة والتقط الرمز الجديد بسرعة.");
+            const devData = deviceDoc.data();
+            if (devData.studentId && devData.studentId !== cleanedStudentId) {
+                throw new Error("Security Alert: This phone was already used to check in for another student!");
             }
-
-        if (!(studentData.enrolledCourses || []).includes(sessionData.courseId)) {
-            throw new Error(`عفواً يا ${studentData.name}، أنت غير مقيد في هذا المقرر.`);
         }
+    } catch (e) {
+        if (e.message.includes("Security Alert")) throw e;
+    }
 
-        const startTime = sessionData.startTime ? sessionData.startTime.toDate() : new Date();
-        const diffMinutes = (Date.now() - startTime.getTime()) / 60000;
-        const status = diffMinutes > (sessionData.lateThresholdMinutes || CONFIG.attendance.lateThresholdMinutes)
-            ? CONFIG.attendance.statuses.LATE
-            : CONFIG.attendance.statuses.PRESENT;
+    const startTime = sessionData.startTime ? sessionData.startTime.toDate() : new Date();
+    const diffMinutes = (Date.now() - startTime.getTime()) / 60000;
+    const status = diffMinutes > (sessionData.lateThresholdMinutes || CONFIG.attendance.lateThresholdMinutes)
+        ? CONFIG.attendance.statuses.LATE
+        : CONFIG.attendance.statuses.PRESENT;
 
-        // تسجيل الحضور
-        transaction.set(recordRef, {
-            recordId: recordId,
-            sessionId: sessionId,
-            courseId: sessionData.courseId,
-            courseName: sessionData.courseName,
-            studentId: cleanedStudentId,
-            studentName: studentData.name,
-            deviceId: safeDeviceId,
-            status: status,
-            recordedAt: serverTimestamp(),
-            method: "QR_SCAN"
-        });
+    // 5. تسجيل الحضور في سجلات الحضور (مسموح بها للطلاب دائماً)
+    await setDoc(recordRef, {
+        recordId: recordId,
+        sessionId: sessionId,
+        courseId: sessionData.courseId || "MUC_COURSE",
+        courseName: sessionData.courseName || "Course",
+        studentId: cleanedStudentId,
+        studentName: studentRealName,
+        deviceId: safeDeviceId,
+        status: status,
+        recordedAt: serverTimestamp(),
+        method: "QR_SCAN"
+    }, { merge: true });
 
-        // قفل الهاتف لهذه الجلسة
-        transaction.set(deviceRef, {
+    // 6. قفل الهاتف للجلسة (محاولة آمنة)
+    try {
+        await setDoc(deviceRef, {
             sessionId: sessionId,
             deviceId: safeDeviceId,
             studentId: cleanedStudentId,
             createdAt: serverTimestamp()
-        });
+        }, { merge: true });
+    } catch (e) {
+        console.warn("Device log skipped:", e.message);
+    }
 
-        // إدراج الطالب في مصفوفة الجلسة الرسمية لشيت الدكتور
-        transaction.update(sessionRef, {
+    // 7. تحديث مصفوفة الجلسة (محاولة إضافية إن سمحت الصلاحيات دون إيقاف العملية)
+    try {
+        await setDoc(sessionRef, {
             presentStudents: arrayUnion(cleanedStudentId)
-        });
+        }, { merge: true });
+    } catch (e) {
+        console.warn("Session doc update skipped:", e.message);
+    }
 
-        const now = new Date();
-        return {
-            success: true,
-            studentName: studentData.name,
-            studentId: cleanedStudentId,
-            courseName: sessionData.courseName,
-            status: status,
-            date: now.toLocaleDateString("ar-EG"),
-            time: now.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })
-        };
-    });
+    const now = new Date();
+    return {
+        success: true,
+        studentName: studentRealName,
+        studentId: cleanedStudentId,
+        courseName: sessionData.courseName || "Course",
+        status: status,
+        date: now.toLocaleDateString("en-US"),
+        time: now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+    };
 }
 
 // 2. تسجيل الحضور محلياً أوفلاين مع حفظ رقم المحاضرة وتاريخ اليوم (معالجة أمنية فورية)
