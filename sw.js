@@ -1,14 +1,15 @@
-// sw.js - MUC Student Offline Engine
-const CACHE_NAME = "muc-student-offline-v15";
+// تم تغيير الإصدار إلى v16 لإجبار هواتف الطلاب على سحب التحديث الجديد فوراً
+const CACHE_NAME = "muc-student-offline-v16";
 
 const STATIC_ASSETS = [
   "./",
   "./index.html",
   "./firebase.js",
   "./config.js",
+  "./praxis-data.js", // 👈 تم إضافة ملف توزيع الطلاب هنا ليعمل التحقق أوفلاين 100%
   "./logo.jpg",
   "https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js",
-    "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+  "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
   "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js",
   "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js",
   "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
