@@ -906,6 +906,13 @@ if (manual) {
             }
         }
 
+// زر تفريغ السجلات المعلقة يدوياً
+        document.getElementById("btn-clear-pending")?.addEventListener("click", () => {
+            localStorage.removeItem("muc_pending_records");
+            refreshPendingBanner();
+            showCustomAlert("تم المسح", "تم تنظيف قائمة السجلات المعلقة بنجاح.", false);
+        });
+
         document.getElementById("btn-sync-now").addEventListener("click", () => runSync(true));
         window.addEventListener("online", () => runSync(false));
         document.addEventListener("visibilitychange", () => {
@@ -933,11 +940,7 @@ if (manual) {
     </div>
 
 </div>
-document.getElementById("btn-clear-pending")?.addEventListener("click", () => {
-            localStorage.removeItem("muc_pending_records");
-            refreshPendingBanner();
-            showCustomAlert("تم المسح", "تم تنظيف قائمة السجلات المعلقة بنجاح.", false);
-        });
+
 <!-- تنسيقات التبديل التلقائي حسب لغة الصفحة -->
 <style>
     /* إذا كانت الصفحة بالإنجليزية (dir="ltr" أو lang="en") */
