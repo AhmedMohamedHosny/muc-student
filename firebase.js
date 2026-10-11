@@ -105,15 +105,23 @@ const sessionDoc = await getDoc(sessionRef);
         throw new Error(`Attendance already recorded for Student ID (${cleanedStudentId})!`);
     }
 
-    // 3. جلب اسم الطالب بأمان
-    let studentRealName = cleanedStudentId;
-    try {
-        const studentDoc = await getDoc(doc(db, "students", cleanedStudentId));
-        if (studentDoc.exists()) {
-            studentRealName = studentDoc.data().name || cleanedStudentId;
-        }
-    } catch (e) {
-        console.warn("Student name fetch skipped:", e.message);
+// 3. فحص أكاديمي شامل: التحقق من وجود الطالب وقيده في المقرر
+    const studentDoc = await getDoc(doc(db, "students", cleanedStudentId));
+    if (!studentDoc.exists()) {
+        throw new Error(`⚠️ الرقم الجامعي (${cleanedStudentId}) غير مسجل بقاعدة بيانات الجامعة!`);
+    }
+
+    const studentData = studentDoc.data();
+    const studentRealName = studentData.name || cleanedStudentId;
+
+    // فحص القيد في المادة (ديناميكي لجميع المقررات والدكاترة)
+    const enrolledList = studentData.enrolledCourses || [];
+    const currentCourseId = sessionData.courseId || "";
+    const isEnrolled = enrolledList.includes(currentCourseId) || 
+                       (studentData.sections && (studentData.sections[currentCourseId] || Object.keys(studentData.sections).some(k => k.toLowerCase() === currentCourseId.toLowerCase())));
+
+    if (!isEnrolled) {
+        throw new Error(`NOT_ENROLLED:${studentRealName}:${sessionData.courseName || "هذا المقرر"}`);
     }
 
     // 4. فحص بصمة الهاتف (منع تسجيل الزميل)
@@ -266,16 +274,41 @@ export async function syncPendingAttendance() {
         if (!connected && !auth.currentUser) {
             throw new Error("Network connection pending");
         }
-
-        for (const item of queue) {
+for (const item of queue) {
             try {
-                let realStudentName = item.studentName && item.studentName !== "طالب" ? item.studentName : "طالب";
+                // 1) التحقق أولاً: هل المحاضرة لا تزال موجودة في السيرفر أم حذفها الدكتور؟
+                let sessionExists = true;
                 try {
-                    const stdSnap = await withTimeout(getDoc(doc(db, "students", item.studentId)), 6000);
-                    if (stdSnap.exists()) realStudentName = stdSnap.data().name || realStudentName;
-                } catch (e) { console.warn(e); }
+                    const sessSnap = await withTimeout(getDoc(doc(db, "attendance_sessions", item.sessionId)), 5000);
+                    if (!sessSnap.exists() || sessSnap.data()?.status === "deleted") {
+                        sessionExists = false;
+                    }
+                } catch (err) {
+                    // إذا كان الخطأ رفض صلاحية، فهذا يعني أن الجلسة حُذفت
+                    if (err.message && err.message.includes("permission-denied")) sessionExists = false;
+                }
 
-                const startMs = item.sessionStart || item.scannedAt || Date.now();
+                if (!sessionExists) {
+                    removeFromQueue(item); // حذف السجل فوراً من هاتف الطالب لأن الدكتور حذف المحاضرة
+                    continue;
+                }
+
+                // 2) التحقق من وجود وقيد الطالب في السيرفر
+                let realStudentName = item.studentName || "طالب";
+                const stdSnap = await withTimeout(getDoc(doc(db, "students", item.studentId)), 6000);
+                if (stdSnap.exists()) {
+                    const sData = stdSnap.data();
+                    realStudentName = sData.name || realStudentName;
+                    const enrolled = sData.enrolledCourses || [];
+                    if (item.courseId && !enrolled.includes(item.courseId)) {
+                        removeFromQueue(item); // غير مقيد بالمقرر، يُحذف السجل
+                        continue;
+                    }
+                } else {
+                    removeFromQueue(item); // رقم غير موجود، يُحذف السجل المعلق
+                    continue;
+                }
+
                 const recordId = `${item.sessionId}_${item.studentId}`;
                 const recordData = {
                     recordId,
@@ -293,18 +326,8 @@ export async function syncPendingAttendance() {
                 if (item.timeSlot) recordData.timeSlot = item.timeSlot;
                 if (item.hash) recordData.hash = item.hash;
 
-// 1) تسجيل حضور الطالب في مستنده المنفصل فقط
                 await withTimeout(setDoc(doc(db, "attendance_records", recordId), recordData, { merge: true }));
 
-                // 2) توثيق بصمة الجهاز لمنع التكرار
-                try {
-                    await withTimeout(setDoc(doc(db, "attendance_devices", `${item.sessionId}_${item.deviceId}`), {
-                        sessionId: item.sessionId,
-                        deviceId: item.deviceId,
-                        studentId: item.studentId,
-                        createdAt: serverTimestamp()
-                    }, { merge: true }));
-                } catch (e) { console.warn(e.message); }
                 try {
                     await withTimeout(setDoc(doc(db, "attendance_devices", `${item.sessionId}_${item.deviceId}`), {
                         sessionId: item.sessionId,
@@ -314,9 +337,13 @@ export async function syncPendingAttendance() {
                     }, { merge: true }));
                 } catch (e) { console.warn(e.message); }
 
-                removeFromQueue(item); // يتشال من الطابور فور نجاحه
+                removeFromQueue(item);
                 uploaded++;
             } catch (err) {
+                // إذا رفض السيرفر الحفظ لأن المحاضرة ملغاة، احذف السجل المعلق
+                if (err.message && (err.message.includes("permission-denied") || err.message.includes("not found"))) {
+                    removeFromQueue(item);
+                }
                 console.error("فشل رفع سجل الطالب:", item.studentId, err);
             }
         }
