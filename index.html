@@ -203,14 +203,10 @@ background: #FDF2F3;
                 <i class="fa-solid fa-clock"></i>
                 You have <span id="pending-count">0</span> offline attendance record(s) pending sync
             </div>
-            <div style="display:flex; gap:8px;">
-                <button type="button" id="btn-sync-now" class="btn" style="flex:2; background:#C59B27; color:#000; padding:0.7rem; font-size:0.92rem;">
+<div style="display:flex; gap:8px;">
+                <button type="button" id="btn-sync-now" class="btn" style="width:100%; background:#C59B27; color:#000; padding:0.75rem; font-size:0.95rem; font-weight:800;">
                     <i class="fa-solid fa-cloud-arrow-up"></i>
                     <span id="btn-sync-text">Sync Attendance Now</span>
-                </button>
-                <button type="button" id="btn-clear-pending" class="btn" style="flex:1; background:#EF4444; color:#fff; padding:0.7rem; font-size:0.85rem;" title="حذف السجلات المعلقة">
-                    <i class="fa-solid fa-trash-can"></i>
-                    <span>مسح</span>
                 </button>
             </div>
             <p id="sync-feedback" style="font-size:0.78rem; margin-top:6px; font-weight:700;"></p>
@@ -331,11 +327,11 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance,
         let activeToken = urlParams.get("token");
         let offlinePayload = null;
 let isExpiredQrError = false; // متغير لتحديد ما إذا كان الخطأ انتهاء صلاحية الرمز
-        // توليد أو جلب بصمة الهاتف
-        let deviceId = localStorage.getItem("muc_device_fingerprint");
+// توليد أو جلب بصمة الهاتف الموحدة
+        let deviceId = localStorage.getItem("muc_device_id");
         if (!deviceId) {
             deviceId = "dev_" + Math.random().toString(36).substring(2) + "_" + Date.now();
-            localStorage.setItem("muc_device_fingerprint", deviceId);
+            localStorage.setItem("muc_device_id", deviceId);
         }
 
         const scannerStep = document.getElementById("scanner-step");
@@ -428,21 +424,9 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
             }, 300);
         }
 
-// تشغيل الكاميرا مع فحص أمان وضع التطبيق (Standalone PWA Check)
+// تشغيل الكاميرا المباشرة داخل الصفحة
         let html5QrScanner = null;
         btnTriggerCam?.addEventListener("click", async () => {
-            const isInstalledApp = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-
-            // إذا كان الطالب فاتح من متصفح عادي ولم يثبت التطبيق على هاتفه
-            if (!isInstalledApp && !window.location.hostname.includes("localhost")) {
-                await showCustomAlert(
-                    "MUC App Required",
-                    "⚠️ للحفاظ على نزاهة الحضور: يجب تثبيت البرنامج على هاتفك أولاً (Install App / إضافة إلى الشاشة الرئيسية) وفتحه كتطبيق مستقل لتسجيل الحضور!",
-                    false
-                );
-                return;
-            }
-
             btnTriggerCam.classList.add("d-none");
             qrBox.classList.remove("d-none");
             startCameraScanner();
@@ -493,7 +477,7 @@ if (decodedText.startsWith("{")) {
                                 c: rawC || "MUC_COURSE",
                                 cn: decodeURIComponent(rawCn || "جلسة أوفلاين"),
                                 l: Number(parsed.searchParams.get("lec") || 1),
-                                t: Math.floor(Date.now() / 10000),
+                                t: Math.floor(Date.now() / 15000),
                                 h: activeToken,
                                 ts: Number(parsed.searchParams.get("ts") || Date.now())
                             };
@@ -675,7 +659,6 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
     btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Confirming...`;
 
     try {
-localStorage.setItem("muc_saved_student_id", sid);
         localStorage.removeItem("muc_saved_student_name"); // حذف أي اسم قديم مستعار نهائياً
 
         let studentRealName = localStorage.getItem(`muc_student_name_${sid}`) || "";
@@ -732,7 +715,6 @@ localStorage.setItem("muc_saved_student_id", sid);
             );
 
             if (!isEnrolledInScanned) {
-                isExpiredQrError = true;
                 showResult(false, "غير مقيد في هذه المحاضرة!", "");
 
                 const statusMsg = document.getElementById("status-msg");
@@ -782,7 +764,7 @@ localStorage.setItem("muc_saved_student_id", sid);
                 hostRole: offlinePayload.hr,
                 doctorId: offlinePayload.d
             });
-
+localStorage.setItem("muc_saved_student_id", sid);
             refreshPendingBanner();
             showResult(true, "Attendance Saved Successfully!", "Saved locally on your device. It will upload automatically once internet is available.");            
             document.getElementById("rcpt-name").innerText = studentRealName;
@@ -795,9 +777,9 @@ localStorage.setItem("muc_saved_student_id", sid);
             return;
         }
 
-        // ب. التسجيل أونلاين المباشر
-        let deviceId = localStorage.getItem("muc_device_fingerprint") || ("dev_" + Math.random().toString(36).substring(2));
-        localStorage.setItem("muc_device_fingerprint", deviceId);
+// ب. التسجيل أونلاين المباشر
+        let deviceId = localStorage.getItem("muc_device_id") || ("dev_" + Math.random().toString(36).substring(2));
+        localStorage.setItem("muc_device_id", deviceId);
 
         const res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
         
@@ -893,7 +875,12 @@ async function runSync(manual) {
 if (manual) {
                 btn.disabled = false;
                 txt.innerText = "Sync Attendance Now";
-                if (getPendingCount() === 0) {
+                const syncErr = localStorage.getItem("muc_sync_error");
+                if (syncErr) {
+                    fb.style.color = "#DC2626";
+                    fb.innerText = syncErr;
+                    localStorage.removeItem("muc_sync_error");
+                } else if (getPendingCount() === 0) {
                     fb.style.color = "#15803D";
                     fb.innerText = "✅ Attendance uploaded successfully";
                 } else if (result === -1 && !navigator.onLine) {
@@ -906,12 +893,7 @@ if (manual) {
             }
         }
 
-// زر تفريغ السجلات المعلقة يدوياً
-        document.getElementById("btn-clear-pending")?.addEventListener("click", () => {
-            localStorage.removeItem("muc_pending_records");
-            refreshPendingBanner();
-            showCustomAlert("تم المسح", "تم تنظيف قائمة السجلات المعلقة بنجاح.", false);
-        });
+
 
         document.getElementById("btn-sync-now").addEventListener("click", () => runSync(true));
         window.addEventListener("online", () => runSync(false));

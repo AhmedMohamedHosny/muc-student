@@ -182,22 +182,37 @@ const sessionDoc = await getDoc(sessionRef);
     };
 }
 
-// 2. تسجيل الحضور محلياً أوفلاين مع حفظ رقم المحاضرة وتاريخ اليوم (معالجة أمنية فورية)
 export async function queueOfflineAttendance({ studentId, studentName, sessionId, courseId, courseName, lectureNumber, timeSlot, hash, sessionStart, sessionType, group, hostRole, doctorId }) {
+    const cleanedStudentId = String(studentId).trim();
     if (!sessionId) {
         throw new Error("⚠️ رمز الحضور غير صالح، يرجى مسح الباركود مرة أخرى.");
+    }
+
+    // 🔒 فحص عزل محاضرة 1 عن محاضرة 2 في الأوفلاين
+    const sessionCourseKey = `${courseId || ""} ${courseName || ""}`.toLowerCase();
+    const isLec1Session = sessionCourseKey.includes("lec1") || sessionCourseKey.includes("l1") || sessionCourseKey.includes("محاضرة 1");
+    const isLec2Session = sessionCourseKey.includes("lec2") || sessionCourseKey.includes("l2") || sessionCourseKey.includes("محاضرة 2");
+
+    if (isLec1Session || isLec2Session) {
+        const isLec2Std = PRAXIS_LEC2_STUDENTS.has(cleanedStudentId);
+        if (isLec1Session && isLec2Std) {
+            throw new Error("⚠️ غير مصرح: أنت مسجل في (محاضرة 2) ولا يمكنك تسجيل الحضور في محاضرة 1!");
+        }
+        if (isLec2Session && !isLec2Std) {
+            throw new Error("⚠️ غير مصرح: أنت مسجل في (محاضرة 1) ولا يمكنك تسجيل الحضور في محاضرة 2!");
+        }
     }
 
     const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
     const deviceId = getLocalDeviceId();
 
-    // 🔒 1. حماية أمنية: منع تكرار تسجيل نفس الطالب في نفس الجلسة
-    const studentExists = queue.some(q => q.sessionId === sessionId && q.studentId === studentId);
+    // 🔒 منع تكرار تسجيل نفس الطالب لنفس المحاضرة
+    const studentExists = queue.some(q => q.sessionId === sessionId && q.studentId === cleanedStudentId);
     if (studentExists) {
         throw new Error("تم تسجيل حضورك لهذه المحاضرة بالفعل ومحفوظ على هاتفك!");
     }
 
-    // 🔒 2. حماية أمنية: قفل بصمة الهاتف (منع تسجيل الزميل من نفس الهاتف أوفلاين)
+    // 🔒 منع تسجيل طالبين مختلفين من نفس الهاتف
     const deviceExists = queue.some(q => q.sessionId === sessionId && q.deviceId === deviceId);
     if (deviceExists) {
         throw new Error("⚠️ حماية أمنية: تم استخدام هذا الهاتف لتسجيل طالب آخر في هذه المحاضرة!");
@@ -292,20 +307,22 @@ for (const item of queue) {
                     removeFromQueue(item); // حذف السجل فوراً من هاتف الطالب لأن الدكتور حذف المحاضرة
                     continue;
                 }
-
-                // 2) التحقق من وجود وقيد الطالب في السيرفر
+// 2) التحقق من وجود وقيد الطالب في السيرفر
                 let realStudentName = item.studentName || "طالب";
                 const stdSnap = await withTimeout(getDoc(doc(db, "students", item.studentId)), 6000);
                 if (stdSnap.exists()) {
                     const sData = stdSnap.data();
                     realStudentName = sData.name || realStudentName;
+                    localStorage.setItem(`muc_student_name_${item.studentId}`, realStudentName);
                     const enrolled = sData.enrolledCourses || [];
                     if (item.courseId && !enrolled.includes(item.courseId)) {
-                        removeFromQueue(item); // غير مقيد بالمقرر، يُحذف السجل
+                        localStorage.setItem("muc_sync_error", `⚠️ الرقم (${item.studentId}) غير مقيد في هذا المقرر!`);
+                        removeFromQueue(item);
                         continue;
                     }
                 } else {
-                    removeFromQueue(item); // رقم غير موجود، يُحذف السجل المعلق
+                    localStorage.setItem("muc_sync_error", `⚠️ الرقم الجامعي (${item.studentId}) غير مسجل بعد!`);
+                    removeFromQueue(item);
                     continue;
                 }
 
