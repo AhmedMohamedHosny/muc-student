@@ -35,7 +35,28 @@ function getLocalDeviceId() {
         return "dev" + Date.now();
     }
 }
-
+// قائمة الأرقام الجامعية لطلاب المحاضرة الثانية (167 طالباً) مدمجة لمنع فشل الاستدعاء
+const PRAXIS_LEC2_STUDENTS = new Set([
+  "24120490","25120899","25120933","25221096","25221102","25120837","25120836","26121713","25120874",
+  "26121631","26121641","26121677","26121654","26121694","26121676","26121674","26121657","26121667",
+  "26121647","26121648","26121650","26121642","26121690","26121660","25120979","26121664","26121697",
+  "26121696","26121714","26121673","26121679","26121649","26121672","26121715","26121688","26121669",
+  "26121652","26121661","26121629","25120995","25120958","25120955","24120548","25221092","26121126",
+  "26121195","26121123","26121271","26121212","26121283","26121216","26121296","26121310","26121190",
+  "26121221","26121191","26121260","26121246","26121132","26121249","26121334","26121227","26121181",
+  "26121306","26121311","26121223","26121174","26121171","26121355","26121304","26121170","26121188",
+  "26121233","25121117","25221097","25121083","25120936","25120978","25120872","25120845","26121444",
+  "26121135","26121700","25120940","26121701","26121726","26121681","26121702","26121735","26121695",
+  "26121706","26121705","26121656","26121717","26121689","26121710","26121658","26121687","26121703",
+  "26121698","26121734","25120862","26121711","26121699","26121708","25221106","26121415","26121525",
+  "26121645","26121428","26121563","26121482","26121562","26121400","26121655","25120818","26121518",
+  "26121507","26121553","26121455","26121583","26121513","26121554","26121363","26121608","26121486",
+  "26121377","26121558","26121470","26121639","26121460","26121497","26121646","26121465","26121368",
+  "25221093","25120807","25120863","25120857","25121045","25120969","25121076","25120932","25121041",
+  "25120813","25120854","25120817","25121010","25121047","25120953","25120923","25120834","25120913",
+  "25120981","25121051","25120850","25120901","25120908","25121042","25221103","25120970","25121012",
+  "25221113","25121069","25121018","25121088","25120976"
+]);
 // 1. التسجيل الأونلاين المباشر بحماية وتفادي أخطاء الصلاحيات
 export async function recordStudentAttendance(sessionId, clientToken, studentIdInput, deviceId) {
     const cleanedStudentId = String(studentIdInput).trim();
@@ -49,14 +70,28 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
     const recordRef = doc(db, "attendance_records", recordId);
     const deviceRef = doc(db, "attendance_devices", `${sessionId}_${safeDeviceId}`);
 
-    // 1. فحص الجلسة والرمز
-    const sessionDoc = await getDoc(sessionRef);
+const sessionDoc = await getDoc(sessionRef);
     if (!sessionDoc.exists()) {
         throw new Error("Attendance session not found or already closed.");
     }
     const sessionData = sessionDoc.data();
     if (sessionData.status !== "active") {
         throw new Error("Attendance session is currently closed by the instructor.");
+    }
+
+    // 🔒 فحص أمني حاسم: منع تسجيل طالب المحاضرة الثانية في المحاضرة الأولى والعكس
+    const sessionCourseKey = `${sessionData.courseId || ""} ${sessionData.courseName || ""}`.toLowerCase();
+    const isLec1Session = sessionCourseKey.includes("lec1") || sessionCourseKey.includes("l1") || sessionCourseKey.includes("محاضرة 1");
+    const isLec2Session = sessionCourseKey.includes("lec2") || sessionCourseKey.includes("l2") || sessionCourseKey.includes("محاضرة 2");
+
+    if (isLec1Session || isLec2Session) {
+        const isLec2Std = PRAXIS_LEC2_STUDENTS.has(cleanedStudentId);
+        if (isLec1Session && isLec2Std) {
+            throw new Error("WRONG_LEC_2");
+        }
+        if (isLec2Session && !isLec2Std) {
+            throw new Error("WRONG_LEC_1");
+        }
     }
 
     const t = sessionData.currentToken || {};
