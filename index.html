@@ -688,9 +688,63 @@ btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Confirming...`;
             }
         }
 
-// أ. التسجيل أوفلاين وتمرير رقم المحاضرة وتاريخ اليوم
+// أ. فحص المحاضرة المستهدفة والتحقق من تسكين الطالب (منع تسجيل طالب محاضرة 2 في محاضرة 1)
+        const scannedCourseStr = `${offlinePayload?.c || ""} ${offlinePayload?.cn || ""} ${activeSessionId || ""}`.toLowerCase();
+        const isLec1Scanned = scannedCourseStr.includes("lec1") || scannedCourseStr.includes("l1") || scannedCourseStr.includes("محاضرة 1");
+        const isLec2Scanned = scannedCourseStr.includes("lec2") || scannedCourseStr.includes("l2") || scannedCourseStr.includes("محاضرة 2");
+
+        let studentAssignedLec = 0;
+        try {
+            const pMod = await import("./praxis-data.js");
+            const praxisList = pMod.PRAXIS_STUDENTS_LIST || [];
+            const foundRow = praxisList.find(r => r && String(r[0]).trim() === sid);
+            if (foundRow) {
+                studentAssignedLec = String(foundRow[4] || "").includes("2") ? 2 : 1;
+                if (!studentRealName || studentRealName === "طالب") {
+                    studentRealName = foundRow[1] || studentRealName;
+                    localStorage.setItem(`muc_student_name_${sid}`, studentRealName);
+                }
+            }
+        } catch (e) {
+            console.warn("Praxis data offline load notice:", e);
+        }
+
+        // إذا كان الطالب في محاضرة 2 ومسح كود محاضرة 1 (أو العكس) -> رفض أمني فوري باللغة الإنجليزية
+        if ((isLec1Scanned && studentAssignedLec === 2) || (isLec2Scanned && studentAssignedLec === 1)) {
+            const myLecTitle = studentAssignedLec === 2 ? "Lecture 2" : "Lecture 1";
+            const myHall = studentAssignedLec === 2 ? "Room 201" : "Room 108 A";
+            const mySchedule = studentAssignedLec === 2 ? "Monday (11:00 AM – 12:50 PM)" : "Monday (09:00 AM – 10:50 AM)";
+            const scannedTitle = isLec1Scanned ? "Lecture 1 (Room 108 A)" : "Lecture 2 (Room 201)";
+
+            isExpiredQrError = true; // لكي يعيد زر المحاولة فتح الكاميرا فوراً لمسح الرمز الصحيح
+            showResult(false, "Wrong Lecture Session!", "");
+            
+            const statusMsg = document.getElementById("status-msg");
+            statusMsg.innerHTML = `
+                <div style="background: #FEF2F2; border: 1.5px solid #FECACA; border-radius: 12px; padding: 14px; text-align: left; font-size: 13px; line-height: 1.8; color: #1E293B; margin-top: 10px;">
+                    <div style="color: #991B1B; font-weight: 800; font-size: 14px; margin-bottom: 6px;">
+                        <i class="fa-solid fa-ban"></i> Access Denied
+                    </div>
+                    <div><strong>Student Name:</strong> ${studentRealName}</div>
+                    <div><strong>Student ID:</strong> <span style="font-family:monospace; font-weight:800;">${sid}</span></div>
+                    <div style="margin-top: 8px; padding: 8px 12px; background: #FFF; border-radius: 8px; border-left: 4px solid #DC2626;">
+                        <div><strong>Your Official Session:</strong> <span style="color:#DC2626; font-weight:900;">${myLecTitle}</span></div>
+                        <div><strong>Hall Location:</strong> <b>${myHall}</b></div>
+                        <div><strong>Official Schedule:</strong> <b>${mySchedule}</b></div>
+                    </div>
+                    <div style="margin-top: 8px; color: #64748B; font-size: 11.5px; line-height: 1.5;">
+                        ⚠️ You scanned <b>${scannedTitle}</b>. Attendance is strictly prohibited outside your designated session. Please attend your official lecture or contact course instructor Dr. Asmaa Thabet Anwar.
+                    </div>
+                </div>
+            `;
+            document.getElementById("receipt-box").classList.add("d-none");
+            btn.disabled = false;
+            btn.innerHTML = `<span>Confirm Attendance Now</span> <i class="fa-solid fa-arrow-right"></i>`;
+            return;
+        }
+
+        // أ. التسجيل أوفلاين وتمرير رقم المحاضرة وتاريخ اليوم (عند تطابق المحاضرة رسمياً)
         if (offlinePayload) {
-// قراءة رقم المحاضرة الحقيقي المتشفّر داخل باركود الدكتور
             const realLectureNum = Number(offlinePayload.l ?? offlinePayload.ln ?? offlinePayload.lectureNumber ?? 1);
 
             await queueOfflineAttendance({
@@ -699,7 +753,7 @@ btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Confirming...`;
                 sessionId: offlinePayload.s,
                 courseId: offlinePayload.c,
                 courseName: offlinePayload.cn,
-                lectureNumber: realLectureNum, // الرقم الحقيقي القادم من شاشة الدكتور
+                lectureNumber: realLectureNum,
                 timeSlot: offlinePayload.t,
                 hash: offlinePayload.h,
                 sessionStart: offlinePayload.ts,
@@ -709,7 +763,7 @@ btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Confirming...`;
                 doctorId: offlinePayload.d
             });
 
-refreshPendingBanner();
+            refreshPendingBanner();
             showResult(true, "Attendance Saved Successfully!", "Saved locally on your device. It will upload automatically once internet is available.");            
             document.getElementById("rcpt-name").innerText = studentRealName;
             document.getElementById("rcpt-id").innerText = sid;
