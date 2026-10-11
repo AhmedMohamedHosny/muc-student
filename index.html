@@ -675,33 +675,49 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
     btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Confirming...`;
 
     try {
-        localStorage.setItem("muc_saved_student_id", sid);
+localStorage.setItem("muc_saved_student_id", sid);
+        localStorage.removeItem("muc_saved_student_name"); // حذف أي اسم قديم مستعار نهائياً
 
-        // 1. استرجاع الاسم المخصص لهذا الرقم الجامعي فقط (منع استعارة اسم طالب آخر نهائياً)
         let studentRealName = localStorage.getItem(`muc_student_name_${sid}`) || "";
         let studentEnrolledCourses = [];
 
-        // 2. التحقق من السيرفر فوراً إذا كان الهاتف متصلاً بالإنترنت
+        // 1. فحص كشف الطلاب المحلي أوفلاين لجلب الاسم الصحيح فوراً
+        try {
+            const pMod = await import("./praxis-data.js");
+            const pList = pMod.PRAXIS_STUDENTS_LIST || [];
+            const row = pList.find(r => r && String(r[0]).trim() === sid);
+            if (row && row[1]) {
+                studentRealName = row[1]; // يجلب "فارس محمد علي عيسي علي" فوراً
+                localStorage.setItem(`muc_student_name_${sid}`, studentRealName);
+            }
+        } catch (e) {}
+
+        // 2. إذا كان الهاتف متصلاً بالإنترنت: التحقق الرسمي من السيرفر
         if (navigator.onLine) {
             const { db } = await import("./firebase.js");
             const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
             const stdSnap = await getDoc(doc(db, "students", sid));
-            
+
             if (!stdSnap.exists()) {
                 throw new Error(`⚠️ الرقم الجامعي (${sid}) غير مسجل في قاعدة بيانات الجامعة!`);
             }
 
             const stdData = stdSnap.data();
-            studentRealName = stdData.name || sid;
+            studentRealName = stdData.name || studentRealName || sid;
             studentEnrolledCourses = stdData.enrolledCourses || [];
 
             localStorage.setItem(`muc_student_name_${sid}`, studentRealName);
             localStorage.setItem(`muc_student_courses_${sid}`, JSON.stringify(studentEnrolledCourses));
         } else {
-            // أوفلاين: قراءة المقررات المخزنة مسبقاً لهذا الرقم
+            // أوفلاين: استرجاع المقررات المخزنة مسبقاً
             try {
                 studentEnrolledCourses = JSON.parse(localStorage.getItem(`muc_student_courses_${sid}`) || "[]");
             } catch (e) {}
+        }
+
+        // 3. إن لم يوجد الاسم وكان الطالب يسجل أوفلاين لأول مرة: يكتب Student
+        if (!studentRealName || studentRealName.trim() === "") {
+            studentRealName = "Student";
         }
 
         // 3. التحقق الأكاديمي العام: هل الطالب مقيد في هذا المقرر/المحاضرة؟
