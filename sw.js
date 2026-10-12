@@ -1,5 +1,5 @@
 // تم تغيير الإصدار إلى v16 لإجبار هواتف الطلاب على سحب التحديث الجديد فوراً
-const CACHE_NAME = "muc-student-offline-v16";
+const CACHE_NAME = "muc-student-offline-v17";
 
 const STATIC_ASSETS = [
   "./",
