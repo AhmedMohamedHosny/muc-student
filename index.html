@@ -213,10 +213,14 @@ background: #FDF2F3;
         </div>
 <!-- زرار فتح الكاميرا المباشر لضمان أمان المتصفح -->
 <div id="scanner-step">
-            <button type="button" id="btn-trigger-cam" class="btn btn-scan">
-                <i class="fa-solid fa-camera" style="font-size: 1.3rem;"></i> 
-                <span>Scan Projector QR Code</span>
-            </button>
+<button type="button" id="btn-trigger-cam" class="btn btn-scan">
+    <i class="fa-solid fa-camera" style="font-size: 1.2rem;"></i> 
+    <span>Scan Projector QR Code</span>
+</button>
+<button type="button" id="btn-enter-otp" class="btn" style="background:#C59B27; color:#000; font-weight:800; margin-bottom:0.75rem;">
+    <i class="fa-solid fa-keyboard" style="font-size: 1.2rem;"></i>
+    <span>Enter 6-Digit Code</span>
+</button>
             <div id="qr-reader" class="d-none"></div>
             
 <div id="camera-tools" class="camera-tools d-none">
@@ -341,6 +345,30 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
         const courseBadge = document.getElementById("course-badge");
         const detectedCourse = document.getElementById("detected-course-name");
         const btnTriggerCam = document.getElementById("btn-trigger-cam");
+        // معالج إدخال الكود المكون من 6 أرقام
+document.getElementById("btn-enter-otp")?.addEventListener("click", async () => {
+    const enteredOtp = await showCustomPrompt("Enter 6-Digit Code", "Please enter the dynamic code displayed above the screen QR:");
+    if (!enteredOtp || enteredOtp.trim().length < 6) {
+        await showCustomAlert("Invalid Code", "Please enter a valid 6-digit number.");
+        return;
+    }
+
+    const cleanOtp = enteredOtp.trim();
+
+    // إيقاف الكاميرا والانتقال لخانة الرقم الجامعي
+    if (html5QrScanner) {
+        try { await html5QrScanner.stop(); } catch(e) {}
+    }
+    document.getElementById("camera-tools")?.classList.add("d-none");
+    scannerStep.classList.add("d-none");
+    inputStep.classList.remove("d-none");
+    detectedCourse.innerText = "Check-in via Dynamic Code";
+    courseBadge.innerText = `Code Verified: ${cleanOtp}`;
+
+    // حفظ الكود للتحقق أثناء الإرسال
+    window._enteredOtpCode = cleanOtp;
+    inputId.focus();
+});
         const qrBox = document.getElementById("qr-reader");
 
 // دالة عرض التنبيهات الأنيقة بدون اسم الموقع
@@ -780,7 +808,10 @@ localStorage.setItem("muc_saved_student_id", sid);
 // ب. التسجيل أونلاين المباشر
         let deviceId = localStorage.getItem("muc_device_id") || ("dev_" + Math.random().toString(36).substring(2));
         localStorage.setItem("muc_device_id", deviceId);
-
+const submittedOtp = window._enteredOtpCode || "";
+if (submittedOtp) {
+    activeToken = activeToken || `OTP_${submittedOtp}`;
+}
         const res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
         
         if (res.studentName) {
