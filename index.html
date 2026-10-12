@@ -215,6 +215,9 @@ background: #FDF2F3;
                 <i class="fa-solid fa-camera" style="font-size: 1.3rem;"></i> 
                 <span>Scan Projector QR Code</span>
             </button>
+            <button type="button" id="btn-enter-pin" class="btn" style="background:#C59B27; color:#000; font-weight:800; margin-top:8px;">
+    <i class="fa-solid fa-keyboard"></i> <span>Enter 6-Digit PIN</span>
+</button>
             <div id="qr-reader" class="d-none"></div>
             
             <div id="camera-tools" class="camera-tools d-none">
@@ -522,6 +525,75 @@ if (decodedText.startsWith("{")) {
             },
             () => {}
         );
+        // تسجيل الحضور بكتابة كود الـ 6 أرقام
+document.getElementById("btn-enter-pin")?.addEventListener("click", async () => {
+    const studentIdVal = inputId.value.trim() || await showCustomPrompt("Student ID", "Please enter your Academic Student ID:", "");
+    if (!studentIdVal) return;
+    localStorage.setItem("muc_saved_student_id", studentIdVal);
+    inputId.value = studentIdVal;
+
+    const enteredPin = await showCustomPrompt("Lecture PIN Code", "Enter the 6-digit code shown on the screen:", "");
+    if (!enteredPin || enteredPin.length !== 6) {
+        await showCustomAlert("Invalid PIN", "Please enter a valid 6-digit code.");
+        return;
+    }
+
+    try {
+        const btnPin = document.getElementById("btn-enter-pin");
+        btnPin.disabled = true;
+        btnPin.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Verifying Code...`;
+
+        // إذا كان أونلاين: البحث عن الجلسة النشطة بنفس الكود
+        if (navigator.onLine) {
+            const { db } = await import("./firebase.js");
+            const { collection, query, where, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+            
+            const q = query(collection(db, "attendance_sessions"), where("status", "==", "active"), where("activePinCode", "==", parseInt(enteredPin, 10)));
+            const snap = await getDocs(q);
+
+            if (snap.empty) {
+                throw new Error("Expired or incorrect PIN code. Please check the screen.");
+            }
+
+            const targetSession = snap.docs[0];
+            const sData = targetSession.data();
+            activeSessionId = targetSession.id;
+            activeToken = sData.currentToken?.token || "";
+
+            // تسجيل الحضور فوراً
+            const res = await recordStudentAttendance(activeSessionId, activeToken, studentIdVal, deviceId);
+            showResult(true, "Attendance Confirmed!", "Checked in successfully via PIN code.");
+            document.getElementById("rcpt-name").innerText = res.studentName;
+            document.getElementById("rcpt-id").innerText = res.studentId;
+            document.getElementById("rcpt-course").innerText = res.courseName;
+            document.getElementById("rcpt-date").innerText = res.date;
+            document.getElementById("rcpt-time").innerText = res.time;
+            document.getElementById("receipt-box").classList.remove("d-none");
+        } else {
+            // إذا كان أوفلاين
+            await queueOfflineAttendance({
+                studentId: studentIdVal,
+                studentName: localStorage.getItem(`muc_student_name_${studentIdVal}`) || "Student",
+                sessionId: `off_pin_${Date.now()}`,
+                courseId: "MUC_COURSE",
+                courseName: "Offline Lecture",
+                lectureNumber: 1,
+                timeSlot: Math.floor(Date.now() / 15000),
+                hash: enteredPin
+            });
+            refreshPendingBanner();
+            showResult(true, "Saved Offline!", "PIN recorded locally. It will upload once reconnected.");
+        }
+    } catch (err) {
+        showResult(false, "Check-in Failed", err.message);
+    } finally {
+        const btnPin = document.getElementById("btn-enter-pin");
+        if (btnPin) {
+            btnPin.disabled = false;
+            btnPin.innerHTML = `<i class="fa-solid fa-keyboard"></i> <span>Enter 6-Digit PIN</span>`;
+        }
+    }
+});
 // ==========================================
         // 🔍 محرك الزوم الذكي (10x + Pinch to Zoom بأصبعين)
         // ==========================================
