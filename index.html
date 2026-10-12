@@ -835,6 +835,8 @@ showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been
 }
 });
         function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
+                scannerStep.classList.add("d-none");   // ← السطر الجديد
+
             inputStep.classList.add("d-none");
             resultStep.classList.remove("d-none");
             document.getElementById("btn-retry").classList.toggle("d-none", !canRetry);
@@ -871,8 +873,12 @@ document.getElementById("btn-retry").addEventListener("click", async () => {
         startCameraScanner();
     } else {
         // لو الخطأ ليس انتهاء رمز (مثل رقم جامعي خطأ)، يرجع لخانة تعديل الرقم
-        inputStep.classList.remove("d-none");
-        inputId.focus();
+if (offlinePayload || activeSessionId) {
+    inputStep.classList.remove("d-none");
+    inputId.focus();
+} else {
+    scannerStep.classList.remove("d-none");
+}
     }
 });
 
