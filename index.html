@@ -525,75 +525,114 @@ if (decodedText.startsWith("{")) {
             },
             () => {}
         );
-        // تسجيل الحضور بكتابة كود الـ 6 أرقام
-document.getElementById("btn-enter-pin")?.addEventListener("click", async () => {
-    const studentIdVal = inputId.value.trim() || await showCustomPrompt("Student ID", "Please enter your Academic Student ID:", "");
-    if (!studentIdVal) return;
-    localStorage.setItem("muc_saved_student_id", studentIdVal);
-    inputId.value = studentIdVal;
+// ==========================================
+    // 🔢 معالج تسجيل الحضور المباشر بكود الـ 6 أرقام
+    // ==========================================
+    document.getElementById("btn-enter-otp")?.addEventListener("click", async () => {
+        // 1. جلب أو طلب الرقم الجامعي للطالب
+        let studentIdVal = inputId.value.trim() || localStorage.getItem("muc_saved_student_id");
+        if (!studentIdVal) {
+            studentIdVal = await showCustomPrompt("Student ID", "Please enter your Academic Student ID (الرقم الجامعي):", "");
+            if (!studentIdVal || !studentIdVal.trim()) return;
+            studentIdVal = studentIdVal.trim();
+            localStorage.setItem("muc_saved_student_id", studentIdVal);
+            inputId.value = studentIdVal;
+        }
 
-    const enteredPin = await showCustomPrompt("Lecture PIN Code", "Enter the 6-digit code shown on the screen:", "");
-    if (!enteredPin || enteredPin.length !== 6) {
-        await showCustomAlert("Invalid PIN", "Please enter a valid 6-digit code.");
-        return;
-    }
+        // 2. طلب كود الـ 6 أرقام من الطالب
+        const enteredPin = await showCustomPrompt("Lecture PIN Code", "Enter the 6-digit code shown on the projector screen:", "");
+        if (!enteredPin || enteredPin.trim().length !== 6 || isNaN(parseInt(enteredPin.trim(), 10))) {
+            await showCustomAlert("Invalid PIN", "Please enter a valid 6-digit code.");
+            return;
+        }
 
-    try {
-        const btnPin = document.getElementById("btn-enter-pin");
-        btnPin.disabled = true;
-        btnPin.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Verifying Code...`;
+        const cleanPin = parseInt(enteredPin.trim(), 10);
+        const btnOtp = document.getElementById("btn-enter-otp");
 
-        // إذا كان أونلاين: البحث عن الجلسة النشطة بنفس الكود
-        if (navigator.onLine) {
-            const { db } = await import("./firebase.js");
-            const { collection, query, where, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
-            
-            const q = query(collection(db, "attendance_sessions"), where("status", "==", "active"), where("activePinCode", "==", parseInt(enteredPin, 10)));
-            const snap = await getDocs(q);
-
-            if (snap.empty) {
-                throw new Error("Expired or incorrect PIN code. Please check the screen.");
+        try {
+            if (btnOtp) {
+                btnOtp.disabled = true;
+                btnOtp.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> <span>Verifying Code...</span>`;
             }
 
-            const targetSession = snap.docs[0];
-            const sData = targetSession.data();
-            activeSessionId = targetSession.id;
-            activeToken = sData.currentToken?.token || "";
+            // 3. التحقق أونلاين: البحث عن المحاضرة النشطة بالكود وتسجيل الحضور
+            if (navigator.onLine) {
+                const { db } = await import("./firebase.js");
+                const { collection, query, where, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+                
+                const q = query(
+                    collection(db, "attendance_sessions"), 
+                    where("status", "==", "active"), 
+                    where("activePinCode", "==", cleanPin)
+                );
+                const snap = await getDocs(q);
 
-            // تسجيل الحضور فوراً
-            const res = await recordStudentAttendance(activeSessionId, activeToken, studentIdVal, deviceId);
-            showResult(true, "Attendance Confirmed!", "Checked in successfully via PIN code.");
-            document.getElementById("rcpt-name").innerText = res.studentName;
-            document.getElementById("rcpt-id").innerText = res.studentId;
-            document.getElementById("rcpt-course").innerText = res.courseName;
-            document.getElementById("rcpt-date").innerText = res.date;
-            document.getElementById("rcpt-time").innerText = res.time;
-            document.getElementById("receipt-box").classList.remove("d-none");
-        } else {
-            // إذا كان أوفلاين
-            await queueOfflineAttendance({
-                studentId: studentIdVal,
-                studentName: localStorage.getItem(`muc_student_name_${studentIdVal}`) || "Student",
-                sessionId: `off_pin_${Date.now()}`,
-                courseId: "MUC_COURSE",
-                courseName: "Offline Lecture",
-                lectureNumber: 1,
-                timeSlot: Math.floor(Date.now() / 15000),
-                hash: enteredPin
-            });
-            refreshPendingBanner();
-            showResult(true, "Saved Offline!", "PIN recorded locally. It will upload once reconnected.");
+                if (snap.empty) {
+                    throw new Error("Expired or incorrect PIN code. Please check the screen.");
+                }
+
+                const targetSession = snap.docs[0];
+                const sData = targetSession.data();
+                activeSessionId = targetSession.id;
+                activeToken = sData.currentToken?.token || "";
+
+                // تسجيل الحضور فوراً في السيرفر
+                let devId = localStorage.getItem("muc_device_id") || ("dev_" + Math.random().toString(36).substring(2));
+                localStorage.setItem("muc_device_id", devId);
+
+                const res = await recordStudentAttendance(activeSessionId, activeToken, studentIdVal, devId);
+
+                if (html5QrScanner) {
+                    try { await html5QrScanner.stop(); } catch(e) {}
+                }
+                scannerStep.classList.add("d-none");
+                inputStep.classList.add("d-none");
+
+                showResult(true, "Attendance Confirmed!", "Checked in successfully via PIN code.");
+                document.getElementById("rcpt-name").innerText = res.studentName;
+                document.getElementById("rcpt-id").innerText = res.studentId;
+                document.getElementById("rcpt-course").innerText = res.courseName;
+                document.getElementById("rcpt-date").innerText = res.date;
+                document.getElementById("rcpt-time").innerText = res.time;
+                document.getElementById("rcpt-status").innerText = res.status === "Present" ? "Present" : "Late";
+                document.getElementById("receipt-box").classList.remove("d-none");
+
+            } else {
+                // 4. التحقق أوفلاين: حفظ الحضور على الموبايل
+                let stdName = localStorage.getItem(`muc_student_name_${studentIdVal}`) || "Student";
+                await queueOfflineAttendance({
+                    studentId: studentIdVal,
+                    studentName: stdName,
+                    sessionId: `off_pin_${cleanPin}_${Date.now()}`,
+                    courseId: "MUC_COURSE",
+                    courseName: "Offline Lecture",
+                    lectureNumber: 1,
+                    timeSlot: Math.floor(Date.now() / 15000),
+                    hash: String(cleanPin)
+                });
+
+                scannerStep.classList.add("d-none");
+                inputStep.classList.add("d-none");
+                refreshPendingBanner();
+                showResult(true, "Saved Offline!", "PIN recorded locally. It will upload once reconnected.");
+                document.getElementById("rcpt-name").innerText = stdName;
+                document.getElementById("rcpt-id").innerText = studentIdVal;
+                document.getElementById("rcpt-course").innerText = "Offline Lecture";
+                document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
+                document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
+                document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
+                document.getElementById("receipt-box").classList.remove("d-none");
+            }
+
+        } catch (err) {
+            showResult(false, "Check-in Failed", err.message || "Failed to verify PIN code.");
+        } finally {
+            if (btnOtp) {
+                btnOtp.disabled = false;
+                btnOtp.innerHTML = `<i class="fa-solid fa-keyboard" style="font-size: 1.2rem;"></i> <span>Enter 6-Digit Code</span>`;
+            }
         }
-    } catch (err) {
-        showResult(false, "Check-in Failed", err.message);
-    } finally {
-        const btnPin = document.getElementById("btn-enter-pin");
-        if (btnPin) {
-            btnPin.disabled = false;
-            btnPin.innerHTML = `<i class="fa-solid fa-keyboard"></i> <span>Enter 6-Digit PIN</span>`;
-        }
-    }
-});
+    });
 // ==========================================
         // 🔍 محرك الزوم الذكي (10x + Pinch to Zoom بأصبعين)
         // ==========================================
