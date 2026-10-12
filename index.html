@@ -299,7 +299,7 @@ background: #FDF2F3;
     </div>
     <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
     <script type="module">
-import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount } from "./firebase.js";
+import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch } from "./firebase.js";
         // 🌐 Language Switcher Logic
         let currentLang = "en";
         document.getElementById("btn-lang-toggle")?.addEventListener("click", () => {
@@ -388,6 +388,21 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
                 };
             });
         }
+        // تحويل أكواد الأخطاء لرسائل مفهومة للطالب
+function friendlyError(err) {
+    const m = String(err?.message || err || "");
+    if (m.startsWith("WRONG_LEC_2")) {
+        return "هذه المحاضرة الأولى وأنت مسجل في المحاضرة الثانية. من فضلك تواصل مع الدكتور.\n\nThis is Lecture 1, but you are registered in Lecture 2. Please contact your doctor.";
+    }
+    if (m.startsWith("WRONG_LEC_1")) {
+        return "هذه المحاضرة الثانية وأنت مسجل في المحاضرة الأولى. من فضلك تواصل مع الدكتور.\n\nThis is Lecture 2, but you are registered in Lecture 1. Please contact your doctor.";
+    }
+    if (m.startsWith("NOT_ENROLLED:")) {
+        const parts = m.split(":");
+        return `${parts[1]} غير مقيد في مقرر (${parts.slice(2).join(":")}). تواصل مع الدكتور.\n\nYou are not enrolled in this course. Please contact your doctor.`;
+    }
+    return m;
+}
 
         // استرجاع وتغيير الرقم الجامعي بدون prompt
         const savedStudentId = localStorage.getItem("muc_saved_student_id");
@@ -774,7 +789,14 @@ if (offlinePayload || activeSessionId) {
 }
     }
 });
-
+async function showSyncErrorIfAny() {
+    const modal = document.getElementById("custom-app-modal");
+    if (!modal.classList.contains("d-none")) return;   // في مودال مفتوح
+    const msg = localStorage.getItem("muc_sync_error");
+    if (!msg) return;
+    localStorage.removeItem("muc_sync_error");
+    await showCustomAlert("Attendance Not Registered", msg);
+}
         // ===== بانر الحضور المعلّق + زرار الرفع اليدوي =====
         function refreshPendingBanner() {
             const n = getPendingCount();
@@ -841,6 +863,14 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
     try {
         btnPin.disabled = true;
         btnPin.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Verifying Code...`;
+                // حظر فوري (أونلاين وأوفلاين) حسب أول رقم في الـ PIN
+        const mismatch = checkPinLectureMatch(enteredPin, studentIdVal);
+        if (mismatch === "WRONG_LEC_2") {
+            throw new Error("هذه المحاضرة الأولى وأنت مسجل في المحاضرة الثانية. من فضلك تواصل مع الدكتور.\n\nThis is Lecture 1, but you are registered in Lecture 2. Please contact your doctor.");
+        }
+        if (mismatch === "WRONG_LEC_1") {
+            throw new Error("هذه المحاضرة الثانية وأنت مسجل في المحاضرة الأولى. من فضلك تواصل مع الدكتور.\n\nThis is Lecture 2, but you are registered in Lecture 1. Please contact your doctor.");
+        }
 
         // ---------- أوفلاين: نحفظ الـ PIN وهيتسجل لما النت يرجع ----------
         if (!navigator.onLine) {
@@ -908,8 +938,7 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
     }
 });
 console.log("PIN listener attached ✅");
-        setInterval(refreshPendingBanner, 3000);
-
+setInterval(() => { refreshPendingBanner(); showSyncErrorIfAny(); }, 3000);
         refreshPendingBanner();
         runSync(false);
     </script>

@@ -61,6 +61,14 @@ const PRAXIS_LEC2_STUDENTS = new Set([
   "25120981","25121051","25120850","25120901","25120908","25121042","25221103","25120970","25121012",
   "25221113","25121069","25121018","25121088","25120976"
 ]);
+// فحص فوري: أول رقم في الـ PIN يدل على المحاضرة (1 = محاضرة 1، 2 = محاضرة 2)
+export function checkPinLectureMatch(pin, studentId) {
+    const first = String(pin).charAt(0);
+    const isLec2Std = PRAXIS_LEC2_STUDENTS.has(String(studentId).trim());
+    if (first === "1" && isLec2Std) return "WRONG_LEC_2";
+    if (first === "2" && !isLec2Std) return "WRONG_LEC_1";
+    return null;
+}
 // 1. التسجيل الأونلاين المباشر بحماية وتفادي أخطاء الصلاحيات
 export async function recordStudentAttendance(sessionId, clientToken, studentIdInput, deviceId) {
     const cleanedStudentId = String(studentIdInput).trim();
@@ -259,7 +267,16 @@ function withTimeout(promise, ms = 10000) {
         new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms))
     ]);
 }
-
+function checkLectureMatch(courseId, courseName, studentId) {
+    const key = `${courseId || ""} ${courseName || ""}`.toLowerCase();
+    const isLec1 = key.includes("lec1") || key.includes("l1") || key.includes("محاضرة 1");
+    const isLec2 = key.includes("lec2") || key.includes("l2") || key.includes("محاضرة 2");
+    if (!isLec1 && !isLec2) return null;
+    const isLec2Std = PRAXIS_LEC2_STUDENTS.has(String(studentId).trim());
+    if (isLec1 && isLec2Std) return "WRONG_LEC_2";
+    if (isLec2 && !isLec2Std) return "WRONG_LEC_1";
+    return null;
+}
 function removeFromQueue(item) {
     const key = item.origSessionId || item.sessionId;
     const q = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
@@ -301,15 +318,20 @@ for (const item of queue) {
                 if (item.pin) {
                     item.origSessionId = item.sessionId;   // عشان removeFromQueue يلاقيه
                     const ps = await withTimeout(
-                        getDocs(query(collection(db, "attendance_sessions"), where("activePinCode", "==", Number(item.pin)))),
+                        getDocs(query(collection(db, "attendance_sessions"), where("pinHistory", "array-contains", Number(item.pin)))),
                         8000
                     );
-                    if (ps.empty) {
-                        // الكود مش مطابق لأي جلسة دلوقتي: يفضل في الطابور، ويتشال بعد 48 ساعة
+                    // نفس يوم التسجيل، عشان الكود مايتطابقش مع جلسة قديمة بالصدفة
+                    const matches = ps.docs.filter(d => {
+                        const sd0 = d.data().startedAtDate;
+                        return !sd0 || !item.startedAtDate || sd0 === item.startedAtDate;
+                    });
+                    if (matches.length === 0) {
+                        // يفضل في الطابور، ويتشال بعد 48 ساعة
                         if (Date.now() - (item.scannedAt || 0) > 48 * 3600 * 1000) removeFromQueue(item);
                         continue;
                     }
-                    const sd = ps.docs[0];
+                    const sd = matches[0];
                     item.sessionId = sd.id;
                     item.courseId = sd.data().courseId || "";
                     item.courseName = sd.data().courseName || item.courseName;
@@ -328,6 +350,15 @@ for (const item of queue) {
 
                 if (!sessionExists) {
                     removeFromQueue(item); // حذف السجل فوراً من هاتف الطالب لأن الدكتور حذف المحاضرة
+                    continue;
+                }
+                                // 1.5) عزل المحاضرة 1 عن 2 (المحاضرة بتتعرف وقت الرفع في سجلات الـ PIN الأوفلاين)
+                const mismatch = checkLectureMatch(item.courseId, item.courseName, item.studentId);
+                if (mismatch) {
+                    localStorage.setItem("muc_sync_error", mismatch === "WRONG_LEC_2"
+                        ? `⚠️ حضور الرقم (${item.studentId}) لم يُسجَّل: هذه المحاضرة الأولى وأنت مسجل في المحاضرة الثانية. تواصل مع الدكتور.\n\nNot registered: this is Lecture 1 but you belong to Lecture 2. Please contact your doctor.`
+                        : `⚠️ حضور الرقم (${item.studentId}) لم يُسجَّل: هذه المحاضرة الثانية وأنت مسجل في المحاضرة الأولى. تواصل مع الدكتور.\n\nNot registered: this is Lecture 2 but you belong to Lecture 1. Please contact your doctor.`);
+                    removeFromQueue(item);
                     continue;
                 }
 // 2) التحقق من وجود وقيد الطالب في السيرفر
