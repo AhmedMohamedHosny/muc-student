@@ -525,94 +525,7 @@ if (decodedText.startsWith("{")) {
             },
             () => {}
         );
-// ===== تسجيل الحضور بكود الـ 6 أرقام (أونلاين + أوفلاين) =====
-document.getElementById("btn-enter-pin")?.addEventListener("click", async () => {
-    let studentIdVal = inputId.value.trim() || localStorage.getItem("muc_saved_student_id") || "";
-    if (!studentIdVal) {
-        studentIdVal = await showCustomPrompt("Student ID", "Please enter your Academic Student ID:", "");
-        if (!studentIdVal) return;
-    }
-    localStorage.setItem("muc_saved_student_id", studentIdVal);
-    inputId.value = studentIdVal;
 
-    const enteredPin = await showCustomPrompt("Lecture PIN Code", "Enter the 6-digit code shown on the screen:", "");
-    if (!enteredPin) return;
-    if (!/^\d{6}$/.test(enteredPin)) {
-        await showCustomAlert("Invalid PIN", "Please enter a valid 6-digit code.");
-        return;
-    }
-
-    const btnPin = document.getElementById("btn-enter-pin");
-    try {
-        btnPin.disabled = true;
-        btnPin.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Verifying Code...`;
-
-        // ---------- أوفلاين: نحفظ الـ PIN وهيتسجل لما النت يرجع ----------
-        if (!navigator.onLine) {
-            const stdName = localStorage.getItem(`muc_student_name_${studentIdVal}`) || "Student";
-            await queueOfflineAttendance({
-                studentId: studentIdVal,
-                studentName: stdName,
-                sessionId: `pin_${enteredPin}`,   // معرّف مؤقت، الـ sync هيحوّله لجلسة حقيقية
-                courseId: "",
-                courseName: "PIN Lecture",
-                lectureNumber: 1,
-                timeSlot: 0,
-                hash: "",
-                pin: enteredPin
-            });
-            refreshPendingBanner();
-            showResult(true, "Saved Offline!", "PIN saved on your phone. It will be registered automatically once you're online.");
-            document.getElementById("rcpt-name").innerText = stdName;
-            document.getElementById("rcpt-id").innerText = studentIdVal;
-            document.getElementById("rcpt-course").innerText = "Will be detected on sync";
-            document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
-            document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
-            document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
-            document.getElementById("receipt-box").classList.remove("d-none");
-            return;
-        }
-
-        // ---------- أونلاين ----------
-        const { db, auth } = await import("./firebase.js");
-        const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
-        const { collection, query, where, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
-
-        if (!auth.currentUser) await signInAnonymously(auth);
-
-        const q = query(
-            collection(db, "attendance_sessions"),
-            where("status", "==", "active"),
-            where("activePinCode", "==", parseInt(enteredPin, 10))
-        );
-        const snap = await getDocs(q);
-        if (snap.empty) throw new Error("Expired or incorrect PIN code. Please check the screen.");
-
-        const targetSession = snap.docs[0];
-        const token = targetSession.data().currentToken?.token || "";
-
-        const res = await recordStudentAttendance(targetSession.id, token, studentIdVal, deviceId);
-
-        showResult(true, "Attendance Confirmed!", "Checked in successfully via PIN code.");
-        document.getElementById("rcpt-name").innerText = res.studentName;
-        document.getElementById("rcpt-id").innerText = res.studentId;
-        document.getElementById("rcpt-course").innerText = res.courseName;
-        document.getElementById("rcpt-date").innerText = res.date;
-        document.getElementById("rcpt-time").innerText = res.time;
-        document.getElementById("rcpt-status").innerText = res.status === "Present" ? "Present" : "Late";
-        document.getElementById("receipt-box").classList.remove("d-none");
-    } catch (err) {
-        activeSessionId = null;
-        activeToken = null;
-        offlinePayload = null;
-        isExpiredQrError = false;
-        showResult(false, "Check-in Failed", err.message || "Failed to verify PIN code.");
-    } finally {
-        btnPin.disabled = false;
-        btnPin.innerHTML = `<i class="fa-solid fa-keyboard"></i> <span>Enter 6-Digit PIN</span>`;
-    }
-});
-console.log("PIN listener attached ✅");
 // ==========================================
         // 🔍 محرك الزوم الذكي (10x + Pinch to Zoom بأصبعين)
         // ==========================================
@@ -907,6 +820,94 @@ if (manual) {
         document.addEventListener("visibilitychange", () => {
             if (document.visibilityState === "visible") runSync(false);
         });
+        // ===== تسجيل الحضور بكود الـ 6 أرقام (أونلاين + أوفلاين) =====
+document.getElementById("btn-enter-pin")?.addEventListener("click", async () => {
+    let studentIdVal = inputId.value.trim() || localStorage.getItem("muc_saved_student_id") || "";
+    if (!studentIdVal) {
+        studentIdVal = await showCustomPrompt("Student ID", "Please enter your Academic Student ID:", "");
+        if (!studentIdVal) return;
+    }
+    localStorage.setItem("muc_saved_student_id", studentIdVal);
+    inputId.value = studentIdVal;
+
+    const enteredPin = await showCustomPrompt("Lecture PIN Code", "Enter the 6-digit code shown on the screen:", "");
+    if (!enteredPin) return;
+    if (!/^\d{6}$/.test(enteredPin)) {
+        await showCustomAlert("Invalid PIN", "Please enter a valid 6-digit code.");
+        return;
+    }
+
+    const btnPin = document.getElementById("btn-enter-pin");
+    try {
+        btnPin.disabled = true;
+        btnPin.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Verifying Code...`;
+
+        // ---------- أوفلاين: نحفظ الـ PIN وهيتسجل لما النت يرجع ----------
+        if (!navigator.onLine) {
+            const stdName = localStorage.getItem(`muc_student_name_${studentIdVal}`) || "Student";
+            await queueOfflineAttendance({
+                studentId: studentIdVal,
+                studentName: stdName,
+                sessionId: `pin_${enteredPin}`,   // معرّف مؤقت، الـ sync هيحوّله لجلسة حقيقية
+                courseId: "",
+                courseName: "PIN Lecture",
+                lectureNumber: 1,
+                timeSlot: 0,
+                hash: "",
+                pin: enteredPin
+            });
+            refreshPendingBanner();
+            showResult(true, "Saved Offline!", "PIN saved on your phone. It will be registered automatically once you're online.");
+            document.getElementById("rcpt-name").innerText = stdName;
+            document.getElementById("rcpt-id").innerText = studentIdVal;
+            document.getElementById("rcpt-course").innerText = "Will be detected on sync";
+            document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
+            document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
+            document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
+            document.getElementById("receipt-box").classList.remove("d-none");
+            return;
+        }
+
+        // ---------- أونلاين ----------
+        const { db, auth } = await import("./firebase.js");
+        const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
+        const { collection, query, where, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+
+        if (!auth.currentUser) await signInAnonymously(auth);
+
+        const q = query(
+            collection(db, "attendance_sessions"),
+            where("status", "==", "active"),
+            where("activePinCode", "==", parseInt(enteredPin, 10))
+        );
+        const snap = await getDocs(q);
+        if (snap.empty) throw new Error("Expired or incorrect PIN code. Please check the screen.");
+
+        const targetSession = snap.docs[0];
+        const token = targetSession.data().currentToken?.token || "";
+
+        const res = await recordStudentAttendance(targetSession.id, token, studentIdVal, deviceId);
+
+        showResult(true, "Attendance Confirmed!", "Checked in successfully via PIN code.");
+        document.getElementById("rcpt-name").innerText = res.studentName;
+        document.getElementById("rcpt-id").innerText = res.studentId;
+        document.getElementById("rcpt-course").innerText = res.courseName;
+        document.getElementById("rcpt-date").innerText = res.date;
+        document.getElementById("rcpt-time").innerText = res.time;
+        document.getElementById("rcpt-status").innerText = res.status === "Present" ? "Present" : "Late";
+        document.getElementById("receipt-box").classList.remove("d-none");
+    } catch (err) {
+        activeSessionId = null;
+        activeToken = null;
+        offlinePayload = null;
+        isExpiredQrError = false;
+        showResult(false, "Check-in Failed", err.message || "Failed to verify PIN code.");
+    } finally {
+        btnPin.disabled = false;
+        btnPin.innerHTML = `<i class="fa-solid fa-keyboard"></i> <span>Enter 6-Digit PIN</span>`;
+    }
+});
+console.log("PIN listener attached ✅");
         setInterval(refreshPendingBanner, 3000);
 
         refreshPendingBanner();
