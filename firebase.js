@@ -35,28 +35,7 @@ function getLocalDeviceId() {
         return "dev" + Date.now();
     }
 }
-// قائمة الأرقام الجامعية لطلاب المحاضرة الثانية (167 طالباً) مدمجة لمنع فشل الاستدعاء
-const PRAXIS_LEC2_STUDENTS = new Set([
-  "24120490","25120899","25120933","25221096","25221102","25120837","25120836","26121713","25120874",
-  "26121631","26121641","26121677","26121654","26121694","26121676","26121674","26121657","26121667",
-  "26121647","26121648","26121650","26121642","26121690","26121660","25120979","26121664","26121697",
-  "26121696","26121714","26121673","26121679","26121649","26121672","26121715","26121688","26121669",
-  "26121652","26121661","26121629","25120995","25120958","25120955","24120548","25221092","26121126",
-  "26121195","26121123","26121271","26121212","26121283","26121216","26121296","26121310","26121190",
-  "26121221","26121191","26121260","26121246","26121132","26121249","26121334","26121227","26121181",
-  "26121306","26121311","26121223","26121174","26121171","26121355","26121304","26121170","26121188",
-  "26121233","25121117","25221097","25121083","25120936","25120978","25120872","25120845","26121444",
-  "26121135","26121700","25120940","26121701","26121726","26121681","26121702","26121735","26121695",
-  "26121706","26121705","26121656","26121717","26121689","26121710","26121658","26121687","26121703",
-  "26121698","26121734","25120862","26121711","26121699","26121708","25221106","26121415","26121525",
-  "26121645","26121428","26121563","26121482","26121562","26121400","26121655","25120818","26121518",
-  "26121507","26121553","26121455","26121583","26121513","26121554","26121363","26121608","26121486",
-  "26121377","26121558","26121470","26121639","26121460","26121497","26121646","26121465","26121368",
-  "25221093","25120807","25120863","25120857","25121045","25120969","25121076","25120932","25121041",
-  "25120813","25120854","25120817","25121010","25121047","25120953","25120923","25120834","25120913",
-  "25120981","25121051","25120850","25120901","25120908","25121042","25221103","25120970","25121012",
-  "25221113","25121069","25121018","25121088","25120976"
-]);
+
 // 1. التسجيل الأونلاين المباشر بحماية وتفادي أخطاء الصلاحيات
 export async function recordStudentAttendance(sessionId, clientToken, studentIdInput, deviceId) {
     const cleanedStudentId = String(studentIdInput).trim();
@@ -70,28 +49,14 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
     const recordRef = doc(db, "attendance_records", recordId);
     const deviceRef = doc(db, "attendance_devices", `${sessionId}_${safeDeviceId}`);
 
-const sessionDoc = await getDoc(sessionRef);
+    // 1. فحص الجلسة والرمز
+    const sessionDoc = await getDoc(sessionRef);
     if (!sessionDoc.exists()) {
         throw new Error("Attendance session not found or already closed.");
     }
     const sessionData = sessionDoc.data();
     if (sessionData.status !== "active") {
         throw new Error("Attendance session is currently closed by the instructor.");
-    }
-
-    // 🔒 فحص أمني حاسم: منع تسجيل طالب المحاضرة الثانية في المحاضرة الأولى والعكس
-    const sessionCourseKey = `${sessionData.courseId || ""} ${sessionData.courseName || ""}`.toLowerCase();
-    const isLec1Session = sessionCourseKey.includes("lec1") || sessionCourseKey.includes("l1") || sessionCourseKey.includes("محاضرة 1");
-    const isLec2Session = sessionCourseKey.includes("lec2") || sessionCourseKey.includes("l2") || sessionCourseKey.includes("محاضرة 2");
-
-    if (isLec1Session || isLec2Session) {
-        const isLec2Std = PRAXIS_LEC2_STUDENTS.has(cleanedStudentId);
-        if (isLec1Session && isLec2Std) {
-            throw new Error("WRONG_LEC_2");
-        }
-        if (isLec2Session && !isLec2Std) {
-            throw new Error("WRONG_LEC_1");
-        }
     }
 
     const t = sessionData.currentToken || {};
@@ -105,23 +70,15 @@ const sessionDoc = await getDoc(sessionRef);
         throw new Error(`Attendance already recorded for Student ID (${cleanedStudentId})!`);
     }
 
-// 3. فحص أكاديمي شامل: التحقق من وجود الطالب وقيده في المقرر
-    const studentDoc = await getDoc(doc(db, "students", cleanedStudentId));
-    if (!studentDoc.exists()) {
-        throw new Error(`⚠️ الرقم الجامعي (${cleanedStudentId}) غير مسجل بقاعدة بيانات الجامعة!`);
-    }
-
-    const studentData = studentDoc.data();
-    const studentRealName = studentData.name || cleanedStudentId;
-
-    // فحص القيد في المادة (ديناميكي لجميع المقررات والدكاترة)
-    const enrolledList = studentData.enrolledCourses || [];
-    const currentCourseId = sessionData.courseId || "";
-    const isEnrolled = enrolledList.includes(currentCourseId) || 
-                       (studentData.sections && (studentData.sections[currentCourseId] || Object.keys(studentData.sections).some(k => k.toLowerCase() === currentCourseId.toLowerCase())));
-
-    if (!isEnrolled) {
-        throw new Error(`NOT_ENROLLED:${studentRealName}:${sessionData.courseName || "هذا المقرر"}`);
+    // 3. جلب اسم الطالب بأمان
+    let studentRealName = cleanedStudentId;
+    try {
+        const studentDoc = await getDoc(doc(db, "students", cleanedStudentId));
+        if (studentDoc.exists()) {
+            studentRealName = studentDoc.data().name || cleanedStudentId;
+        }
+    } catch (e) {
+        console.warn("Student name fetch skipped:", e.message);
     }
 
     // 4. فحص بصمة الهاتف (منع تسجيل الزميل)
@@ -182,37 +139,22 @@ const sessionDoc = await getDoc(sessionRef);
     };
 }
 
+// 2. تسجيل الحضور محلياً أوفلاين مع حفظ رقم المحاضرة وتاريخ اليوم (معالجة أمنية فورية)
 export async function queueOfflineAttendance({ studentId, studentName, sessionId, courseId, courseName, lectureNumber, timeSlot, hash, sessionStart, sessionType, group, hostRole, doctorId }) {
-    const cleanedStudentId = String(studentId).trim();
     if (!sessionId) {
         throw new Error("⚠️ رمز الحضور غير صالح، يرجى مسح الباركود مرة أخرى.");
-    }
-
-    // 🔒 فحص عزل محاضرة 1 عن محاضرة 2 في الأوفلاين
-    const sessionCourseKey = `${courseId || ""} ${courseName || ""}`.toLowerCase();
-    const isLec1Session = sessionCourseKey.includes("lec1") || sessionCourseKey.includes("l1") || sessionCourseKey.includes("محاضرة 1");
-    const isLec2Session = sessionCourseKey.includes("lec2") || sessionCourseKey.includes("l2") || sessionCourseKey.includes("محاضرة 2");
-
-    if (isLec1Session || isLec2Session) {
-        const isLec2Std = PRAXIS_LEC2_STUDENTS.has(cleanedStudentId);
-        if (isLec1Session && isLec2Std) {
-            throw new Error("⚠️ غير مصرح: أنت مسجل في (محاضرة 2) ولا يمكنك تسجيل الحضور في محاضرة 1!");
-        }
-        if (isLec2Session && !isLec2Std) {
-            throw new Error("⚠️ غير مصرح: أنت مسجل في (محاضرة 1) ولا يمكنك تسجيل الحضور في محاضرة 2!");
-        }
     }
 
     const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
     const deviceId = getLocalDeviceId();
 
-    // 🔒 منع تكرار تسجيل نفس الطالب لنفس المحاضرة
-    const studentExists = queue.some(q => q.sessionId === sessionId && q.studentId === cleanedStudentId);
+    // 🔒 1. حماية أمنية: منع تكرار تسجيل نفس الطالب في نفس الجلسة
+    const studentExists = queue.some(q => q.sessionId === sessionId && q.studentId === studentId);
     if (studentExists) {
         throw new Error("تم تسجيل حضورك لهذه المحاضرة بالفعل ومحفوظ على هاتفك!");
     }
 
-    // 🔒 منع تسجيل طالبين مختلفين من نفس الهاتف
+    // 🔒 2. حماية أمنية: قفل بصمة الهاتف (منع تسجيل الزميل من نفس الهاتف أوفلاين)
     const deviceExists = queue.some(q => q.sessionId === sessionId && q.deviceId === deviceId);
     if (deviceExists) {
         throw new Error("⚠️ حماية أمنية: تم استخدام هذا الهاتف لتسجيل طالب آخر في هذه المحاضرة!");
@@ -289,43 +231,16 @@ export async function syncPendingAttendance() {
         if (!connected && !auth.currentUser) {
             throw new Error("Network connection pending");
         }
-for (const item of queue) {
+
+        for (const item of queue) {
             try {
-                // 1) التحقق أولاً: هل المحاضرة لا تزال موجودة في السيرفر أم حذفها الدكتور؟
-                let sessionExists = true;
+                let realStudentName = item.studentName && item.studentName !== "طالب" ? item.studentName : "طالب";
                 try {
-                    const sessSnap = await withTimeout(getDoc(doc(db, "attendance_sessions", item.sessionId)), 5000);
-                    if (!sessSnap.exists() || sessSnap.data()?.status === "deleted") {
-                        sessionExists = false;
-                    }
-                } catch (err) {
-                    // إذا كان الخطأ رفض صلاحية، فهذا يعني أن الجلسة حُذفت
-                    if (err.message && err.message.includes("permission-denied")) sessionExists = false;
-                }
+                    const stdSnap = await withTimeout(getDoc(doc(db, "students", item.studentId)), 6000);
+                    if (stdSnap.exists()) realStudentName = stdSnap.data().name || realStudentName;
+                } catch (e) { console.warn(e); }
 
-                if (!sessionExists) {
-                    removeFromQueue(item); // حذف السجل فوراً من هاتف الطالب لأن الدكتور حذف المحاضرة
-                    continue;
-                }
-// 2) التحقق من وجود وقيد الطالب في السيرفر
-                let realStudentName = item.studentName || "طالب";
-                const stdSnap = await withTimeout(getDoc(doc(db, "students", item.studentId)), 6000);
-                if (stdSnap.exists()) {
-                    const sData = stdSnap.data();
-                    realStudentName = sData.name || realStudentName;
-                    localStorage.setItem(`muc_student_name_${item.studentId}`, realStudentName);
-                    const enrolled = sData.enrolledCourses || [];
-                    if (item.courseId && !enrolled.includes(item.courseId)) {
-                        localStorage.setItem("muc_sync_error", `⚠️ الرقم (${item.studentId}) غير مقيد في هذا المقرر!`);
-                        removeFromQueue(item);
-                        continue;
-                    }
-                } else {
-                    localStorage.setItem("muc_sync_error", `⚠️ الرقم الجامعي (${item.studentId}) غير مسجل بعد!`);
-                    removeFromQueue(item);
-                    continue;
-                }
-
+                const startMs = item.sessionStart || item.scannedAt || Date.now();
                 const recordId = `${item.sessionId}_${item.studentId}`;
                 const recordData = {
                     recordId,
@@ -343,8 +258,18 @@ for (const item of queue) {
                 if (item.timeSlot) recordData.timeSlot = item.timeSlot;
                 if (item.hash) recordData.hash = item.hash;
 
+// 1) تسجيل حضور الطالب في مستنده المنفصل فقط
                 await withTimeout(setDoc(doc(db, "attendance_records", recordId), recordData, { merge: true }));
 
+                // 2) توثيق بصمة الجهاز لمنع التكرار
+                try {
+                    await withTimeout(setDoc(doc(db, "attendance_devices", `${item.sessionId}_${item.deviceId}`), {
+                        sessionId: item.sessionId,
+                        deviceId: item.deviceId,
+                        studentId: item.studentId,
+                        createdAt: serverTimestamp()
+                    }, { merge: true }));
+                } catch (e) { console.warn(e.message); }
                 try {
                     await withTimeout(setDoc(doc(db, "attendance_devices", `${item.sessionId}_${item.deviceId}`), {
                         sessionId: item.sessionId,
@@ -354,13 +279,9 @@ for (const item of queue) {
                     }, { merge: true }));
                 } catch (e) { console.warn(e.message); }
 
-                removeFromQueue(item);
+                removeFromQueue(item); // يتشال من الطابور فور نجاحه
                 uploaded++;
             } catch (err) {
-                // إذا رفض السيرفر الحفظ لأن المحاضرة ملغاة، احذف السجل المعلق
-                if (err.message && (err.message.includes("permission-denied") || err.message.includes("not found"))) {
-                    removeFromQueue(item);
-                }
                 console.error("فشل رفع سجل الطالب:", item.studentId, err);
             }
         }
