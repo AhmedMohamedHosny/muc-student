@@ -203,10 +203,12 @@ background: #FDF2F3;
                 <i class="fa-solid fa-clock"></i>
                 You have <span id="pending-count">0</span> offline attendance record(s) pending sync
             </div>
-            <button type="button" id="btn-sync-now" class="btn" style="background:#C59B27; color:#000; padding:0.7rem; font-size:0.95rem;">
-                <i class="fa-solid fa-cloud-arrow-up"></i>
-                <span id="btn-sync-text">Sync Attendance Now</span>
-            </button>
+<div style="display:flex; gap:8px;">
+                <button type="button" id="btn-sync-now" class="btn" style="width:100%; background:#C59B27; color:#000; padding:0.75rem; font-size:0.95rem; font-weight:800;">
+                    <i class="fa-solid fa-cloud-arrow-up"></i>
+                    <span id="btn-sync-text">Sync Attendance Now</span>
+                </button>
+            </div>
             <p id="sync-feedback" style="font-size:0.78rem; margin-top:6px; font-weight:700;"></p>
         </div>
 <!-- زرار فتح الكاميرا المباشر لضمان أمان المتصفح -->
@@ -217,7 +219,7 @@ background: #FDF2F3;
             </button>
             <div id="qr-reader" class="d-none"></div>
             
-            <div id="camera-tools" class="camera-tools d-none">
+<div id="camera-tools" class="camera-tools d-none">
                 <div class="zoom-box">
                     <i class="fa-solid fa-magnifying-glass-minus"></i>
                     <input type="range" id="zoom-range" min="1" max="10" step="0.1" value="1">
@@ -226,6 +228,9 @@ background: #FDF2F3;
                 </div>
                 <button type="button" id="btn-torch" class="btn-torch d-none">
                     <i class="fa-solid fa-bolt"></i> <span>Torch</span>
+                </button>
+                <button type="button" id="btn-fullscreen-cam" class="btn-torch" style="background:#C59B27; color:#000; font-weight:800;">
+                    <i class="fa-solid fa-expand"></i> <span></span>
                 </button>
             </div>
             <p style="font-size: 0.78rem; color: #94A3B8; margin-top: 0.5rem;">
@@ -322,11 +327,11 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance,
         let activeToken = urlParams.get("token");
         let offlinePayload = null;
 let isExpiredQrError = false; // متغير لتحديد ما إذا كان الخطأ انتهاء صلاحية الرمز
-        // توليد أو جلب بصمة الهاتف
-        let deviceId = localStorage.getItem("muc_device_fingerprint");
+// توليد أو جلب بصمة الهاتف الموحدة
+        let deviceId = localStorage.getItem("muc_device_id");
         if (!deviceId) {
             deviceId = "dev_" + Math.random().toString(36).substring(2) + "_" + Date.now();
-            localStorage.setItem("muc_device_fingerprint", deviceId);
+            localStorage.setItem("muc_device_id", deviceId);
         }
 
         const scannerStep = document.getElementById("scanner-step");
@@ -419,21 +424,9 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
             }, 300);
         }
 
-// تشغيل الكاميرا مع فحص أمان وضع التطبيق (Standalone PWA Check)
+// تشغيل الكاميرا المباشرة داخل الصفحة
         let html5QrScanner = null;
         btnTriggerCam?.addEventListener("click", async () => {
-            const isInstalledApp = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-
-            // إذا كان الطالب فاتح من متصفح عادي ولم يثبت التطبيق على هاتفه
-            if (!isInstalledApp && !window.location.hostname.includes("localhost")) {
-                await showCustomAlert(
-                    "MUC App Required",
-                    "⚠️ للحفاظ على نزاهة الحضور: يجب تثبيت البرنامج على هاتفك أولاً (Install App / إضافة إلى الشاشة الرئيسية) وفتحه كتطبيق مستقل لتسجيل الحضور!",
-                    false
-                );
-                return;
-            }
-
             btnTriggerCam.classList.add("d-none");
             qrBox.classList.remove("d-none");
             startCameraScanner();
@@ -469,39 +462,41 @@ if (decodedText.startsWith("{")) {
                         activeSessionId = offlinePayload.s;
                         detectedCourse.innerText = offlinePayload.cn || "المقرر الدراسي";
                         courseBadge.innerText = `محاضرة أوفلاين: ${offlinePayload.cn || ''}`;
-                    } else if (decodedText.includes("session=")) {
+} else if (decodedText.includes("session=")) {
                         const parsed = new URL(decodedText);
                         const isOffline = parsed.searchParams.get("offline") === "1" || (parsed.searchParams.get("token") || "").startsWith("OFF_");
+                        
+                        activeSessionId = parsed.searchParams.get("session");
+                        activeToken = parsed.searchParams.get("token");
+                        const rawC = parsed.searchParams.get("course") || "";
+                        const rawCn = parsed.searchParams.get("cname") || "";
 
                         if (isOffline) {
-                            // ✅ معالجة فورية لباركود الأوفلاين بدون طلب إنترنت نهائياً
-                            activeSessionId = parsed.searchParams.get("session");
-                            activeToken = parsed.searchParams.get("token");
-                            const cName = parsed.searchParams.get("cname") || parsed.searchParams.get("course") || "جلسة أوفلاين";
-                            
                             offlinePayload = {
                                 s: activeSessionId,
-                                c: parsed.searchParams.get("course") || "MUC_COURSE",
-                                cn: decodeURIComponent(cName),
+                                c: rawC || "MUC_COURSE",
+                                cn: decodeURIComponent(rawCn || "جلسة أوفلاين"),
                                 l: Number(parsed.searchParams.get("lec") || 1),
-                                t: Math.floor(Date.now() / 10000),
+                                t: Math.floor(Date.now() / 15000),
                                 h: activeToken,
                                 ts: Number(parsed.searchParams.get("ts") || Date.now())
                             };
-                            
                             detectedCourse.innerText = offlinePayload.cn;
                             courseBadge.innerText = "حضور أوفلاين (Offline Mode)";
                         } else {
-                        // محاضرة أونلاين عادية
-                        if (!navigator.onLine) {
-                            await showCustomAlert("Online Connection Required", "This live lecture requires an active internet connection to check in. Please connect to mobile data or Wi-Fi.");
-                            return; // خروج نظيف بدون رمي Error يمنع ظهور رسالة Invalid QR المزدوجة
+                            if (!navigator.onLine) {
+                                await showCustomAlert("Online Connection Required", "This live lecture requires an active internet connection to check in. Please connect to mobile data or Wi-Fi.");
+                                return;
+                            }
+                            offlinePayload = {
+                                s: activeSessionId,
+                                c: rawC,
+                                cn: decodeURIComponent(rawCn || "Live Lecture (Cloud)")
+                            };
+                            detectedCourse.innerText = offlinePayload.cn;
+                            courseBadge.innerText = "Live Online Session";
                         }
-                        activeSessionId = parsed.searchParams.get("session");
-                        activeToken = parsed.searchParams.get("token");
-                        detectedCourse.innerText = "Live Lecture (Cloud)";
-                        courseBadge.innerText = "Live Online Session";
-                    }
+                    
                 } else {
                     throw new Error("INVALID_QR");
                 }
@@ -536,7 +531,31 @@ if (decodedText.startsWith("{")) {
                 const zoomRange = document.getElementById("zoom-range");
                 const zoomVal = document.getElementById("zoom-val");
                 const btnTorch = document.getElementById("btn-torch");
+// تشغيل وضع ملء الشاشة للكاميرا في هاتف الطالب
+                const btnFullCam = document.getElementById("btn-fullscreen-cam");
+                let isCamFullScreen = false;
 
+                if (btnFullCam) {
+                    btnFullCam.onclick = () => {
+                        isCamFullScreen = !isCamFullScreen;
+                        const card = document.querySelector(".card");
+                        const tools = document.getElementById("camera-tools");
+
+                        if (isCamFullScreen) {
+                            qrContainer.style.cssText = "position:fixed !important; inset:0 !important; width:100vw !important; height:100vh !important; z-index:999999 !important; border-radius:0 !important; border:none !important; min-height:100vh !important;";
+                            tools.style.cssText = "position:fixed !important; bottom:25px !important; left:15px !important; right:15px !important; z-index:1000000 !important; background:rgba(15,23,42,0.9) !important; backdrop-filter:blur(6px);";
+                            btnFullCam.innerHTML = `<i class="fa-solid fa-compress"></i> <span>Exit</span>`;
+                            btnFullCam.style.background = "#DC2626";
+                            btnFullCam.style.color = "#fff";
+                        } else {
+                            qrContainer.style.cssText = "width:100% !important; min-height:380px !important; border-radius:16px; border:3px solid var(--accent); background:#000; position:relative;";
+                            tools.style.cssText = "display:flex; align-items:center; justify-content:space-between; gap:10px; background:#1E293B; padding:8px 12px; border-radius:10px; margin-top:10px;";
+                            btnFullCam.innerHTML = `<i class="fa-solid fa-expand"></i> <span></span>`;
+                            btnFullCam.style.background = "#C59B27";
+                            btnFullCam.style.color = "#000";
+                        }
+                    };
+                }
                 if (cameraTools) cameraTools.classList.remove("d-none");
 
                 let currentZoom = 1;
@@ -629,7 +648,7 @@ await showCustomAlert("Permission Denied", "Please allow camera access in your b
     }
 }
 
-// 3. تأكيد الحضور (معدل للربط المباشر وتفادي اسم "طالب")
+// 3. تأكيد الحضور العام الديناميكي (لكل المواد والدكاترة)
 document.getElementById("attendance-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const sid = inputId.value.trim();
@@ -637,33 +656,97 @@ document.getElementById("attendance-form").addEventListener("submit", async (e) 
 
     const btn = document.getElementById("btn-submit");
     btn.disabled = true;
-btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Confirming...`;
+    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Confirming...`;
+
     try {
-        localStorage.setItem("muc_saved_student_id", sid);
+        localStorage.removeItem("muc_saved_student_name"); // حذف أي اسم قديم مستعار نهائياً
 
-        // جلب اسم الطالب الحقيقي فوراً من الفايربيز إذا كان النت شغال
-        let studentRealName = localStorage.getItem(`muc_student_name_${sid}`) || localStorage.getItem("muc_saved_student_name") || "طالب";
+        let studentRealName = localStorage.getItem(`muc_student_name_${sid}`) || "";
+        let studentEnrolledCourses = [];
 
+        // 1. فحص كشف الطلاب المحلي أوفلاين لجلب الاسم الصحيح فوراً
+        try {
+            const pMod = await import("./praxis-data.js");
+            const pList = pMod.PRAXIS_STUDENTS_LIST || [];
+            const row = pList.find(r => r && String(r[0]).trim() === sid);
+            if (row && row[1]) {
+                studentRealName = row[1]; // يجلب "فارس محمد علي عيسي علي" فوراً
+                localStorage.setItem(`muc_student_name_${sid}`, studentRealName);
+            }
+        } catch (e) {}
+
+        // 2. إذا كان الهاتف متصلاً بالإنترنت: التحقق الرسمي من السيرفر
         if (navigator.onLine) {
+            const { db } = await import("./firebase.js");
+            const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+            const stdSnap = await getDoc(doc(db, "students", sid));
+
+            if (!stdSnap.exists()) {
+                throw new Error(`⚠️ الرقم الجامعي (${sid}) غير مسجل في قاعدة بيانات الجامعة!`);
+            }
+
+            const stdData = stdSnap.data();
+            studentRealName = stdData.name || studentRealName || sid;
+            studentEnrolledCourses = stdData.enrolledCourses || [];
+
+            localStorage.setItem(`muc_student_name_${sid}`, studentRealName);
+            localStorage.setItem(`muc_student_courses_${sid}`, JSON.stringify(studentEnrolledCourses));
+        } else {
+            // أوفلاين: استرجاع المقررات المخزنة مسبقاً
             try {
-                const { db } = await import("./firebase.js");
-                const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
-                const stdSnap = await getDoc(doc(db, "students", sid));
-                if (stdSnap.exists()) {
-                    studentRealName = stdSnap.data().name;
-                    localStorage.setItem(`muc_student_name_${sid}`, studentRealName);
-                    localStorage.setItem("muc_saved_student_name", studentRealName);
-                } else {
-                    throw new Error(`الرقم الجامعي (${sid}) غير مقيد بقاعدة البيانات.`);
-                }
-            } catch (err) {
-                if (err.message.includes("غير مقيد")) throw err;
+                studentEnrolledCourses = JSON.parse(localStorage.getItem(`muc_student_courses_${sid}`) || "[]");
+            } catch (e) {}
+        }
+
+        // 3. إن لم يوجد الاسم وكان الطالب يسجل أوفلاين لأول مرة: يكتب Student
+        if (!studentRealName || studentRealName.trim() === "") {
+            studentRealName = "Student";
+        }
+
+        // 3. التحقق الأكاديمي العام: هل الطالب مقيد في هذا المقرر/المحاضرة؟
+        const targetCourseId = (offlinePayload?.c || "").trim();
+        const targetCourseName = (offlinePayload?.cn || "المقرر الدراسي").trim();
+
+        if (studentEnrolledCourses.length > 0 && targetCourseId) {
+            const isEnrolledInScanned = studentEnrolledCourses.some(c => 
+                c.toLowerCase() === targetCourseId.toLowerCase() || 
+                targetCourseId.toLowerCase().includes(c.toLowerCase()) ||
+                c.toLowerCase().includes(targetCourseId.toLowerCase())
+            );
+
+            if (!isEnrolledInScanned) {
+                showResult(false, "غير مقيد في هذه المحاضرة!", "");
+
+                const statusMsg = document.getElementById("status-msg");
+                statusMsg.innerHTML = `
+                    <div style="background: #FEF2F2; border: 1.5px solid #FECACA; border-radius: 12px; padding: 14px; text-align: right; font-size: 13px; line-height: 1.8; color: #1E293B; margin-top: 10px; direction: rtl;">
+                        <div style="color: #991B1B; font-weight: 800; font-size: 14px; margin-bottom: 8px;">
+                            <i class="fa-solid fa-ban"></i> تنبيه أمني: تسجيل غير مصرح به
+                        </div>
+                        <div><strong>اسم الطالب:</strong> ${studentRealName || sid}</div>
+                        <div><strong>الرقم الجامعي:</strong> <span style="font-family:monospace; font-weight:800;">${sid}</span></div>
+                        
+                        <div style="margin-top: 10px; padding: 10px 12px; background: #FFF; border-radius: 8px; border-right: 4px solid #DC2626;">
+                            <div><strong>المقرر الممسوح:</strong> <b style="color:#DC2626;">${targetCourseName}</b></div>
+                            <div><strong>مقرراتك المسجلة رسمياً:</strong> <b>${studentEnrolledCourses.join(" ، ")}</b></div>
+                        </div>
+
+                        <div style="margin-top: 10px; color: #991B1B; font-size: 12px; font-weight: 700; line-height: 1.6;">
+                            ⚠️ أنت غير مقيد في هذا المقرر أو في هذه المجموعة. الحضور غير مسموح به خارج مجموعتك الرسمية.
+                            <br>
+                            يرجى التوجه إلى قاعتك الرسمية أو الرجوع لأستاذ المادة.
+                        </div>
+                    </div>
+                `;
+                document.getElementById("receipt-box").classList.add("d-none");
+                btn.disabled = false;
+                btn.innerHTML = `<span>Confirm Attendance Now</span> <i class="fa-solid fa-arrow-right"></i>`;
+                return;
             }
         }
 
-// أ. التسجيل أوفلاين وتمرير رقم المحاضرة وتاريخ اليوم
+        // أ. التسجيل أوفلاين وتمرير رقم المحاضرة وتاريخ اليوم (عند تطابق المحاضرة رسمياً)
         if (offlinePayload) {
-// قراءة رقم المحاضرة الحقيقي المتشفّر داخل باركود الدكتور
             const realLectureNum = Number(offlinePayload.l ?? offlinePayload.ln ?? offlinePayload.lectureNumber ?? 1);
 
             await queueOfflineAttendance({
@@ -672,7 +755,7 @@ btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Confirming...`;
                 sessionId: offlinePayload.s,
                 courseId: offlinePayload.c,
                 courseName: offlinePayload.cn,
-                lectureNumber: realLectureNum, // الرقم الحقيقي القادم من شاشة الدكتور
+                lectureNumber: realLectureNum,
                 timeSlot: offlinePayload.t,
                 hash: offlinePayload.h,
                 sessionStart: offlinePayload.ts,
@@ -681,8 +764,8 @@ btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Confirming...`;
                 hostRole: offlinePayload.hr,
                 doctorId: offlinePayload.d
             });
-
-refreshPendingBanner();
+localStorage.setItem("muc_saved_student_id", sid);
+            refreshPendingBanner();
             showResult(true, "Attendance Saved Successfully!", "Saved locally on your device. It will upload automatically once internet is available.");            
             document.getElementById("rcpt-name").innerText = studentRealName;
             document.getElementById("rcpt-id").innerText = sid;
@@ -694,9 +777,9 @@ refreshPendingBanner();
             return;
         }
 
-        // ب. التسجيل أونلاين المباشر
-        let deviceId = localStorage.getItem("muc_device_fingerprint") || ("dev_" + Math.random().toString(36).substring(2));
-        localStorage.setItem("muc_device_fingerprint", deviceId);
+// ب. التسجيل أونلاين المباشر
+        let deviceId = localStorage.getItem("muc_device_id") || ("dev_" + Math.random().toString(36).substring(2));
+        localStorage.setItem("muc_device_id", deviceId);
 
         const res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
         
@@ -792,7 +875,12 @@ async function runSync(manual) {
 if (manual) {
                 btn.disabled = false;
                 txt.innerText = "Sync Attendance Now";
-                if (getPendingCount() === 0) {
+                const syncErr = localStorage.getItem("muc_sync_error");
+                if (syncErr) {
+                    fb.style.color = "#DC2626";
+                    fb.innerText = syncErr;
+                    localStorage.removeItem("muc_sync_error");
+                } else if (getPendingCount() === 0) {
                     fb.style.color = "#15803D";
                     fb.innerText = "✅ Attendance uploaded successfully";
                 } else if (result === -1 && !navigator.onLine) {
@@ -804,6 +892,8 @@ if (manual) {
                 }
             }
         }
+
+
 
         document.getElementById("btn-sync-now").addEventListener("click", () => runSync(true));
         window.addEventListener("online", () => runSync(false));
