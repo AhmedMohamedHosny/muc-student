@@ -12,6 +12,10 @@ import {
     getDoc,
     setDoc,
     collection,
+    query,
+    where,
+    getDocs,
+    onSnapshot,
     runTransaction, 
     arrayUnion,
     serverTimestamp,
@@ -182,8 +186,8 @@ const sessionDoc = await getDoc(sessionRef);
     };
 }
 
-export async function queueOfflineAttendance({ studentId, studentName, sessionId, courseId, courseName, lectureNumber, timeSlot, hash, sessionStart, sessionType, group, hostRole, doctorId }) {
-    const cleanedStudentId = String(studentId).trim();
+export async function queueOfflineAttendance({ studentId, studentName, sessionId, courseId, courseName, lectureNumber, timeSlot, hash, sessionStart, sessionType, group, hostRole, doctorId, pin }) {
+        const cleanedStudentId = String(studentId).trim();
     if (!sessionId) {
         throw new Error("⚠️ رمز الحضور غير صالح، يرجى مسح الباركود مرة أخرى.");
     }
@@ -234,6 +238,7 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
         sessionType: sessionType || "",
         hostRole: hostRole || "",
         group: group || "",
+                pin: pin || "",
         doctorId: doctorId || ""
     };
 
@@ -256,9 +261,10 @@ function withTimeout(promise, ms = 10000) {
 }
 
 function removeFromQueue(item) {
+    const key = item.origSessionId || item.sessionId;
     const q = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
     localStorage.setItem("muc_pending_records", JSON.stringify(
-        q.filter(x => !(x.sessionId === item.sessionId && x.studentId === item.studentId))
+        q.filter(x => !(x.sessionId === key && x.studentId === item.studentId))
     ));
 }
 
@@ -291,6 +297,23 @@ export async function syncPendingAttendance() {
         }
 for (const item of queue) {
             try {
+                                // 0) سجل PIN أوفلاين: نحوّله لجلسة حقيقية بالكود
+                if (item.pin) {
+                    item.origSessionId = item.sessionId;   // عشان removeFromQueue يلاقيه
+                    const ps = await withTimeout(
+                        getDocs(query(collection(db, "attendance_sessions"), where("activePinCode", "==", Number(item.pin)))),
+                        8000
+                    );
+                    if (ps.empty) {
+                        // الكود مش مطابق لأي جلسة دلوقتي: يفضل في الطابور، ويتشال بعد 48 ساعة
+                        if (Date.now() - (item.scannedAt || 0) > 48 * 3600 * 1000) removeFromQueue(item);
+                        continue;
+                    }
+                    const sd = ps.docs[0];
+                    item.sessionId = sd.id;
+                    item.courseId = sd.data().courseId || "";
+                    item.courseName = sd.data().courseName || item.courseName;
+                }
                 // 1) التحقق أولاً: هل المحاضرة لا تزال موجودة في السيرفر أم حذفها الدكتور؟
                 let sessionExists = true;
                 try {
