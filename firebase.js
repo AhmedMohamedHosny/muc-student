@@ -145,33 +145,22 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
             throw new Error(`Attendance already recorded for Student ID (${cleanedStudentId})!`);
         }
 
-        // 3. فحص أكاديمي محسن (يفحص الكاش المحلي أولاً لتوفير آلاف القراءات من فايربيز)
-        let studentRealName = localStorage.getItem(`muc_student_name_${cleanedStudentId}`) || "";
+// 3. فحص أمني إجباري: التحقق من قيد الطالب الفعلي في هذا المقرر تحديداً
+        const studentDoc = await getDoc(doc(db, "students", cleanedStudentId));
+        if (!studentDoc.exists()) {
+            throw new Error(`⚠️ الرقم الجامعي (${cleanedStudentId}) غير مسجل بقاعدة بيانات الجامعة!`);
+        }
+        const studentData = studentDoc.data();
+        const studentRealName = studentData.name || cleanedStudentId;
+        localStorage.setItem(`muc_student_name_${cleanedStudentId}`, studentRealName);
 
-        try {
-            if (!studentRealName && typeof PRAXIS_STUDENTS_LIST !== "undefined") {
-                const foundRow = PRAXIS_STUDENTS_LIST.find(r => r && String(r[0]).trim() === cleanedStudentId);
-                if (foundRow && foundRow[1]) studentRealName = foundRow[1];
-            }
-        } catch (e) {}
+        const enrolledList = studentData.enrolledCourses || [];
+        const currentCourseId = sessionData.courseId || "";
+        const isEnrolled = enrolledList.includes(currentCourseId) || 
+                           (studentData.sections && (studentData.sections[currentCourseId] || Object.keys(studentData.sections).some(k => k.toLowerCase() === currentCourseId.toLowerCase())));
 
-        if (!studentRealName) {
-            const studentDoc = await getDoc(doc(db, "students", cleanedStudentId));
-            if (!studentDoc.exists()) {
-                throw new Error(`⚠️ الرقم الجامعي (${cleanedStudentId}) غير مسجل بقاعدة بيانات الجامعة!`);
-            }
-            const studentData = studentDoc.data();
-            studentRealName = studentData.name || cleanedStudentId;
-            localStorage.setItem(`muc_student_name_${cleanedStudentId}`, studentRealName);
-
-            const enrolledList = studentData.enrolledCourses || [];
-            const currentCourseId = sessionData.courseId || "";
-            const isEnrolled = enrolledList.includes(currentCourseId) || 
-                               (studentData.sections && (studentData.sections[currentCourseId] || Object.keys(studentData.sections).some(k => k.toLowerCase() === currentCourseId.toLowerCase())));
-
-            if (!isEnrolled) {
-                throw new Error(`NOT_ENROLLED:${studentRealName}:${sessionData.courseName || "هذا المقرر"}`);
-            }
+        if (!isEnrolled) {
+            throw new Error(`NOT_ENROLLED:${studentRealName}:${sessionData.courseName || "هذا المقرر"}`);
         }
 
         // 4. فحص بصمة الهاتف (منع تسجيل الزميل)

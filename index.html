@@ -737,7 +737,7 @@ showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been
     const errMsg = String(err.message || "");
     isExpiredQrError = errMsg.includes("expired") || errMsg.includes("صلاحية");
 
-    showResult(false, "Check-in Failed", err.message);
+    showResult(false, "Check-in Failed", friendlyError(err));
     btn.disabled = false;
     btn.innerHTML = `<span>Confirm Attendance Now</span> <i class="fa-solid fa-arrow-right"></i>`;
 }
@@ -926,12 +926,12 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
         document.getElementById("rcpt-time").innerText = res.time;
         document.getElementById("rcpt-status").innerText = res.status === "Present" ? "Present" : "Late";
         document.getElementById("receipt-box").classList.remove("d-none");
-    } catch (err) {
+} catch (err) {
         activeSessionId = null;
         activeToken = null;
         offlinePayload = null;
         isExpiredQrError = false;
-        showResult(false, "Check-in Failed", err.message || "Failed to verify PIN code.");
+        showResult(false, "Check-in Failed", friendlyError(err) || "Failed to verify PIN code.");
     } finally {
         btnPin.disabled = false;
         btnPin.innerHTML = `<i class="fa-solid fa-keyboard"></i> <span>Enter 6-Digit PIN</span>`;
