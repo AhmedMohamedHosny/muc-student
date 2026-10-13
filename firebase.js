@@ -389,8 +389,12 @@ for (const item of queue) {
                     if (err.message && err.message.includes("permission-denied")) sessionExists = false;
                 }
 
+// إذا لم تكن المحاضرة قد رُفعت بعد من جهاز الدكتور، نُبقي السجل في هاتف الطالب للمحاولة اللاحقة
                 if (!sessionExists) {
-                    removeFromQueue(item); // حذف السجل فوراً من هاتف الطالب لأن الدكتور حذف المحاضرة
+                    // إذا مر أكثر من 48 ساعة على الجلسة ولم ترفع، يتم تجاهلها
+                    if (Date.now() - (item.scannedAt || 0) > 48 * 3600 * 1000) {
+                        removeFromQueue(item);
+                    }
                     continue;
                 }
                                 // 1.5) عزل المحاضرة 1 عن 2 (المحاضرة بتتعرف وقت الرفع في سجلات الـ PIN الأوفلاين)
