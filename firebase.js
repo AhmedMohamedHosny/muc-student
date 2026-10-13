@@ -248,10 +248,21 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
     const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
     const deviceId = getLocalDeviceId();
 
-    // 🔒 منع تكرار تسجيل نفس الطالب لنفس المحاضرة
-    const studentExists = queue.some(q => q.sessionId === sessionId && q.studentId === cleanedStudentId);
+// 🔒 فحص أمني ذكي: منع تكرار تسجيل الطالب سواء سجل بالباركود أو الكود الرقمي لنفس الجلسة
+    const todayCA = new Date().toLocaleDateString("en-CA");
+    const studentExists = queue.some(q => {
+        if (q.studentId !== cleanedStudentId) return false;
+        // تطابق نفس الجلسة المباشرة
+        if (q.sessionId === sessionId) return true;
+        // تطابق نفس الكود الرقمي PIN
+        if (pin && q.pin && String(q.pin) === String(pin)) return true;
+        // تطابق نفس المقرر في نفس اليوم
+        if (courseId && q.courseId && q.courseId === courseId && q.startedAtDate === todayCA) return true;
+        return false;
+    });
+
     if (studentExists) {
-        throw new Error("تم تسجيل حضورك لهذه المحاضرة بالفعل ومحفوظ على هاتفك!");
+        throw new Error("⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (سواء بالباركود أو الكود الرقمي) ومحفوظ على هاتفك!\n\nYou have already checked in for this lecture!");
     }
 
     // 🔒 منع تسجيل طالبين مختلفين من نفس الهاتف
@@ -409,7 +420,13 @@ for (const item of queue) {
                     removeFromQueue(item);
                     continue;
                 }
-
+// فحص هل الطالب مسجل بالفعل في هذه الجلسة على السيرفر لمنع التعليق
+                const existingRecSnap = await withTimeout(getDoc(doc(db, "attendance_records", `${item.sessionId}_${item.studentId}`)), 5000);
+                if (existingRecSnap.exists()) {
+                    // الطالب حاضر بالفعل، نحذف السجل المكرر فوراً من هاتف الطالب لينظف البانر
+                    removeFromQueue(item);
+                    continue;
+                }
                 const recordId = `${item.sessionId}_${item.studentId}`;
                 const recordData = {
                     recordId,

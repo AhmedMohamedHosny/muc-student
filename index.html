@@ -872,28 +872,29 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
             throw new Error("هذه المحاضرة الثانية وأنت مسجل في المحاضرة الأولى. من فضلك تواصل مع الدكتور.\n\nThis is Lecture 2, but you are registered in Lecture 1. Please contact your doctor.");
         }
 
-        // ---------- أوفلاين: نحفظ الـ PIN وهيتسجل لما النت يرجع ----------
+// ---------- أوفلاين: نحفظ الـ PIN مع التحقق من عدم التكرار ----------
         if (!navigator.onLine) {
             const stdName = localStorage.getItem(`muc_student_name_${studentIdVal}`) || "Student";
             await queueOfflineAttendance({
                 studentId: studentIdVal,
                 studentName: stdName,
-                sessionId: `pin_${enteredPin}`,   // معرّف مؤقت، الـ sync هيحوّله لجلسة حقيقية
+                sessionId: `pin_${enteredPin}`,
                 courseId: "",
-                courseName: "PIN Lecture",
+                courseName: isEn ? "PIN Lecture" : "محاضرة بالكود",
                 lectureNumber: 1,
                 timeSlot: 0,
                 hash: "",
                 pin: enteredPin
             });
             refreshPendingBanner();
-            showResult(true, "Saved Offline!", "PIN saved on your phone. It will be registered automatically once you're online.");
+            const isEnMode = (typeof currentLang !== "undefined" && currentLang === "en") || document.documentElement.lang === "en";
+            showResult(true, isEnMode ? "Saved Offline!" : "تم الحفظ أوفلاين!", isEnMode ? "PIN saved on your phone. It will be registered automatically once you're online." : "تم حفظ الكود على هاتفك، وسيتم تثبيته تلقائياً فور توفر الإنترنت.");
             document.getElementById("rcpt-name").innerText = stdName;
             document.getElementById("rcpt-id").innerText = studentIdVal;
-            document.getElementById("rcpt-course").innerText = "Will be detected on sync";
-            document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
-            document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
-            document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
+            document.getElementById("rcpt-course").innerText = isEnMode ? "Lecture PIN Code" : "محاضرة برمز PIN";
+            document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString(isEnMode ? "en-US" : "ar-EG");
+            document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString(isEnMode ? "en-US" : "ar-EG");
+            document.getElementById("rcpt-status").innerText = isEnMode ? "Saved Offline ⏳ (Pending Sync)" : "محفوظ أوفلاين ⏳ (في انتظار المزامنة)";
             document.getElementById("receipt-box").classList.remove("d-none");
             return;
         }
@@ -975,5 +976,42 @@ setInterval(() => { refreshPendingBanner(); showSyncErrorIfAny(); }, 3000);
         display: flex !important;
     }
 </style>
+<!-- 🔒 درع الحماية ضد الفحص وسرقة الأكواد (Disable DevTools & Right Click) -->
+<script>
+    (function () {
+        // 1. تعطيل النقر بزر الماوس الأيمن (Right-Click Context Menu)
+        document.addEventListener("contextmenu", function (e) {
+            e.preventDefault();
+            return false;
+        }, false);
+
+        // 2. حظر اختصارات لوحة المفاتيح الخاصة بالمطورين
+        document.addEventListener("keydown", function (e) {
+            // منع F12
+            if (e.key === "F12" || e.keyCode === 123) {
+                e.preventDefault();
+                return false;
+            }
+
+            // منع Ctrl+Shift+I (Inspect) و Ctrl+Shift+J (Console) و Ctrl+Shift+C (Element Picker)
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "I" || e.key === "i" || e.key === "J" || e.key === "j" || e.key === "C" || e.key === "c")) {
+                e.preventDefault();
+                return false;
+            }
+
+            // منع Ctrl+U (View Source)
+            if ((e.ctrlKey || e.metaKey) && (e.key === "U" || e.key === "u")) {
+                e.preventDefault();
+                return false;
+            }
+
+            // منع Ctrl+S (Save Webpage)
+            if ((e.ctrlKey || e.metaKey) && (e.key === "S" || e.key === "s")) {
+                e.preventDefault();
+                return false;
+            }
+        }, false);
+    })();
+</script>
 </body>
 </html>
