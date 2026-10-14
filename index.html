@@ -209,15 +209,51 @@ background: #FDF2F3;
             </button>
             <p id="sync-feedback" style="font-size:0.78rem; margin-top:6px; font-weight:700;"></p>
         </div>
-<!-- زرار فتح الكاميرا المباشر لضمان أمان المتصفح -->
-<div id="scanner-step">
+<!-- 1. شريط الترحيب بالطالب (يظهر فوق دائماً بعد حفظ الـ ID) -->
+        <div id="student-welcome-bar" class="d-none" style="background: #F8FAFC; border: 1.5px solid #CBD5E1; border-radius: 12px; padding: 10px 14px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; text-align: right;" dir="rtl">
+            <div>
+                <div style="font-size: 0.95rem; font-weight: 800; color: #0F172A;">
+                    👋 مرحباً، <span id="welcome-student-name" style="color: #7A0C16;">طالب الجامعة</span>
+                </div>
+                <div style="font-size: 0.78rem; color: #475569; font-weight: 700;">
+                    الرقم الجامعي: <span id="welcome-student-id" style="font-family: monospace; font-size: 0.85rem;">--</span>
+                </div>
+            </div>
+            <button type="button" id="btn-change-saved-id" style="background: #FEE2E2; border: 1px solid #FECACA; color: #DC2626; padding: 5px 10px; border-radius: 8px; font-size: 0.75rem; font-weight: 800; cursor: pointer;">
+                <i class="fa-solid fa-pen-to-square"></i> تغيير الرقم
+            </button>
+        </div>
+
+        <!-- 2. شاشة البداية: إدخال الرقم الجامعي أولاً قبل أي شيء -->
+        <div id="input-step">
+            <div class=" d-none" id="scanned-lecture-box" style="background: #ECFDF5; border: 1px solid #A7F3D0; padding: 8px 12px; border-radius: 8px; margin-bottom: 1rem;">
+                <span style="font-size: 0.82rem; color: #065F46; font-weight: 700;">
+                    <i class="fa-solid fa-circle-check"></i> Scanned Lecture: <strong id="detected-course-name">--</strong>
+                </span>
+            </div>
+            <form id="attendance-form">
+                <div class="form-group" style="text-align: center;">
+                    <label style="margin-bottom: 0.6rem; font-size: 0.95rem; color: #1E293B;">
+                        <i class="fa-solid fa-id-card" style="color: #7A0C16;"></i> أدخل رقمك الجامعي أولاً للمتابعة (Student ID)
+                    </label>
+                    <input type="text" id="student-id" placeholder="اكتب رقمك الجامعي هنا..." inputmode="numeric" autocomplete="off" required>
+                </div>
+                <button type="submit" id="btn-submit" class="btn">
+                    <span>تسجيل الدخول ومتابعة (Continue)</span>
+                    <i class="fa-solid fa-arrow-right"></i>
+                </button>
+            </form>
+        </div>
+
+        <!-- 3. شاشة أزرار مسح الـ QR وإدخال الـ PIN (تظهر فوراً بعد معرفة الطالب) -->
+        <div id="scanner-step" class="d-none">
             <button type="button" id="btn-trigger-cam" class="btn btn-scan">
                 <i class="fa-solid fa-camera" style="font-size: 1.3rem;"></i> 
                 <span>Scan Projector QR Code</span>
             </button>
             <button type="button" id="btn-enter-pin" class="btn" style="background:#C59B27; color:#000; font-weight:800; margin-top:8px;">
-    <i class="fa-solid fa-keyboard"></i> <span>Enter 6-Digit PIN</span>
-</button>
+                <i class="fa-solid fa-keyboard"></i> <span>Enter 6-Digit PIN</span>
+            </button>
             <div id="qr-reader" class="d-none"></div>
             
             <div id="camera-tools" class="camera-tools d-none">
@@ -234,30 +270,6 @@ background: #FDF2F3;
             <p style="font-size: 0.78rem; color: #94A3B8; margin-top: 0.5rem;">
                 <i class="fa-solid fa-wifi-slash"></i> Instant scan - 100% Offline compatible
             </p>
-        </div>
-
-        <!-- 2. نموذج إدخال الرقم الجامعي (يظهر تلقائياً بعد لقط الباركود) -->
-<div id="input-step" class="d-none">
-            <div style="background: #ECFDF5; border: 1px solid #A7F3D0; padding: 8px 12px; border-radius: 8px; margin-bottom: 1rem;">
-                <span style="font-size: 0.82rem; color: #065F46; font-weight: 700;">
-                    <i class="fa-solid fa-circle-check"></i> Scanned Lecture: <strong id="detected-course-name">--</strong>
-                </span>
-            </div>
-            <form id="attendance-form">
-                <div class="form-group" style="text-align: left;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
-                        <label style="margin-bottom:0;"><i class="fa-solid fa-id-card"></i> Student ID Number</label>
-                        <button type="button" id="btn-change-saved-id" class="d-none" style="background: none; border: none; color: #DC2626; font-size: 0.78rem; font-weight: 700; cursor: pointer;">
-                            <i class="fa-solid fa-pen-to-square"></i> Change ID
-                        </button>
-                    </div>
-<input type="text" id="student-id" placeholder="Enter your Student ID..." inputmode="numeric" autocomplete="off" required>
-                </div>
-                <button type="submit" id="btn-submit" class="btn">
-                    <span>Confirm Attendance Now</span>
-                    <i class="fa-solid fa-arrow-right"></i>
-                </button>
-            </form>
         </div>
 
         <!-- 2. بطاقة النتيجة (نجاح أو رفض الجهاز) -->
@@ -404,347 +416,324 @@ function friendlyError(err) {
     return m;
 }
 
-        // استرجاع وتغيير الرقم الجامعي بدون prompt
-        const savedStudentId = localStorage.getItem("muc_saved_student_id");
-        if (savedStudentId) {
-            inputId.value = savedStudentId;
-            document.getElementById("btn-change-saved-id")?.classList.remove("d-none");
+const welcomeBar = document.getElementById("student-welcome-bar");
+        const welcomeNameEl = document.getElementById("welcome-student-name");
+        const welcomeIdEl = document.getElementById("welcome-student-id");
+
+        // دالة تحديث شريط الترحيب العلوي وإظهار أزرار الـ QR والـ PIN
+        async function activateStudentProfile(sid, forceFetch = false) {
+            const cleanId = String(sid || "").trim();
+            if (!cleanId) return false;
+
+            let stdName = localStorage.getItem(`muc_student_name_${cleanId}`) || "";
+
+            if (navigator.onLine && (forceFetch || !stdName || stdName === "طالب" || stdName === "Student")) {
+                try {
+                    const { db, auth } = await import("./firebase.js");
+                    const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
+                    const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+                    if (!auth.currentUser) await signInAnonymously(auth);
+                    const stdSnap = await getDoc(doc(db, "students", cleanId));
+                    if (stdSnap.exists()) {
+                        stdName = stdSnap.data().name || cleanId;
+                        localStorage.setItem(`muc_student_name_${cleanId}`, stdName);
+                        localStorage.setItem("muc_saved_student_name", stdName);
+                    } else {
+                        await showCustomAlert("الرقم الجامعي غير صحيح", `⚠️ الرقم الجامعي (${cleanId}) غير مسجل في قاعدة بيانات الجامعة! تأكد من كتابة الـ ID الصحيح.`);
+                        return false;
+                    }
+                } catch (e) {
+                    console.warn("Offline or slow fetch:", e);
+                }
+            }
+
+            if (!stdName) stdName = "طالب جامعة مايو";
+            localStorage.setItem("muc_saved_student_id", cleanId);
+            inputId.value = cleanId;
+
+            welcomeNameEl.innerText = stdName;
+            welcomeIdEl.innerText = cleanId;
+            welcomeBar.classList.remove("d-none");
+
+            inputStep.classList.add("d-none");
+            resultStep.classList.add("d-none");
+            scannerStep.classList.remove("d-none");
+            return true;
         }
 
+        // عند فتح الموقع: لو الطالب مسجل رقمه قبل كده، نرحب به فوراً ونظهر له الـ QR والـ PIN
+        const initialSavedId = localStorage.getItem("muc_saved_student_id");
+        if (initialSavedId && initialSavedId.length >= 7) {
+            activateStudentProfile(initialSavedId, false);
+        } else {
+            localStorage.removeItem("muc_saved_student_id");
+            welcomeBar.classList.add("d-none");
+            inputStep.classList.remove("d-none");
+            scannerStep.classList.add("d-none");
+        }
+
+        // زر تغيير الرقم الجامعي من شريط الترحيب العلوي
         document.getElementById("btn-change-saved-id")?.addEventListener("click", async () => {
-            const newId = await showCustomPrompt("Change Student ID", "Enter your new academic ID number:", inputId.value);
-            if (newId && newId.trim()) {
-                localStorage.setItem("muc_saved_student_id", newId.trim());
-                inputId.value = newId.trim();
+            if (html5QrScanner) {
+                try { await html5QrScanner.stop(); await html5QrScanner.clear(); } catch(e) {}
+            }
+            qrBox.classList.add("d-none");
+            document.getElementById("camera-tools")?.classList.add("d-none");
+            btnTriggerCam.classList.remove("d-none");
+
+            welcomeBar.classList.add("d-none");
+            scannerStep.classList.add("d-none");
+            resultStep.classList.add("d-none");
+            inputStep.classList.remove("d-none");
+            inputId.value = "";
+            inputId.focus();
+        });
+
+        // حفظ الرقم الجامعي عند الضغط على زر الدخول في البداية
+        document.getElementById("attendance-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const sid = inputId.value.trim();
+            if (!sid || sid.length < 7) {
+                await showCustomAlert("تنبيه", "يرجى إدخال رقمك الجامعي الصحيح (وليس كود المحاضرة المكون من 6 أرقام).");
+                return;
+            }
+            const btn = document.getElementById("btn-submit");
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> جاري التحقق...`;
+            try {
+                await activateStudentProfile(sid, true);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `<span>تسجيل الدخول ومتابعة (Continue)</span> <i class="fa-solid fa-arrow-right"></i>`;
             }
         });
 
-// 🔒 رادار الحظر الأمني: منع Google Lens والكاميرات الخارجية وروابط الواتساب تماماً
-        const isAppMode = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-
+        // 🔒 منع فتح الروابط الخارجية المباشرة خارج صفحة الطالب
         if (activeSessionId || activeToken) {
-            // مسح معرّفات الجلسة فوراً وتطهير شريط الرابط لمنع استغلاله
             window.history.replaceState({}, document.title, window.location.pathname);
             activeSessionId = null;
             activeToken = null;
-
-            setTimeout(async () => {
-                await showCustomAlert(
-                    "Security Alert: External Scan Blocked",
-                    "⚠️ غير مسموح بالمسح عبر Google Lens أو الكاميرا الخارجية أو الروابط المباشرة لمنع التلاعب!\n\nيجب فتح تطبيق MUC والمسح حصرياً باستخدام زر [Scan Projector QR Code] الداخلي داخل التطبيق.",
-                    true
-                );
-            }, 300);
         }
 
-// تشغيل الكاميرا مع فحص أمان وضع التطبيق (Standalone PWA Check)
+        // ✅ فتح الكاميرا مباشرة من الموقع بدون اشتراط تثبيت التطبيق
         let html5QrScanner = null;
         btnTriggerCam?.addEventListener("click", async () => {
-            const isInstalledApp = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-
-            // إذا كان الطالب فاتح من متصفح عادي ولم يثبت التطبيق على هاتفه
-            if (!isInstalledApp && !window.location.hostname.includes("localhost")) {
-                await showCustomAlert(
-                    "MUC App Required",
-                    "⚠️ للحفاظ على نزاهة الحضور: يجب تثبيت البرنامج على هاتفك أولاً (Install App / إضافة إلى الشاشة الرئيسية) وفتحه كتطبيق مستقل لتسجيل الحضور!",
-                    false
-                );
-                return;
-            }
-
             btnTriggerCam.classList.add("d-none");
             qrBox.classList.remove("d-none");
             startCameraScanner();
         });
 
-async function startCameraScanner() {
-    if (typeof Html5Qrcode === "undefined") {
-await showCustomAlert("Camera Initializing", "Please make sure you have opened the page online at least once.");
-        btnTriggerCam.classList.remove("d-none");
-        qrBox.classList.add("d-none");
-        return;
-    }
+        // دالة تنفيذ تسجيل الحضور الفوري بمجرد لقط الـ QR
+        async function processInstantQrCheckIn() {
+            const sid = localStorage.getItem("muc_saved_student_id") || inputId.value.trim();
+            const studentRealName = localStorage.getItem(`muc_student_name_${sid}`) || "طالب";
 
-    try {
-if (html5QrScanner) {
-            try { await html5QrScanner.clear(); } catch(e) {}
-        }
-        html5QrScanner = new Html5Qrcode("qr-reader");
-        await html5QrScanner.start(
-            { facingMode: "environment" },
-            { 
-                fps: 25,
-                qrbox: (w, h) => {
-                    // زيادة مساحة مربع الفحص إلى 90% من حجم الكاميرا للقط السريع من بعيد
-                    const size = Math.floor(Math.min(w, h) * 0.90);
-                    return { width: size, height: size };
-                }
-            },
-            async (decodedText) => {
-                try {
-if (decodedText.startsWith("{")) {
-                        offlinePayload = JSON.parse(decodedText);
-                        activeSessionId = offlinePayload.s;
-                        detectedCourse.innerText = offlinePayload.cn || "المقرر الدراسي";
-                        courseBadge.innerText = `محاضرة أوفلاين: ${offlinePayload.cn || ''}`;
-                    } else if (decodedText.includes("session=")) {
-                        const parsed = new URL(decodedText);
-                        const isOffline = parsed.searchParams.get("offline") === "1" || (parsed.searchParams.get("token") || "").startsWith("OFF_");
-
-                        if (isOffline) {
-                            // ✅ معالجة فورية لباركود الأوفلاين بدون طلب إنترنت نهائياً
-                            activeSessionId = parsed.searchParams.get("session");
-                            activeToken = parsed.searchParams.get("token");
-                            const cName = parsed.searchParams.get("cname") || parsed.searchParams.get("course") || "جلسة أوفلاين";
-                            
-                            offlinePayload = {
-                                s: activeSessionId,
-                                c: parsed.searchParams.get("course") || "MUC_COURSE",
-                                cn: decodeURIComponent(cName),
-                                l: Number(parsed.searchParams.get("lec") || 1),
-                                t: Math.floor(Date.now() / 10000),
-                                h: activeToken,
-                                ts: Number(parsed.searchParams.get("ts") || Date.now())
-                            };
-                            
-                            detectedCourse.innerText = offlinePayload.cn;
-                            courseBadge.innerText = "حضور أوفلاين (Offline Mode)";
-                        } else {
-                        // محاضرة أونلاين عادية
-                        if (!navigator.onLine) {
-                            await showCustomAlert("Online Connection Required", "This live lecture requires an active internet connection to check in. Please connect to mobile data or Wi-Fi.");
-                            return; // خروج نظيف بدون رمي Error يمنع ظهور رسالة Invalid QR المزدوجة
-                        }
-                        activeSessionId = parsed.searchParams.get("session");
-                        activeToken = parsed.searchParams.get("token");
-                        detectedCourse.innerText = "Live Lecture (Cloud)";
-                        courseBadge.innerText = "Live Online Session";
-                    }
-                } else {
-                    throw new Error("INVALID_QR");
-                }
-
-                document.getElementById("camera-tools")?.classList.add("d-none");
-                if (html5QrScanner) {
-                    try { await html5QrScanner.stop(); } catch(e) {}
-                }
-                scannerStep.classList.add("d-none");
-                inputStep.classList.remove("d-none");
-                inputId.focus();
-            } catch (e) {
-                // تظهر فقط إذا كان الباركود نفسه تالفاً أو غير مقروء
-                if (e && e.message === "INVALID_QR") {
-                    await showCustomAlert("Invalid QR Code", "Please point your camera directly at the screen's QR code.");
-                }
-            }
-            },
-            () => {}
-        );
-
-// ==========================================
-        // 🔍 محرك الزوم الذكي (10x + Pinch to Zoom بأصبعين)
-        // ==========================================
-        setTimeout(() => {
             try {
-                const videoElem = document.querySelector("#qr-reader video");
-                const qrContainer = document.getElementById("qr-reader");
-                const stream = videoElem ? videoElem.srcObject : null;
-                const track = (stream && stream.getVideoTracks) ? stream.getVideoTracks()[0] : null;
-
-                const cameraTools = document.getElementById("camera-tools");
-                const zoomRange = document.getElementById("zoom-range");
-                const zoomVal = document.getElementById("zoom-val");
-                const btnTorch = document.getElementById("btn-torch");
-
-                if (cameraTools) cameraTools.classList.remove("d-none");
-
-                let currentZoom = 1;
-
-                // دالة توحيد تطبيق الزوم
-                const applyZoom = async (val) => {
-                    currentZoom = Math.min(Math.max(val, 1), 10); // تحديد المجال بين 1x و 10x
-                    
-                    if (zoomRange) zoomRange.value = currentZoom;
-                    if (zoomVal) zoomVal.innerText = `${currentZoom.toFixed(1)}x`;
-
-                    // 1. تقريب مباشر بـ CSS على الفيديو (شغال 100% على الآيفون والأندرويد)
-                    if (videoElem) {
-                        videoElem.style.transform = `scale(${currentZoom})`;
-                        videoElem.style.transformOrigin = "center center";
-                    }
-
-                    // 2. تقريب عدسة الموبايل (Hardware Zoom) إن وُجدت
-                    if (track && track.getCapabilities) {
-                        const caps = track.getCapabilities();
-                        if (caps.zoom) {
-                            try {
-                                const hwZoom = Math.min(currentZoom, caps.zoom.max || 10);
-                                await track.applyConstraints({ advanced: [{ zoom: hwZoom }] });
-                            } catch (e) { /* ignore constraint error */ }
-                        }
-                    }
-                };
-
-                // أ. ربط شريط الزوم (Slider)
-                if (zoomRange) {
-                    zoomRange.oninput = (e) => applyZoom(parseFloat(e.target.value));
-                }
-
-                // ب. تفعيل التكبير باللمس بأصبعين على شاشة الكاميرا (Pinch to Zoom)
-                if (qrContainer) {
-                    let initialDist = null;
-
-                    qrContainer.addEventListener("touchstart", (e) => {
-                        if (e.touches.length === 2) {
-                            initialDist = Math.hypot(
-                                e.touches[0].pageX - e.touches[1].pageX,
-                                e.touches[0].pageY - e.touches[1].pageY
-                            );
-                        }
-                    }, { passive: true });
-
-                    qrContainer.addEventListener("touchmove", (e) => {
-                        if (e.touches.length === 2 && initialDist) {
-                            const currentDist = Math.hypot(
-                                e.touches[0].pageX - e.touches[1].pageX,
-                                e.touches[0].pageY - e.touches[1].pageY
-                            );
-                            const diff = (currentDist - initialDist) / 120; // حساسية الحركة
-                            applyZoom(currentZoom + diff);
-                            initialDist = currentDist;
-                        }
-                    }, { passive: true });
-
-                    qrContainer.addEventListener("touchend", () => {
-                        initialDist = null;
+                // أ. لو الباركود أوفلاين
+                if (offlinePayload) {
+                    const realLectureNum = Number(offlinePayload.l ?? offlinePayload.ln ?? offlinePayload.lectureNumber ?? 1);
+                    await queueOfflineAttendance({
+                        studentId: sid,
+                        studentName: studentRealName,
+                        sessionId: offlinePayload.s,
+                        courseId: offlinePayload.c,
+                        courseName: offlinePayload.cn,
+                        lectureNumber: realLectureNum,
+                        timeSlot: offlinePayload.t,
+                        hash: offlinePayload.h,
+                        sessionStart: offlinePayload.ts,
+                        sessionType: offlinePayload.st,
+                        group: offlinePayload.g,
+                        hostRole: offlinePayload.hr,
+                        doctorId: offlinePayload.d
                     });
+
+                    refreshPendingBanner();
+                    showResult(true, "Attendance Saved Successfully!", "Saved locally on your device. It will upload automatically once internet is available.");
+                    document.getElementById("rcpt-name").innerText = studentRealName;
+                    document.getElementById("rcpt-id").innerText = sid;
+                    document.getElementById("rcpt-course").innerText = offlinePayload.cn || "Course";
+                    document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
+                    document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
+                    document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
+                    document.getElementById("receipt-box").classList.remove("d-none");
+                    return;
                 }
 
-                // ج. تفعيل الكشاف للمواصفات التي تدعمه
-                if (track && track.getCapabilities) {
-                    const capabilities = track.getCapabilities();
-                    if (capabilities.torch && btnTorch) {
-                        btnTorch.classList.remove("d-none");
-                        let torchOn = false;
-                        btnTorch.onclick = async () => {
-                            torchOn = !torchOn;
-                            try {
-                                await track.applyConstraints({ advanced: [{ torch: torchOn }] });
-                                btnTorch.style.background = torchOn ? "#F59E0B" : "#334155";
-                                btnTorch.style.color = torchOn ? "#000" : "#F59E0B";
-                            } catch (e) { console.warn("Torch error:", e); }
-                        };
-                    }
+                // ب. لو الباركود أونلاين مباشر
+                const res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
+                if (res.studentName) {
+                    localStorage.setItem(`muc_student_name_${sid}`, res.studentName);
+                    welcomeNameEl.innerText = res.studentName;
                 }
+
+                showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been recorded on the live classroom screen.");
+                document.getElementById("rcpt-name").innerText = res.studentName;
+                document.getElementById("rcpt-id").innerText = res.studentId;
+                document.getElementById("rcpt-course").innerText = res.courseName;
+                document.getElementById("rcpt-date").innerText = res.date;
+                document.getElementById("rcpt-time").innerText = res.time;
+                document.getElementById("rcpt-status").innerText = res.status === "Present" ? "Present" : "Late";
+                document.getElementById("receipt-box").classList.remove("d-none");
             } catch (err) {
-                console.warn("تعذر تشغيل أدوات الكاميرا المتقدمة:", err);
+                const errMsg = String(err.message || "");
+                isExpiredQrError = errMsg.includes("expired") || errMsg.includes("صلاحية");
+                showResult(false, "Check-in Failed", friendlyError(err));
             }
-        }, 400);
+        }
 
-    } catch (err) {
-await showCustomAlert("Permission Denied", "Please allow camera access in your browser settings to scan.");
-        btnTriggerCam.classList.remove("d-none");
-        qrBox.classList.add("d-none");
-    }
-}
+        async function startCameraScanner() {
+            if (typeof Html5Qrcode === "undefined") {
+                await showCustomAlert("Camera Initializing", "Please make sure you have opened the page online at least once.");
+                btnTriggerCam.classList.remove("d-none");
+                qrBox.classList.add("d-none");
+                return;
+            }
 
-// 3. تأكيد الحضور (معدل للربط المباشر وتفادي اسم "طالب")
-document.getElementById("attendance-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const sid = inputId.value.trim();
-    if (!sid) return;
-
-    const btn = document.getElementById("btn-submit");
-    btn.disabled = true;
-btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Confirming...`;
-    try {
-        localStorage.setItem("muc_saved_student_id", sid);
-
-        // جلب اسم الطالب الحقيقي فوراً من الفايربيز إذا كان النت شغال
-        let studentRealName = localStorage.getItem(`muc_student_name_${sid}`) || localStorage.getItem("muc_saved_student_name") || "طالب";
-
-        if (navigator.onLine) {
             try {
-                const { db } = await import("./firebase.js");
-                const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
-                const stdSnap = await getDoc(doc(db, "students", sid));
-                if (stdSnap.exists()) {
-                    studentRealName = stdSnap.data().name;
-                    localStorage.setItem(`muc_student_name_${sid}`, studentRealName);
-                    localStorage.setItem("muc_saved_student_name", studentRealName);
-                } else {
-                    throw new Error(`الرقم الجامعي (${sid}) غير مقيد بقاعدة البيانات.`);
+                if (html5QrScanner) {
+                    try { await html5QrScanner.clear(); } catch(e) {}
                 }
+                html5QrScanner = new Html5Qrcode("qr-reader");
+                await html5QrScanner.start(
+                    { facingMode: "environment" },
+                    { 
+                        fps: 25,
+                        qrbox: (w, h) => {
+                            const size = Math.floor(Math.min(w, h) * 0.90);
+                            return { width: size, height: size };
+                        }
+                    },
+                    async (decodedText) => {
+                        try {
+                            offlinePayload = null;
+                            activeSessionId = null;
+                            activeToken = null;
+
+                            if (decodedText.startsWith("{")) {
+                                offlinePayload = JSON.parse(decodedText);
+                                activeSessionId = offlinePayload.s;
+                                courseBadge.innerText = `محاضرة أوفلاين: ${offlinePayload.cn || ''}`;
+                            } else if (decodedText.includes("session=")) {
+                                const parsed = new URL(decodedText);
+                                const sParam = parsed.searchParams.get("session") || "";
+                                const tParam = parsed.searchParams.get("token") || "";
+                                const isOffline = parsed.searchParams.get("offline") === "1" || tParam.startsWith("OFF_") || sParam.startsWith("off_");
+
+                                if (isOffline) {
+                                    activeSessionId = sParam;
+                                    activeToken = tParam;
+                                    const cName = parsed.searchParams.get("cname") || parsed.searchParams.get("course") || "جلسة أوفلاين";
+                                    offlinePayload = {
+                                        s: activeSessionId,
+                                        c: parsed.searchParams.get("course") || "MUC_COURSE",
+                                        cn: decodeURIComponent(cName),
+                                        l: Number(parsed.searchParams.get("lec") || 1),
+                                        t: Math.floor(Date.now() / 10000),
+                                        h: activeToken,
+                                        ts: Number(parsed.searchParams.get("ts") || Date.now())
+                                    };
+                                    courseBadge.innerText = "حضور أوفلاين (Offline Mode)";
+                                } else {
+                                    if (!navigator.onLine) {
+                                        await showCustomAlert("Online Connection Required", "This live lecture requires an active internet connection to check in.");
+                                        return;
+                                    }
+                                    activeSessionId = sParam;
+                                    activeToken = tParam;
+                                    courseBadge.innerText = "Live Online Session";
+                                }
+                            } else {
+                                throw new Error("INVALID_QR");
+                            }
+
+                            document.getElementById("camera-tools")?.classList.add("d-none");
+                            if (html5QrScanner) {
+                                try { await html5QrScanner.stop(); } catch(e) {}
+                            }
+                            qrBox.classList.add("d-none");
+                            btnTriggerCam.classList.remove("d-none");
+
+                            // 🚀 تسجيل فوري بدون السؤال عن الـ ID مرة ثانية
+                            await processInstantQrCheckIn();
+                        } catch (e) {
+                            if (e && e.message === "INVALID_QR") {
+                                await showCustomAlert("Invalid QR Code", "Please point your camera directly at the screen's QR code.");
+                            }
+                        }
+                    },
+                    () => {}
+                );
+
+                // محرك الزوم والكشاف
+                setTimeout(() => {
+                    try {
+                        const videoElem = document.querySelector("#qr-reader video");
+                        const qrContainer = document.getElementById("qr-reader");
+                        const stream = videoElem ? videoElem.srcObject : null;
+                        const track = (stream && stream.getVideoTracks) ? stream.getVideoTracks()[0] : null;
+                        const cameraTools = document.getElementById("camera-tools");
+                        const zoomRange = document.getElementById("zoom-range");
+                        const zoomVal = document.getElementById("zoom-val");
+                        const btnTorch = document.getElementById("btn-torch");
+
+                        if (cameraTools) cameraTools.classList.remove("d-none");
+                        let currentZoom = 1;
+
+                        const applyZoom = async (val) => {
+                            currentZoom = Math.min(Math.max(val, 1), 10);
+                            if (zoomRange) zoomRange.value = currentZoom;
+                            if (zoomVal) zoomVal.innerText = `${currentZoom.toFixed(1)}x`;
+                            if (videoElem) {
+                                videoElem.style.transform = `scale(${currentZoom})`;
+                                videoElem.style.transformOrigin = "center center";
+                            }
+                            if (track && track.getCapabilities) {
+                                const caps = track.getCapabilities();
+                                if (caps.zoom) {
+                                    try { await track.applyConstraints({ advanced: [{ zoom: Math.min(currentZoom, caps.zoom.max || 10) }] }); } catch (e) {}
+                                }
+                            }
+                        };
+
+                        if (zoomRange) zoomRange.oninput = (e) => applyZoom(parseFloat(e.target.value));
+                        if (qrContainer) {
+                            let initialDist = null;
+                            qrContainer.addEventListener("touchstart", (e) => {
+                                if (e.touches.length === 2) initialDist = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
+                            }, { passive: true });
+                            qrContainer.addEventListener("touchmove", (e) => {
+                                if (e.touches.length === 2 && initialDist) {
+                                    const currentDist = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
+                                    applyZoom(currentZoom + (currentDist - initialDist) / 120);
+                                    initialDist = currentDist;
+                                }
+                            }, { passive: true });
+                            qrContainer.addEventListener("touchend", () => { initialDist = null; });
+                        }
+                        if (track && track.getCapabilities && track.getCapabilities().torch && btnTorch) {
+                            btnTorch.classList.remove("d-none");
+                            let torchOn = false;
+                            btnTorch.onclick = async () => {
+                                torchOn = !torchOn;
+                                try {
+                                    await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+                                    btnTorch.style.background = torchOn ? "#F59E0B" : "#334155";
+                                    btnTorch.style.color = torchOn ? "#000" : "#F59E0B";
+                                } catch (e) {}
+                            };
+                        }
+                    } catch (err) {}
+                }, 400);
             } catch (err) {
-                if (err.message.includes("غير مقيد")) throw err;
+                await showCustomAlert("Permission Denied", "Please allow camera access in your browser settings to scan.");
+                btnTriggerCam.classList.remove("d-none");
+                qrBox.classList.add("d-none");
             }
         }
 
-// أ. التسجيل أوفلاين وتمرير رقم المحاضرة وتاريخ اليوم
-        if (offlinePayload) {
-// قراءة رقم المحاضرة الحقيقي المتشفّر داخل باركود الدكتور
-            const realLectureNum = Number(offlinePayload.l ?? offlinePayload.ln ?? offlinePayload.lectureNumber ?? 1);
-
-            await queueOfflineAttendance({
-                studentId: sid,
-                studentName: studentRealName,
-                sessionId: offlinePayload.s,
-                courseId: offlinePayload.c,
-                courseName: offlinePayload.cn,
-                lectureNumber: realLectureNum, // الرقم الحقيقي القادم من شاشة الدكتور
-                timeSlot: offlinePayload.t,
-                hash: offlinePayload.h,
-                sessionStart: offlinePayload.ts,
-                sessionType: offlinePayload.st,
-                group: offlinePayload.g,
-                hostRole: offlinePayload.hr,
-                doctorId: offlinePayload.d
-            });
-
-refreshPendingBanner();
-            showResult(true, "Attendance Saved Successfully!", "Saved locally on your device. It will upload automatically once internet is available.");            
-            document.getElementById("rcpt-name").innerText = studentRealName;
-            document.getElementById("rcpt-id").innerText = sid;
-            document.getElementById("rcpt-course").innerText = offlinePayload.cn || "Course";
-            document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
-            document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
-            document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
-            document.getElementById("receipt-box").classList.remove("d-none");
-            return;
-        }
-
-        // ب. التسجيل أونلاين المباشر
-        let deviceId = localStorage.getItem("muc_device_fingerprint") || ("dev_" + Math.random().toString(36).substring(2));
-        localStorage.setItem("muc_device_fingerprint", deviceId);
-
-        const res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
-        
-        if (res.studentName) {
-            localStorage.setItem(`muc_student_name_${sid}`, res.studentName);
-            localStorage.setItem("muc_saved_student_name", res.studentName);
-        }
-
-showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been recorded on the live classroom screen.");
-        document.getElementById("rcpt-name").innerText = res.studentName;
-        document.getElementById("rcpt-id").innerText = res.studentId;
-        document.getElementById("rcpt-course").innerText = res.courseName;
-        document.getElementById("rcpt-date").innerText = res.date;
-        document.getElementById("rcpt-time").innerText = res.time;
-        document.getElementById("rcpt-status").innerText = res.status === "Present" ? "Present" : "Late";
-        document.getElementById("receipt-box").classList.remove("d-none");
-
-} catch (err) {
-    const errMsg = String(err.message || "");
-    isExpiredQrError = errMsg.includes("expired") || errMsg.includes("صلاحية");
-
-    showResult(false, "Check-in Failed", friendlyError(err));
-    btn.disabled = false;
-    btn.innerHTML = `<span>Confirm Attendance Now</span> <i class="fa-solid fa-arrow-right"></i>`;
-}
-});
         function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
-                scannerStep.classList.add("d-none");   // ← السطر الجديد
-
+            scannerStep.classList.add("d-none");
             inputStep.classList.add("d-none");
             resultStep.classList.remove("d-none");
             document.getElementById("btn-retry").classList.toggle("d-none", !canRetry);
@@ -756,72 +745,48 @@ showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been
             document.getElementById("status-title").innerText = title;
             document.getElementById("status-msg").innerText = msg;
         }
-document.getElementById("btn-retry").addEventListener("click", async () => {
-    resultStep.classList.add("d-none");
 
-    if (isExpiredQrError) {
-        isExpiredQrError = false;
-        offlinePayload = null;
-        activeSessionId = null;
-        activeToken = null;
+        document.getElementById("btn-retry").addEventListener("click", async () => {
+            resultStep.classList.add("d-none");
+            offlinePayload = null;
+            activeSessionId = null;
+            activeToken = null;
+            scannerStep.classList.remove("d-none");
+            btnTriggerCam.classList.remove("d-none");
+            qrBox.classList.add("d-none");
+        });
 
-        // إخفاء حقل الإدخال وإظهار الكاميرا
-        inputStep.classList.add("d-none");
-        scannerStep.classList.remove("d-none");
-        btnTriggerCam.classList.add("d-none");
-        qrBox.classList.remove("d-none");
-
-        // إيقاف أي فحص قديم وتشغيل الكاميرا فوراً لتلقط الرمز الحي
-        if (html5QrScanner) {
-            try { 
-                await html5QrScanner.stop(); 
-                await html5QrScanner.clear(); 
-            } catch(e) {}
+        async function showSyncErrorIfAny() {
+            const modal = document.getElementById("custom-app-modal");
+            if (!modal.classList.contains("d-none")) return;
+            const msg = localStorage.getItem("muc_sync_error");
+            if (!msg) return;
+            localStorage.removeItem("muc_sync_error");
+            await showCustomAlert("Attendance Not Registered", msg);
         }
-        startCameraScanner();
-    } else {
-        // لو الخطأ ليس انتهاء رمز (مثل رقم جامعي خطأ)، يرجع لخانة تعديل الرقم
-if (offlinePayload || activeSessionId) {
-    inputStep.classList.remove("d-none");
-    inputId.focus();
-} else {
-    scannerStep.classList.remove("d-none");
-}
-    }
-});
-async function showSyncErrorIfAny() {
-    const modal = document.getElementById("custom-app-modal");
-    if (!modal.classList.contains("d-none")) return;   // في مودال مفتوح
-    const msg = localStorage.getItem("muc_sync_error");
-    if (!msg) return;
-    localStorage.removeItem("muc_sync_error");
-    await showCustomAlert("Attendance Not Registered", msg);
-}
-        // ===== بانر الحضور المعلّق + زرار الرفع اليدوي =====
+
         function refreshPendingBanner() {
             const n = getPendingCount();
             document.getElementById("pending-count").innerText = n;
             document.getElementById("pending-banner").classList.toggle("d-none", n === 0);
         }
 
-async function runSync(manual) {
+        async function runSync(manual) {
             const btn = document.getElementById("btn-sync-now");
             const txt = document.getElementById("btn-sync-text");
             const fb = document.getElementById("sync-feedback");
 
             if (manual) {
                 btn.disabled = true;
-                txt.innerText = currentLang === "en" ? "Connecting to server..." : "جاري الاتصال بالسيرفر...";
+                txt.innerText = "Connecting to server...";
                 fb.innerText = "";
+                await new Promise(r => setTimeout(r, 600));
             }
-
-            // انتظار بسيط لضمان استقرار شبكة الموبايل
-            if (manual) await new Promise(r => setTimeout(r, 800));
 
             const result = await syncPendingAttendance();
             refreshPendingBanner();
 
-if (manual) {
+            if (manual) {
                 btn.disabled = false;
                 txt.innerText = "Sync Attendance Now";
                 if (getPendingCount() === 0) {
@@ -832,7 +797,7 @@ if (manual) {
                     fb.innerText = "No internet connection. Enable Wi-Fi or Mobile Data and try again.";
                 } else {
                     fb.style.color = "#B91C1C";
-                    fb.innerText = "Internet connection is weak. Please try again.";
+                    fb.innerText = "Waiting for instructor to upload offline lecture to server...";
                 }
             }
         }
@@ -842,103 +807,128 @@ if (manual) {
         document.addEventListener("visibilitychange", () => {
             if (document.visibilityState === "visible") runSync(false);
         });
-        // ===== تسجيل الحضور بكود الـ 6 أرقام (أونلاين + أوفلاين) =====
-document.getElementById("btn-enter-pin")?.addEventListener("click", async () => {
-    let studentIdVal = inputId.value.trim() || localStorage.getItem("muc_saved_student_id") || "";
-    if (!studentIdVal) {
-        studentIdVal = await showCustomPrompt("Student ID", "Please enter your Academic Student ID:", "");
-        if (!studentIdVal) return;
-    }
-    localStorage.setItem("muc_saved_student_id", studentIdVal);
-    inputId.value = studentIdVal;
 
-    const enteredPin = await showCustomPrompt("Lecture PIN Code", "Enter the 6-digit code shown on the screen:", "");
-    if (!enteredPin) return;
-    if (!/^\d{6}$/.test(enteredPin)) {
-        await showCustomAlert("Invalid PIN", "Please enter a valid 6-digit code.");
-        return;
-    }
+        // ===== تسجيل الحضور الفوري بكود الـ 6 أرقام (بدون طلب الـ ID مرة ثانية) =====
+        document.getElementById("btn-enter-pin")?.addEventListener("click", async () => {
+            const studentIdVal = localStorage.getItem("muc_saved_student_id") || inputId.value.trim();
+            if (!studentIdVal || studentIdVal.length < 7) {
+                welcomeBar.classList.add("d-none");
+                scannerStep.classList.add("d-none");
+                inputStep.classList.remove("d-none");
+                return;
+            }
 
-    const btnPin = document.getElementById("btn-enter-pin");
-    try {
-        btnPin.disabled = true;
-        btnPin.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Verifying Code...`;
-                // حظر فوري (أونلاين وأوفلاين) حسب أول رقم في الـ PIN
-        const mismatch = checkPinLectureMatch(enteredPin, studentIdVal);
-        if (mismatch === "WRONG_LEC_2") {
-            throw new Error("هذه المحاضرة الأولى وأنت مسجل في المحاضرة الثانية. من فضلك تواصل مع الدكتور.\n\nThis is Lecture 1, but you are registered in Lecture 2. Please contact your doctor.");
-        }
-        if (mismatch === "WRONG_LEC_1") {
-            throw new Error("هذه المحاضرة الثانية وأنت مسجل في المحاضرة الأولى. من فضلك تواصل مع الدكتور.\n\nThis is Lecture 2, but you are registered in Lecture 1. Please contact your doctor.");
-        }
+            const enteredPin = await showCustomPrompt("Lecture PIN Code", "أدخل كود المحاضرة المكون من 6 أرقام الظاهر على الشاشة:", "");
+            if (!enteredPin) return;
+            if (!/^\d{6}$/.test(enteredPin)) {
+                await showCustomAlert("Invalid PIN", "يرجى إدخال كود صحيح مكون من 6 أرقام فقط.");
+                return;
+            }
 
-// ---------- أوفلاين: نحفظ الـ PIN مع التحقق من عدم التكرار ----------
-        if (!navigator.onLine) {
-            const isEnMode = (typeof currentLang !== "undefined" && currentLang === "en") || document.documentElement.lang === "en";
-            const stdName = localStorage.getItem(`muc_student_name_${studentIdVal}`) || "Student";
-            await queueOfflineAttendance({
-                studentId: studentIdVal,
-                studentName: stdName,
-                sessionId: `pin_${enteredPin}`,
-                courseId: "",
-                courseName: isEnMode ? "PIN Lecture" : "محاضرة بالكود",
-                lectureNumber: 1,
-                timeSlot: 0,
-                hash: "",
-                pin: enteredPin
-            });
-            refreshPendingBanner();
-            showResult(true, isEnMode ? "Saved Offline!" : "تم الحفظ أوفلاين!", isEnMode ? "PIN saved on your phone. It will be registered automatically once you're online." : "تم حفظ الكود على هاتفك، وسيتم تثبيته تلقائياً فور توفر الإنترنت.");
-            document.getElementById("rcpt-name").innerText = stdName;
-            document.getElementById("rcpt-id").innerText = studentIdVal;
-            document.getElementById("rcpt-course").innerText = isEnMode ? "Lecture PIN Code" : "محاضرة برمز PIN";
-            document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString(isEnMode ? "en-US" : "ar-EG");
-            document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString(isEnMode ? "en-US" : "ar-EG");
-            document.getElementById("rcpt-status").innerText = isEnMode ? "Saved Offline ⏳ (Pending Sync)" : "محفوظ أوفلاين ⏳ (في انتظار المزامنة)";
-            document.getElementById("receipt-box").classList.remove("d-none");
-            return;
-        }
+            const btnPin = document.getElementById("btn-enter-pin");
+            const stdName = localStorage.getItem(`muc_student_name_${studentIdVal}`) || "طالب";
 
-        // ---------- أونلاين ----------
-        const { db, auth } = await import("./firebase.js");
-        const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
-        const { collection, query, where, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+            try {
+                btnPin.disabled = true;
+                btnPin.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Verifying Code...`;
 
-        if (!auth.currentUser) await signInAnonymously(auth);
+                const mismatch = checkPinLectureMatch(enteredPin, studentIdVal);
+                if (mismatch === "WRONG_LEC_2") {
+                    throw new Error("هذه المحاضرة الأولى وأنت مسجل في المحاضرة الثانية. من فضلك تواصل مع الدكتور.");
+                }
+                if (mismatch === "WRONG_LEC_1") {
+                    throw new Error("هذه المحاضرة الثانية وأنت مسجل في المحاضرة الأولى. من فضلك تواصل مع الدكتور.");
+                }
 
-        const q = query(
-            collection(db, "attendance_sessions"),
-            where("status", "==", "active"),
-            where("activePinCode", "==", parseInt(enteredPin, 10))
-        );
-        const snap = await getDocs(q);
-        if (snap.empty) throw new Error("Expired or incorrect PIN code. Please check the screen.");
+                // 1) إذا كان الطالب متصلاً بالإنترنت: نبحث عن الجلسة في السيرفر
+                if (navigator.onLine) {
+                    const { db, auth } = await import("./firebase.js");
+                    const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
+                    const { collection, query, where, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
 
-        const targetSession = snap.docs[0];
-        const token = targetSession.data().currentToken?.token || "";
+                    if (!auth.currentUser) await signInAnonymously(auth);
 
-        const res = await recordStudentAttendance(targetSession.id, token, studentIdVal, deviceId);
+                    const pinNum = parseInt(enteredPin, 10);
+                    const snap = await getDocs(query(
+                        collection(db, "attendance_sessions"),
+                        where("pinHistory", "array-contains", pinNum)
+                    ));
 
-        showResult(true, "Attendance Confirmed!", "Checked in successfully via PIN code.");
-        document.getElementById("rcpt-name").innerText = res.studentName;
-        document.getElementById("rcpt-id").innerText = res.studentId;
-        document.getElementById("rcpt-course").innerText = res.courseName;
-        document.getElementById("rcpt-date").innerText = res.date;
-        document.getElementById("rcpt-time").innerText = res.time;
-        document.getElementById("rcpt-status").innerText = res.status === "Present" ? "Present" : "Late";
-        document.getElementById("receipt-box").classList.remove("d-none");
-} catch (err) {
-        activeSessionId = null;
-        activeToken = null;
-        offlinePayload = null;
-        isExpiredQrError = false;
-        showResult(false, "Check-in Failed", friendlyError(err) || "Failed to verify PIN code.");
-    } finally {
-        btnPin.disabled = false;
-        btnPin.innerHTML = `<i class="fa-solid fa-keyboard"></i> <span>Enter 6-Digit PIN</span>`;
-    }
-});
-console.log("PIN listener attached ✅");
+                    const todayCA = new Date().toLocaleDateString("en-CA");
+                    const todayDocs = snap.docs.filter(d => !d.data().startedAtDate || d.data().startedAtDate === todayCA);
+
+                    // إذا وجدنا جلسة أونلاين نشطة حالياً
+                    const activeOnlineDoc = todayDocs.find(d => d.data().status === "active" && !d.data().qrOffline);
+                    if (activeOnlineDoc) {
+                        const res = await recordStudentAttendance(activeOnlineDoc.id, "PIN_VERIFIED", studentIdVal, deviceId);
+                        showResult(true, "Attendance Confirmed!", "Checked in successfully via PIN code.");
+                        document.getElementById("rcpt-name").innerText = res.studentName;
+                        document.getElementById("rcpt-id").innerText = res.studentId;
+                        document.getElementById("rcpt-course").innerText = res.courseName;
+                        document.getElementById("rcpt-date").innerText = res.date;
+                        document.getElementById("rcpt-time").innerText = res.time;
+                        document.getElementById("rcpt-status").innerText = res.status === "Present" ? "Present" : "Late";
+                        document.getElementById("receipt-box").classList.remove("d-none");
+                        return;
+                    }
+
+                    // إذا وجدنا جلسة أوفلاين رفعها جهاز الدكتور للسيرفر
+                    const offlineDoc = todayDocs[0];
+                    if (offlineDoc) {
+                        const sData = offlineDoc.data();
+                        await queueOfflineAttendance({
+                            studentId: studentIdVal,
+                            studentName: stdName,
+                            sessionId: offlineDoc.id,
+                            courseId: sData.courseId || "MUC_COURSE",
+                            courseName: sData.courseName || "Course",
+                            lectureNumber: sData.lectureNumber || 1,
+                            timeSlot: 0,
+                            hash: "",
+                            pin: enteredPin
+                        });
+                        await syncPendingAttendance();
+                        refreshPendingBanner();
+                        showResult(true, "Attendance Confirmed!", "Checked in successfully via PIN code.");
+                        document.getElementById("rcpt-name").innerText = stdName;
+                        document.getElementById("rcpt-id").innerText = studentIdVal;
+                        document.getElementById("rcpt-course").innerText = sData.courseName || "Course";
+                        document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
+                        document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
+                        document.getElementById("rcpt-status").innerText = "Present";
+                        document.getElementById("receipt-box").classList.remove("d-none");
+                        return;
+                    }
+                }
+
+                // 2) إذا كان الطالب أوفلاين (أو الدكتور فاتح محاضرة أوفلاين ولسه مرفعهاش على السيرفر)
+                await queueOfflineAttendance({
+                    studentId: studentIdVal,
+                    studentName: stdName,
+                    sessionId: `pin_${enteredPin}`,
+                    courseId: "",
+                    courseName: "PIN Lecture",
+                    lectureNumber: 1,
+                    timeSlot: 0,
+                    hash: "",
+                    pin: enteredPin
+                });
+                refreshPendingBanner();
+                showResult(true, "Saved Offline!", "PIN saved on your phone. It will be registered automatically once the lecture is synced.");
+                document.getElementById("rcpt-name").innerText = stdName;
+                document.getElementById("rcpt-id").innerText = studentIdVal;
+                document.getElementById("rcpt-course").innerText = "Lecture PIN Code";
+                document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
+                document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
+                document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
+                document.getElementById("receipt-box").classList.remove("d-none");
+            } catch (err) {
+                showResult(false, "Check-in Failed", friendlyError(err) || "Failed to verify PIN code.");
+            } finally {
+                btnPin.disabled = false;
+                btnPin.innerHTML = `<i class="fa-solid fa-keyboard"></i> <span>Enter 6-Digit PIN</span>`;
+            }
+        });
 setInterval(() => { refreshPendingBanner(); showSyncErrorIfAny(); }, 3000);
         refreshPendingBanner();
         runSync(false);

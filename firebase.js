@@ -134,8 +134,8 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
             }
         }
 
-        const t = sessionData.currentToken || {};
-        if (!clientToken || t.token !== clientToken) {
+const t = sessionData.currentToken || {};
+        if (clientToken !== "PIN_VERIFIED" && (!clientToken || t.token !== clientToken)) {
             throw new Error("QR Code expired! Please scan the updated code on the screen.");
         }
 
