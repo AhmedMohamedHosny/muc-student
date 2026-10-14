@@ -190,7 +190,7 @@ background: #FDF2F3;
 }
     </style>
 </head>
-<body>
+
 <body style="padding-bottom: 50px;">
 <!-- شريط الترحيب ثابت فوق خالص في الشاشة الحمراء خارج الكارت الأبيض -->
 <div id="student-welcome-bar" class="d-none" style="position: fixed; top: 12px; left: 50%; transform: translateX(-50%); width: calc(100% - 2rem); max-width: 460px; z-index: 9999; background: rgba(25, 2, 5, 0.65); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(197, 155, 39, 0.55); border-radius: 14px; padding: 8px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.3);" dir="rtl">
@@ -592,10 +592,17 @@ if (navigator.onLine && (forceFetch || !stdName || stdName === "طالب" || std
                     });
 
                     // إذا كان الطالب مشغل نت، نرفع الحضور فوراً للسيرفر لكي لا يظهر شريط الانتظار الأصفر!
-                    if (navigator.onLine) {
+if (navigator.onLine) {
                         await syncPendingAttendance();
                     }
                     refreshPendingBanner();
+
+                    // فحص حاسم: لو السيرفر رفض الطالب (مثلاً غير مقيد بالمقرر)، نظهر شاشة الخطأ الحمراء فوراً!
+                    const syncErr = localStorage.getItem("muc_sync_error");
+                    if (syncErr) {
+                        localStorage.removeItem("muc_sync_error");
+                        throw new Error(syncErr);
+                    }
 
                     const isAlreadySynced = getPendingCount() === 0;
                     if (isAlreadySynced) {
@@ -816,7 +823,8 @@ if (navigator.onLine && (forceFetch || !stdName || stdName === "طالب" || std
         }
 
 function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
-            welcomeBar.classList.add("d-none"); // إخفاء شريط الاسم والـ ID في صفحة التأكيد
+            welcomeBar.classList.add("d-none");
+            document.getElementById("receipt-box")?.classList.add("d-none"); // إخفاء الإيصال دائماً إلا عند النجاح
             scannerStep.classList.add("d-none");
             inputStep.classList.add("d-none");
             resultStep.classList.remove("d-none");
@@ -898,7 +906,7 @@ document.getElementById("btn-sync-now").addEventListener("click", () => runSync(
             if (document.visibilityState === "visible") runSync(false);
         });
 
-// ===== تسجيل الحضور الذكي والمؤمّن بكود الـ 6 أرقام (يرفض أي كود عشوائي) =====
+// ===== تسجيل الحضور الذكي والمؤمّن بكود الـ 6 أرقام =====
         document.getElementById("btn-enter-pin")?.addEventListener("click", async () => {
             const studentIdVal = getSavedStudentId() || inputId.value.trim();
             if (!studentIdVal || studentIdVal.length < 7) {
@@ -922,7 +930,12 @@ document.getElementById("btn-sync-now").addEventListener("click", () => runSync(
                 btnPin.disabled = true;
                 btnPin.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Verifying Code...`;
 
-                // 1) فحص عزل المحاضرة 1 عن المحاضرة 2
+                // 1) فحص البصمة الزمنية والرياضية للكود فوراً (يرفض أي رقم عشوائي مثل 180585 في 0 ثانية سواء أونلاين أو أوفلاين!)
+                if (!isValidPinChecksum(enteredPin)) {
+                    throw new Error(`❌ الكود الرقمي (${enteredPin}) غير صحيح أو منتهي الصلاحية! يرجى نقل الكود الحالي الظاهر على شاشة المدرج.\n\nInvalid or expired PIN code!`);
+                }
+
+                // 2) فحص عزل المحاضرة 1 عن المحاضرة 2
                 const mismatch = checkPinLectureMatch(enteredPin, studentIdVal);
                 if (mismatch === "WRONG_LEC_2") {
                     throw new Error("هذه المحاضرة الأولى وأنت مسجل في المحاضرة الثانية. من فضلك تواصل مع الدكتور.");
@@ -931,8 +944,7 @@ document.getElementById("btn-sync-now").addEventListener("click", () => runSync(
                     throw new Error("هذه المحاضرة الثانية وأنت مسجل في المحاضرة الأولى. من فضلك تواصل مع الدكتور.");
                 }
 
-                // 2) محاولة التحقق والتسجيل المباشر عبر السيرفر (بمهلة 4.5 ثانية)
-                let serverCheckedSuccessfully = false;
+                // 3) إذا كان الطالب متصلاً بالإنترنت: نبحث عن الجلسة في السيرفر لتسجيله مباشرة
                 if (navigator.onLine) {
                     try {
                         const { db, auth } = await import("./firebase.js");
@@ -953,46 +965,35 @@ document.getElementById("btn-sync-now").addEventListener("click", () => runSync(
                             new Promise((_, rej) => setTimeout(() => rej(new Error("NETWORK_TIMEOUT")), 4500))
                         ]);
 
-                        serverCheckedSuccessfully = true;
                         const todayCA = new Date().toLocaleDateString("en-CA");
                         const todayDocs = snap.docs.filter(d => !d.data().startedAtDate || d.data().startedAtDate === todayCA);
 
-                        // أ) إذا لم توجد أي محاضرة اليوم بهذا الكود على السيرفر -> نرفض الكود فوراً!
-                        if (todayDocs.length === 0) {
-                            throw new Error("INVALID_OR_CLOSED_PIN");
+                        // إذا وجدنا المحاضرة مرفوعة على السيرفر -> نسجل حضور الطالب مباشرة بدون طابور انتظار!
+                        if (todayDocs.length > 0) {
+                            const targetDoc = todayDocs.find(d => d.data().status === "active" && !d.data().qrOffline) || todayDocs[0];
+                            const res = await recordStudentAttendance(targetDoc.id, "PIN_VERIFIED", studentIdVal, deviceId);
+
+                            refreshPendingBanner();
+                            showResult(true, "Attendance Confirmed!", "Checked in and registered on server successfully via PIN code.");
+                            document.getElementById("rcpt-name").innerText = res.studentName;
+                            document.getElementById("rcpt-id").innerText = res.studentId;
+                            document.getElementById("rcpt-course").innerText = res.courseName;
+                            document.getElementById("rcpt-date").innerText = res.date;
+                            document.getElementById("rcpt-time").innerText = res.time;
+                            document.getElementById("rcpt-status").innerText = res.status === "Present" ? "Present ✔" : "Late";
+                            document.getElementById("receipt-box").classList.remove("d-none");
+                            return;
                         }
-
-                        // ب) إذا وجدنا المحاضرة (سواء أونلاين أو أوفلاين) -> نسجل حضور الطالب مباشرة على السيرفر بدون أي طابور انتظار!
-                        const targetDoc = todayDocs.find(d => d.data().status === "active" && !d.data().qrOffline) || todayDocs[0];
-                        const res = await recordStudentAttendance(targetDoc.id, "PIN_VERIFIED", studentIdVal, deviceId);
-
-                        refreshPendingBanner();
-                        showResult(true, "Attendance Confirmed!", "Checked in and registered on server successfully via PIN code.");
-                        document.getElementById("rcpt-name").innerText = res.studentName;
-                        document.getElementById("rcpt-id").innerText = res.studentId;
-                        document.getElementById("rcpt-course").innerText = res.courseName;
-                        document.getElementById("rcpt-date").innerText = res.date;
-                        document.getElementById("rcpt-time").innerText = res.time;
-                        document.getElementById("rcpt-status").innerText = res.status === "Present" ? "Present ✔" : "Late";
-                        document.getElementById("receipt-box").classList.remove("d-none");
-                        return;
+                        // أما إذا كان الكود صحيحاً بختم الوقت الحالي ولم يظهر على السيرفر بعد -> فهذا يعني أن لاب الدكتور أوفلاين في المدرج، فنحفظه للطالب في الخطوة 4!
                     } catch (netErr) {
                         const msg = String(netErr?.message || "");
-                        if (msg === "INVALID_OR_CLOSED_PIN") {
-                            throw new Error(`❌ الكود الرقمي (${enteredPin}) غير صحيح أو لا توجد محاضرة مفتوحة حالياً بهذا الكود!\n\nInvalid PIN code or no active lecture found.`);
-                        }
-                        if (serverCheckedSuccessfully) {
+                        if (msg !== "NETWORK_TIMEOUT" && !msg.includes("Failed to fetch") && !msg.includes("network-request-failed") && !msg.includes("SESSION_NOT_ON_SERVER_YET")) {
                             throw netErr; // خطأ فعلي مثل: الطالب مسجل مسبقاً أو غير مقيد بالمقرر
                         }
-                        // أما إذا كان الخطأ انقطاع/سقوط الشبكة في المدرج (NETWORK_TIMEOUT)، ننتقل للتحقق الرياضي الأوفلاين
                     }
                 }
 
-                // 3) إذا كان الطالب أوفلاين تماماً (بدون إنترنت): نتحقق أولاً من المعادلة الرياضية للكود لمنع أي أرقام عشوائية!
-                if (!isValidPinChecksum(enteredPin)) {
-                    throw new Error(`❌ الكود الرقمي (${enteredPin}) غير صحيح! يرجى التأكد من نقل الأرقام الـ 6 الصحيحة من شاشة المدرج.\n\nInvalid PIN code!`);
-                }
-
+                // 4) حفظ الكود الصحيح في الأوفلاين (لو الطالب أوفلاين أو لاب الدكتور أوفلاين لم يرفع المحاضرة بعد)
                 await queueOfflineAttendance({
                     studentId: studentIdVal,
                     studentName: stdName,
@@ -1005,7 +1006,7 @@ document.getElementById("btn-sync-now").addEventListener("click", () => runSync(
                     pin: enteredPin
                 });
                 refreshPendingBanner();
-                showResult(true, "Saved Offline!", "PIN saved on your phone. It will be registered automatically once you connect to the internet.");
+                showResult(true, "Saved Offline!", "PIN verified and saved on your phone. It will sync automatically once the lecture is uploaded.");
                 document.getElementById("rcpt-name").innerText = stdName;
                 document.getElementById("rcpt-id").innerText = studentIdVal;
                 document.getElementById("rcpt-course").innerText = "Lecture PIN Code";
