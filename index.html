@@ -874,20 +874,20 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
 
 // ---------- أوفلاين: نحفظ الـ PIN مع التحقق من عدم التكرار ----------
         if (!navigator.onLine) {
+            const isEnMode = (typeof currentLang !== "undefined" && currentLang === "en") || document.documentElement.lang === "en";
             const stdName = localStorage.getItem(`muc_student_name_${studentIdVal}`) || "Student";
             await queueOfflineAttendance({
                 studentId: studentIdVal,
                 studentName: stdName,
                 sessionId: `pin_${enteredPin}`,
                 courseId: "",
-                courseName: isEn ? "PIN Lecture" : "محاضرة بالكود",
+                courseName: isEnMode ? "PIN Lecture" : "محاضرة بالكود",
                 lectureNumber: 1,
                 timeSlot: 0,
                 hash: "",
                 pin: enteredPin
             });
             refreshPendingBanner();
-            const isEnMode = (typeof currentLang !== "undefined" && currentLang === "en") || document.documentElement.lang === "en";
             showResult(true, isEnMode ? "Saved Offline!" : "تم الحفظ أوفلاين!", isEnMode ? "PIN saved on your phone. It will be registered automatically once you're online." : "تم حفظ الكود على هاتفك، وسيتم تثبيته تلقائياً فور توفر الإنترنت.");
             document.getElementById("rcpt-name").innerText = stdName;
             document.getElementById("rcpt-id").innerText = studentIdVal;
