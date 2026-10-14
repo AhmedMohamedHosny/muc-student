@@ -247,52 +247,63 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
 
     const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
     const deviceId = getLocalDeviceId();
-
-// 🔒 فحص أمني ذكي: منع تكرار تسجيل الطالب سواء سجل بالباركود أو الكود الرقمي لنفس الجلسة
+// 🔒 فحص أمني ذكي: منع تراكم 4 أو 5 سجلات لنفس المحاضرة عند تكرار المحاولة
     const todayCA = new Date().toLocaleDateString("en-CA");
-    const studentExists = queue.some(q => {
+    const nowMs = Date.now();
+    const LECTURE_WINDOW_MS = 90 * 60 * 1000; // 90 دقيقة (مدة المحاضرة الواحدة)
+
+    // 1) إذا كان الطالب مسجلاً بالفعل بنفس الجلسة أو نفس الـ PIN أو نفس المقرر اليوم (أو مسح QR كامل خلال آخر 90 دقيقة)
+    const exactOrQrExists = queue.some(q => {
         if (q.studentId !== cleanedStudentId) return false;
-        // تطابق نفس الجلسة المباشرة
         if (q.sessionId === sessionId) return true;
-        // تطابق نفس الكود الرقمي PIN
         if (pin && q.pin && String(q.pin) === String(pin)) return true;
-        // تطابق نفس المقرر في نفس اليوم
-        if (courseId && q.courseId && q.courseId === courseId && q.startedAtDate === todayCA) return true;
+        if (courseId && q.courseId && q.courseId !== "MUC_COURSE" && q.courseId === courseId && q.startedAtDate === todayCA) return true;
+        // لو الطالب مسح باركود QR كامل في آخر 90 دقيقة ثم حاول يكتب PIN لنفس المحاضرة
+        if (pin && !q.pin && (nowMs - (q.scannedAt || 0) < LECTURE_WINDOW_MS)) return true;
         return false;
     });
 
-    if (studentExists) {
+    if (exactOrQrExists) {
         throw new Error("⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (سواء بالباركود أو الكود الرقمي) ومحفوظ على هاتفك!\n\nYou have already checked in for this lecture!");
     }
 
-    // 🔒 منع تسجيل طالبين مختلفين من نفس الهاتف
-    const deviceExists = queue.some(q => q.sessionId === sessionId && q.deviceId === deviceId);
+    // 2) منع تسجيل طالبين مختلفين من نفس الهاتف في نفس المحاضرة
+    const deviceExists = queue.some(q => q.studentId !== cleanedStudentId && (
+        q.sessionId === sessionId || (nowMs - (q.scannedAt || 0) < LECTURE_WINDOW_MS)
+    ));
     if (deviceExists) {
         throw new Error("⚠️ حماية أمنية: تم استخدام هذا الهاتف لتسجيل طالب آخر في هذه المحاضرة!");
     }
 
+    // 3) إذا كان الطالب قد أدخل كود PIN منذ دقائق وأعاد المحاولة بكود PIN أحدث (أو مسح QR)، نستبدل المحاولة القديمة لمنع تكرار العداد
+    const cleanedQueue = queue.filter(q => {
+        if (q.studentId !== cleanedStudentId) return true;
+        const isRecentPinAttempt = Boolean(q.pin) && (nowMs - (q.scannedAt || 0) < LECTURE_WINDOW_MS);
+        return !isRecentPinAttempt; // يحذف محاولة الـ PIN القديمة ويحل محلها السجل الجديد
+    });
+
     const record = {
-        studentId: String(studentId).trim(),
+        studentId: cleanedStudentId,
         studentName: studentName || "طالب",
         sessionId: String(sessionId).trim(),
         courseId: courseId || "MUC_COURSE",
         courseName: courseName || "المقرر الدراسي",
         lectureNumber: Number(lectureNumber) || 1,
-        startedAtDate: new Date().toLocaleDateString("en-CA"),
+        startedAtDate: todayCA,
         deviceId: deviceId,
         timeSlot: timeSlot || 0,
         hash: hash || "",
-        scannedAt: Date.now(),
+        scannedAt: nowMs,
         sessionStart: Number(sessionStart) || 0,
         sessionType: sessionType || "",
         hostRole: hostRole || "",
         group: group || "",
-                pin: pin || "",
+        pin: pin || "",
         doctorId: doctorId || ""
     };
 
-    queue.push(record);
-    localStorage.setItem("muc_pending_records", JSON.stringify(queue));
+    cleanedQueue.push(record);
+    localStorage.setItem("muc_pending_records", JSON.stringify(cleanedQueue));
 
     // إذا كان الهاتف متصلاً بالإنترنت حالياً، يرفع الحضور فوراً
     if (navigator.onLine) syncPendingAttendance(); // بدون await
@@ -322,7 +333,13 @@ function removeFromQueue(item) {
     const key = item.origSessionId || item.sessionId;
     const q = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
     localStorage.setItem("muc_pending_records", JSON.stringify(
-        q.filter(x => !(x.sessionId === key && x.studentId === item.studentId))
+        q.filter(x => {
+            if (x.studentId !== item.studentId) return true;
+            if (x.sessionId === key || x.sessionId === item.sessionId) return false;
+            // مسح أي محاولات PIN أخرى لنفس الطالب خلال نفس المحاضرة (90 دقيقة)
+            if (x.pin && Math.abs((x.scannedAt || 0) - (item.scannedAt || 0)) < 90 * 60 * 1000) return false;
+            return true;
+        })
     ));
 }
 
@@ -478,7 +495,42 @@ for (const item of queue) {
 }
 
 export function getPendingCount() {
-    return JSON.parse(localStorage.getItem("muc_pending_records") || "[]").length;
+    // 1) مسح شامل لمرة واحدة فقط لكل السجلات القديمة العالقة عند الطلاب فور فتح الموقع المحدث
+    if (!localStorage.getItem("muc_purge_old_sync_v1")) {
+        localStorage.removeItem("muc_pending_records");
+        localStorage.removeItem("muc_sync_error");
+        localStorage.setItem("muc_purge_old_sync_v1", "done");
+        return 0;
+    }
+
+    // 2) تنظيف تلقائي مستمر لأي سجل تالف أو قديم مر عليه أكثر من 6 ساعات
+    const rawQueue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
+    if (rawQueue.length === 0) return 0;
+
+    const nowMs = Date.now();
+    const MAX_AGE_MS = 6 * 3600 * 1000; // 6 ساعات كحد أقصى لبقاء السجل المعلق
+    const seenKeys = new Set();
+
+    const cleanQueue = rawQueue.filter(item => {
+        // حذف أي سجل كان فيه الـ ID عبارة عن كود PIN من 6 أرقام بالخطأ
+        const sid = String(item.studentId || "").trim();
+        if (sid.length < 7) return false;
+
+        // حذف أي سجل قديم مر عليه أكثر من 6 ساعات
+        if (nowMs - (item.scannedAt || 0) > MAX_AGE_MS) return false;
+
+        // منع وجود أكثر من سجل واحد لنفس الطالب في الطابور
+        if (seenKeys.has(sid)) return false;
+        seenKeys.add(sid);
+
+        return true;
+    });
+
+    if (cleanQueue.length !== rawQueue.length) {
+        localStorage.setItem("muc_pending_records", JSON.stringify(cleanQueue));
+    }
+
+    return cleanQueue.length;
 }
 
 // منظم حركة المزامنة لمنع سقوط السيرفر عند خروج مئات الطلاب معاً (Jittered Queue)

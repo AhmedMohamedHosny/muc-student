@@ -194,34 +194,37 @@ background: #FDF2F3;
 <body style="padding-bottom: 50px;">
 <div class="card">
 
+        <!-- 1. شريط الترحيب العلوي المدمج بخط صغير وأنيق في قمة الكارت فوق اللوجو -->
+        <div id="student-welcome-bar" class="d-none" style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 50px; padding: 5px 12px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px;" dir="rtl">
+            <div style="display: flex; align-items: center; gap: 5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 0.74rem; font-weight: 700; color: #1E293B;">
+                <span>👋 مرحباً،</span>
+                <span id="welcome-student-name" style="color: #7A0C16; font-weight: 800; overflow: hidden; text-overflow: ellipsis;">طالب الجامعة</span>
+                <span style="color: #CBD5E1;">|</span>
+                <span id="welcome-student-id" style="color: #64748B; font-family: monospace; font-size: 0.73rem;">--</span>
+            </div>
+            <button type="button" id="btn-change-saved-id" style="background: #FEE2E2; border: 1px solid #FECACA; color: #DC2626; padding: 2px 8px; border-radius: 50px; font-size: 0.68rem; font-weight: 500; cursor: pointer; white-space: nowrap; flex-shrink: 0;">
+                <i class="fa-solid fa-pen-to-square"></i> تغيير الرقم
+            </button>
+        </div>
 
         <img src="logo.jpg" alt="MUC Logo" class="logo">
         <div id="course-badge" class="session-badge">Smart Live Attendance</div>
 
-<div id="pending-banner" class="d-none" style="background:#FEF3C7; border:1px solid #F59E0B; color:#92400E; border-radius:10px; padding:10px 12px; margin-bottom:12px; text-align:left;">
+        <div id="pending-banner" class="d-none" style="background:#FEF3C7; border:1px solid #F59E0B; color:#92400E; border-radius:10px; padding:10px 12px; margin-bottom:12px; text-align:left;">
             <div style="font-weight:700; font-size:0.88rem; margin-bottom:8px;">
                 <i class="fa-solid fa-clock"></i>
                 You have <span id="pending-count">0</span> offline attendance record(s) pending sync
             </div>
-            <button type="button" id="btn-sync-now" class="btn" style="background:#C59B27; color:#000; padding:0.7rem; font-size:0.95rem;">
-                <i class="fa-solid fa-cloud-arrow-up"></i>
-                <span id="btn-sync-text">Sync Attendance Now</span>
-            </button>
-            <p id="sync-feedback" style="font-size:0.78rem; margin-top:6px; font-weight:700;"></p>
-        </div>
-<!-- 1. شريط الترحيب بالطالب (يظهر فوق دائماً بعد حفظ الـ ID) -->
-        <div id="student-welcome-bar" class="d-none" style="background: #F8FAFC; border: 1.5px solid #CBD5E1; border-radius: 12px; padding: 10px 14px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; text-align: right;" dir="rtl">
-            <div>
-                <div style="font-size: 0.95rem; font-weight: 800; color: #0F172A;">
-                    👋 مرحباً، <span id="welcome-student-name" style="color: #7A0C16;">طالب الجامعة</span>
-                </div>
-                <div style="font-size: 0.78rem; color: #475569; font-weight: 700;">
-                    الرقم الجامعي: <span id="welcome-student-id" style="font-family: monospace; font-size: 0.85rem;">--</span>
-                </div>
+            <div style="display:flex; gap:8px;">
+                <button type="button" id="btn-sync-now" class="btn" style="background:#C59B27; color:#000; padding:0.7rem; font-size:0.95rem; flex:1;">
+                    <i class="fa-solid fa-cloud-arrow-up"></i>
+                    <span id="btn-sync-text">Sync Attendance Now</span>
+                </button>
+                <button type="button" id="btn-clear-pending" class="btn" style="background:#FEE2E2; color:#DC2626; border:1px solid #FECACA; padding:0.7rem 0.9rem; font-size:0.9rem; width:auto; border-radius:10px;" title="مسح السجل المعلق">
+                    <i class="fa-solid fa-trash-can"></i>
+                </button>
             </div>
-            <button type="button" id="btn-change-saved-id" style="background: #FEE2E2; border: 1px solid #FECACA; color: #DC2626; padding: 5px 10px; border-radius: 8px; font-size: 0.75rem; font-weight: 800; cursor: pointer;">
-                <i class="fa-solid fa-pen-to-square"></i> تغيير الرقم
-            </button>
+            <p id="sync-feedback" style="font-size:0.78rem; margin-top:6px; font-weight:700;"></p>
         </div>
 
         <!-- 2. شاشة البداية: إدخال الرقم الجامعي أولاً قبل أي شيء -->
@@ -420,14 +423,49 @@ const welcomeBar = document.getElementById("student-welcome-bar");
         const welcomeNameEl = document.getElementById("welcome-student-name");
         const welcomeIdEl = document.getElementById("welcome-student-id");
 
+        // حفظ واسترجاع الرقم الجامعي والاسم من LocalStorage + Cookies لمدة 365 يوماً
+        function saveStudentIdPermanently(sid, sname = "") {
+            localStorage.setItem("muc_saved_student_id", sid);
+            document.cookie = `muc_saved_student_id=${encodeURIComponent(sid)}; max-age=31536000; path=/; SameSite=Lax`;
+            if (sname) {
+                localStorage.setItem(`muc_student_name_${sid}`, sname);
+                localStorage.setItem("muc_saved_student_name", sname);
+                document.cookie = `muc_saved_student_name=${encodeURIComponent(sname)}; max-age=31536000; path=/; SameSite=Lax`;
+            }
+        }
+
+        function getSavedStudentId() {
+            const fromLocal = localStorage.getItem("muc_saved_student_id");
+            if (fromLocal) return fromLocal;
+            const match = document.cookie.match(/(?:^|;\s*)muc_saved_student_id=([^;]*)/);
+            if (match && match[1]) {
+                const decoded = decodeURIComponent(match[1]);
+                localStorage.setItem("muc_saved_student_id", decoded);
+                return decoded;
+            }
+            return "";
+        }
+
+        function getSavedStudentName(sid) {
+            const fromLocal = localStorage.getItem(`muc_student_name_${sid}`) || localStorage.getItem("muc_saved_student_name");
+            if (fromLocal) return fromLocal;
+            const match = document.cookie.match(/(?:^|;\s*)muc_saved_student_name=([^;]*)/);
+            if (match && match[1]) {
+                const decoded = decodeURIComponent(match[1]);
+                localStorage.setItem(`muc_student_name_${sid}`, decoded);
+                return decoded;
+            }
+            return "";
+        }
+
         // دالة تحديث شريط الترحيب العلوي وإظهار أزرار الـ QR والـ PIN
         async function activateStudentProfile(sid, forceFetch = false) {
             const cleanId = String(sid || "").trim();
             if (!cleanId) return false;
 
-            let stdName = localStorage.getItem(`muc_student_name_${cleanId}`) || "";
+            let stdName = getSavedStudentName(cleanId);
 
-            if (navigator.onLine && (forceFetch || !stdName || stdName === "طالب" || stdName === "Student")) {
+            if (navigator.onLine && (forceFetch || !stdName || stdName === "طالب" || stdName === "Student" || stdName === "طالب جامعة مايو")) {
                 try {
                     const { db, auth } = await import("./firebase.js");
                     const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
@@ -436,8 +474,6 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                     const stdSnap = await getDoc(doc(db, "students", cleanId));
                     if (stdSnap.exists()) {
                         stdName = stdSnap.data().name || cleanId;
-                        localStorage.setItem(`muc_student_name_${cleanId}`, stdName);
-                        localStorage.setItem("muc_saved_student_name", stdName);
                     } else {
                         await showCustomAlert("الرقم الجامعي غير صحيح", `⚠️ الرقم الجامعي (${cleanId}) غير مسجل في قاعدة بيانات الجامعة! تأكد من كتابة الـ ID الصحيح.`);
                         return false;
@@ -448,7 +484,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             }
 
             if (!stdName) stdName = "طالب جامعة مايو";
-            localStorage.setItem("muc_saved_student_id", cleanId);
+            saveStudentIdPermanently(cleanId, stdName);
             inputId.value = cleanId;
 
             welcomeNameEl.innerText = stdName;
@@ -462,7 +498,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
         }
 
         // عند فتح الموقع: لو الطالب مسجل رقمه قبل كده، نرحب به فوراً ونظهر له الـ QR والـ PIN
-        const initialSavedId = localStorage.getItem("muc_saved_student_id");
+        const initialSavedId = getSavedStudentId();
         if (initialSavedId && initialSavedId.length >= 7) {
             activateStudentProfile(initialSavedId, false);
         } else {
@@ -802,8 +838,13 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             }
         }
 
-        document.getElementById("btn-sync-now").addEventListener("click", () => runSync(true));
-        window.addEventListener("online", () => runSync(false));
+document.getElementById("btn-sync-now").addEventListener("click", () => runSync(true));
+        document.getElementById("btn-clear-pending")?.addEventListener("click", () => {
+            localStorage.removeItem("muc_pending_records");
+            refreshPendingBanner();
+            document.getElementById("sync-feedback").innerText = "";
+        });
+                window.addEventListener("online", () => runSync(false));
         document.addEventListener("visibilitychange", () => {
             if (document.visibilityState === "visible") runSync(false);
         });
