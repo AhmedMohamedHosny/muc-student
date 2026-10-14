@@ -770,7 +770,8 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             }
         }
 
-        function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
+function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
+            welcomeBar.classList.add("d-none"); // إخفاء شريط الاسم والـ ID في صفحة التأكيد
             scannerStep.classList.add("d-none");
             inputStep.classList.add("d-none");
             resultStep.classList.remove("d-none");
@@ -789,6 +790,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             offlinePayload = null;
             activeSessionId = null;
             activeToken = null;
+            welcomeBar.classList.remove("d-none"); // إظهار الشريط مرة أخرى عند العودة للرئيسية
             scannerStep.classList.remove("d-none");
             btnTriggerCam.classList.remove("d-none");
             qrBox.classList.add("d-none");
