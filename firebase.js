@@ -207,14 +207,27 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
             method: clientToken === "PIN_VERIFIED" ? "PIN_CODE" : "QR_SCAN"
         }, { merge: true }), 4500);
 
+// قفل الرقم الجامعي على هذا الهاتف نهائياً على السيرفر لمنع انتحال الشخصية
         try {
-            await withTimeout(setDoc(deviceRef, {
-                sessionId: sessionId,
-                deviceId: safeDeviceId,
-                studentId: cleanedStudentId,
-                createdAt: serverTimestamp()
-            }, { merge: true }), 3000);
-        } catch (e) {}
+            const hwKey = localStorage.getItem("muc_hw_bound_key") || safeDeviceId;
+            const idLockRef = doc(db, "attendance_devices", `id_lock_${cleanedStudentId}`);
+            const idLockSnap = await withTimeout(getDoc(idLockRef), 3000);
+            if (idLockSnap.exists()) {
+                const lockedDev = idLockSnap.data().deviceId;
+                if (lockedDev && lockedDev !== hwKey && lockedDev !== safeDeviceId) {
+                    throw new Error("🚫 هذا الرقم الجامعي مسجل ومربوط بهاتف طالب آخر بالفعل! يرجى التحدث مع المشرف.");
+                }
+            } else {
+                await withTimeout(setDoc(idLockRef, {
+                    studentId: cleanedStudentId,
+                    studentName: studentRealName,
+                    deviceId: hwKey,
+                    lockedAt: serverTimestamp()
+                }, { merge: true }), 3000);
+            }
+        } catch (lockErr) {
+            if (String(lockErr.message || "").includes("مربوط بهاتف طالب آخر")) throw lockErr;
+        }
 
         removeFromQueue({ studentId: cleanedStudentId, sessionId: sessionId, courseId: sessionData.courseId, scannedAt: Date.now() });
 

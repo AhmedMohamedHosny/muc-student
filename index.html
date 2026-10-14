@@ -43,7 +43,7 @@
             padding: 1rem;
         }
 
-        .logo { height: 75px; object-fit: contain; margin-bottom: 0.75rem; }
+.logo { height: 75px; object-fit: contain; display: block; margin: 0 auto 0.5rem; }
         .session-badge {
 background: #FDF2F3;
             color: var(--secondary);
@@ -192,19 +192,68 @@ background: #FDF2F3;
 </head>
 
 <body style="padding-bottom: 50px;">
-<!-- شريط الترحيب ثابت فوق خالص في الشاشة الحمراء خارج الكارت الأبيض -->
-<div id="student-welcome-bar" class="d-none" style="position: fixed; top: 12px; left: 50%; transform: translateX(-50%); width: calc(100% - 2rem); max-width: 460px; z-index: 9999; background: rgba(25, 2, 5, 0.65); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(197, 155, 39, 0.55); border-radius: 14px; padding: 8px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.3);" dir="rtl">
+<!-- شريط الترحيب ثابت فوق خالص في الشاشة الحمراء (بدون زر تعديل نهائياً) -->
+<div id="student-welcome-bar" class="d-none" style="position: fixed; top: 12px; left: 50%; transform: translateX(-50%); width: calc(100% - 2rem); max-width: 460px; z-index: 9999; background: rgba(25, 2, 5, 0.72); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(197, 155, 39, 0.55); border-radius: 14px; padding: 9px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.3);" dir="rtl">
     <div style="text-align: right; line-height: 1.4;">
-        <div style="font-size: 0.78rem; font-weight: 800; color: #ffffff;">
+        <div style="font-size: 0.8rem; font-weight: 800; color: #ffffff;">
             👋 مرحباً، <span id="welcome-student-name" dir="auto" style="color: #FDE68A; font-weight: 800;">طالب الجامعة</span>
         </div>
-        <div style="font-size: 0.72rem; color: #E2E8F0; font-weight: 600;">
-            الرقم الجامعي: <span id="welcome-student-id" style="color: #C59B27; font-family: monospace; font-weight: 800; font-size: 0.78rem;">--</span>
+        <div style="font-size: 0.73rem; color: #E2E8F0; font-weight: 600;">
+            الرقم الجامعي: <span id="welcome-student-id" style="color: #C59B27; font-family: monospace; font-weight: 800; font-size: 0.8rem;">--</span>
         </div>
     </div>
-    <button type="button" id="btn-change-saved-id" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(252, 165, 165, 0.5); color: #FCA5A5; padding: 5px 10px; border-radius: 8px; font-size: 0.7rem; font-weight: 800; cursor: pointer; white-space: nowrap; flex-shrink: 0;">
-        <i class="fa-solid fa-pen-to-square"></i> تغيير الرقم
-    </button>
+    <span style="background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(16, 185, 129, 0.45); color: #6EE7B7; padding: 4px 10px; border-radius: 8px; font-size: 0.68rem; font-weight: 800; white-space: nowrap; flex-shrink: 0;">
+        <i class="fa-solid fa-shield-halved"></i> موثق بالهاتف
+    </span>
+</div>
+
+<!-- شاشة الأنيميشن الفخمة لتأكيد ربط الـ ID بالهاتف نهائياً (Yes / No) -->
+<style>
+@keyframes idModalPop {
+    0% { opacity: 0; transform: scale(0.75) translateY(25px); }
+    70% { transform: scale(1.03) translateY(-3px); }
+    100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes shieldPulse {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(197, 155, 39, 0.45); }
+    50% { transform: scale(1.08); box-shadow: 0 0 0 14px rgba(197, 155, 39, 0); }
+}
+.id-confirm-card {
+    animation: idModalPop 0.38s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.id-pulse-icon {
+    animation: shieldPulse 1.8s infinite ease-in-out;
+}
+</style>
+
+<div id="id-lock-confirm-modal" class="d-none" style="position:fixed; inset:0; background:rgba(15, 2, 4, 0.82); z-index:100000; display:flex; align-items:center; justify-content:center; padding:1.2rem; backdrop-filter:blur(6px);" dir="rtl">
+    <div class="id-confirm-card" style="background:#ffffff; color:#0F172A; border-radius:20px; width:100%; max-width:390px; padding:1.5rem 1.25rem; text-align:center; box-shadow:0 25px 50px rgba(0,0,0,0.55); border-top:6px solid #C59B27;">
+        <div class="id-pulse-icon" style="width:68px; height:68px; border-radius:50%; background:linear-gradient(135deg, #FEF3C7, #FDE68A); color:#92400E; display:flex; align-items:center; justify-content:center; margin:0 auto 12px; font-size:1.9rem; border:2px solid #F59E0B;">
+            <i class="fa-solid fa-user-lock"></i>
+        </div>
+        <h3 style="font-size:1.12rem; font-weight:800; color:#7A0C16; margin-bottom:6px;">
+            تأكيد ربط الرقم الجامعي النهائي
+        </h3>
+        <p style="font-size:0.86rem; color:#334155; font-weight:700; line-height:1.55; margin-bottom:12px;">
+            أنت متأكد يا بشمهندس/ة إن ده الـ ID بتاعك؟
+        </p>
+        <div style="background:#F8FAFC; border:2px dashed #CBD5E1; border-radius:12px; padding:10px 12px; margin-bottom:12px;">
+            <div id="confirm-std-name" style="font-size:0.95rem; font-weight:800; color:#0F172A; margin-bottom:4px;">--</div>
+            <div id="confirm-std-id" style="font-size:1.15rem; font-weight:900; color:#7A0C16; font-family:monospace; letter-spacing:2px;">--</div>
+        </div>
+        <div style="background:#FEF2F2; border:1px solid #FECACA; color:#991B1B; border-radius:10px; padding:8px 10px; font-size:0.76rem; font-weight:700; line-height:1.5; margin-bottom:16px;">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            تنبيه هام: سيتم حفظ هذا الرقم وربطه بهاتفك نهائياً طوال الفصل الدراسي <strong>ولن يتغير مرة أخرى!</strong>
+        </div>
+        <div style="display:flex; gap:10px;">
+            <button type="button" id="btn-id-confirm-yes" class="btn" style="background:#10B981; color:#fff; font-weight:800; flex:1; padding:0.75rem; border-radius:12px;">
+                <i class="fa-solid fa-circle-check"></i> Yes (نعم، متأكد)
+            </button>
+            <button type="button" id="btn-id-confirm-no" class="btn" style="background:#E2E8F0; color:#334155; font-weight:800; flex:1; padding:0.75rem; border-radius:12px;">
+                <i class="fa-solid fa-xmark"></i> No (تعديل)
+            </button>
+        </div>
+    </div>
 </div>
 
 <div class="card" style="margin-top: 55px;">
@@ -425,7 +474,27 @@ const welcomeBar = document.getElementById("student-welcome-bar");
         const welcomeNameEl = document.getElementById("welcome-student-name");
         const welcomeIdEl = document.getElementById("welcome-student-id");
 
-        // حفظ واسترجاع الرقم الجامعي والاسم من LocalStorage + Cookies لمدة 365 يوماً
+// بصمة عتادية ثابتة للهاتف لمنع فتح نفس الـ ID من هاتف آخر أو متصفح خفي
+        function getHardwareDeviceKey() {
+            let savedKey = localStorage.getItem("muc_hw_bound_key");
+            if (!savedKey) {
+                const match = document.cookie.match(/(?:^|;\s*)muc_hw_bound_key=([^;]*)/);
+                if (match && match[1]) savedKey = decodeURIComponent(match[1]);
+            }
+            if (!savedKey) {
+                const sig = `${screen.width}x${screen.height}x${screen.colorDepth}_${navigator.hardwareConcurrency || 4}_${navigator.platform || "MUC"}`;
+                let h = 0;
+                for (let i = 0; i < sig.length; i++) { h = ((h << 5) - h) + sig.charCodeAt(i); h |= 0; }
+                const rand = Math.random().toString(36).substring(2, 10);
+                savedKey = `hw_${Math.abs(h).toString(36)}_${rand}`;
+            }
+            localStorage.setItem("muc_hw_bound_key", savedKey);
+            document.cookie = `muc_hw_bound_key=${encodeURIComponent(savedKey)}; max-age=31536000; path=/; SameSite=Lax`;
+            return savedKey;
+        }
+        const myHardwareKey = getHardwareDeviceKey();
+
+        // حفظ واسترجاع الرقم الجامعي والاسم نهائياً من LocalStorage + Cookies لمدة 365 يوماً
         function saveStudentIdPermanently(sid, sname = "") {
             localStorage.setItem("muc_saved_student_id", sid);
             document.cookie = `muc_saved_student_id=${encodeURIComponent(sid)}; max-age=31536000; path=/; SameSite=Lax`;
@@ -460,33 +529,109 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             return "";
         }
 
-        // دالة تحديث شريط الترحيب العلوي وإظهار أزرار الـ QR والـ PIN
-        async function activateStudentProfile(sid, forceFetch = false) {
+        // نافذة الأنيميشن لتأكيد الـ ID بـ Yes أو No
+        function askAnimatedIdConfirmation(sid, sname) {
+            return new Promise((resolve) => {
+                const modal = document.getElementById("id-lock-confirm-modal");
+                document.getElementById("confirm-std-name").innerText = sname || "طالب جامعة مايو";
+                document.getElementById("confirm-std-id").innerText = sid;
+                modal.classList.remove("d-none");
+
+                document.getElementById("btn-id-confirm-yes").onclick = () => {
+                    modal.classList.add("d-none");
+                    resolve(true);
+                };
+                document.getElementById("btn-id-confirm-no").onclick = () => {
+                    modal.classList.add("d-none");
+                    resolve(false);
+                };
+            });
+        }
+
+        // دالة التحقق من ملكية الـ ID وتفعيله نهائياً
+        async function activateStudentProfile(sid, isFirstTimeSetup = false) {
             const cleanId = String(sid || "").trim();
             if (!cleanId) return false;
 
             let stdName = getSavedStudentName(cleanId);
-if (navigator.onLine && (forceFetch || !stdName || stdName === "طالب" || stdName === "Student" || stdName === "طالب جامعة مايو")) {
+
+            if (navigator.onLine && (isFirstTimeSetup || !stdName || stdName === "طالب" || stdName === "Student" || stdName === "طالب جامعة مايو")) {
                 try {
-                    const fetchStudentWithTimeout = async () => {
-                        const { db, auth } = await import("./firebase.js");
-                        const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
-                        const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+                    const { db, auth } = await import("./firebase.js");
+                    const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
+                    const { doc, getDoc, setDoc, serverTimestamp } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+
+                    const verifyOnServer = async () => {
                         if (!auth.currentUser) await signInAnonymously(auth);
-                        return await getDoc(doc(db, "students", cleanId));
+                        const [stdSnap, lockSnap] = await Promise.all([
+                            getDoc(doc(db, "students", cleanId)),
+                            getDoc(doc(db, "attendance_devices", `id_lock_${cleanId}`))
+                        ]);
+                        return { stdSnap, lockSnap, db, doc, setDoc, serverTimestamp };
                     };
-                    const stdSnap = await Promise.race([
-                        fetchStudentWithTimeout(),
-                        new Promise((_, rej) => setTimeout(() => rej(new Error("TIMEOUT")), 3500))
+
+                    const res = await Promise.race([
+                        verifyOnServer(),
+                        new Promise((_, rej) => setTimeout(() => rej(new Error("TIMEOUT")), 4500))
                     ]);
-                    if (stdSnap && stdSnap.exists()) {
-                        stdName = stdSnap.data().name || cleanId;
-                    } else if (stdSnap) {
+
+                    if (!res.stdSnap.exists()) {
                         await showCustomAlert("الرقم الجامعي غير صحيح", `⚠️ الرقم الجامعي (${cleanId}) غير مسجل في قاعدة بيانات الجامعة! تأكد من كتابة الـ ID الصحيح.`);
                         return false;
                     }
+
+                    const stdData = res.stdSnap.data() || {};
+                    stdName = stdData.name || cleanId;
+
+                    // 🔒 فحص حاسم: هل هذا الـ ID مربوط بالفعل بهاتف طالب آخر؟
+                    const existingLockDevice = (res.lockSnap.exists() && res.lockSnap.data().deviceId) || stdData.boundDeviceId || "";
+                    if (existingLockDevice && existingLockDevice !== myHardwareKey && existingLockDevice !== deviceId) {
+                        await showCustomAlert(
+                            "الرقم الجامعي مستخدم بالفعل!",
+                            `🚫 عفواً، هناك شخص قام بالفعل باستخدام الرقم الجامعي (${cleanId}) وتسجيله على هاتف آخر!\n\nلا يمكن فتح نفس الـ ID على أكثر من هاتف. يرجى التحدث مع المشرف.\n\nThis Student ID is already claimed by another device. Please contact your supervisor.`
+                        );
+                        return false;
+                    }
+
+                    // إذا كانت هذه أول مرة يسجل فيها الطالب رقمه، نظهر له شاشة التأكيد بالأنيميشن (Yes / No)
+                    if (isFirstTimeSetup) {
+                        const isConfirmed = await askAnimatedIdConfirmation(cleanId, stdName);
+                        if (!isConfirmed) {
+                            inputId.focus();
+                            return false;
+                        }
+
+                        // حجز الرقم الجامعي باسم هذا الهاتف نهائياً على السيرفر لمنع أي شخص آخر من كتابته!
+                        try {
+                            await Promise.race([
+                                setDoc(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), {
+                                    studentId: cleanId,
+                                    studentName: stdName,
+                                    deviceId: myHardwareKey,
+                                    legacyDeviceId: deviceId,
+                                    lockedAt: res.serverTimestamp()
+                                }, { merge: true }),
+                                new Promise((r) => setTimeout(r, 3000))
+                            ]);
+                        } catch (lockErr) {
+                            console.warn("Lock write notice:", lockErr);
+                        }
+                    }
                 } catch (e) {
-                    console.warn("Offline or slow network in hall, continuing in offline mode:", e);
+                    // في حالة كون الطالب أوفلاين تماماً في المدرج ويربط رقمه لأول مرة
+                    if (isFirstTimeSetup) {
+                        const isConfirmed = await askAnimatedIdConfirmation(cleanId, stdName || "طالب جامعة مايو");
+                        if (!isConfirmed) {
+                            inputId.focus();
+                            return false;
+                        }
+                    }
+                }
+            } else if (isFirstTimeSetup) {
+                const isConfirmed = await askAnimatedIdConfirmation(cleanId, stdName || "طالب جامعة مايو");
+                if (!isConfirmed) {
+                    inputId.focus();
+                    return false;
                 }
             }
 
@@ -504,7 +649,7 @@ if (navigator.onLine && (forceFetch || !stdName || stdName === "طالب" || std
             return true;
         }
 
-        // عند فتح الموقع: لو الطالب مسجل رقمه قبل كده، نرحب به فوراً ونظهر له الـ QR والـ PIN
+        // عند فتح الموقع: لو الطالب أكد رقمه سابقاً، يدخل فوراً على شاشة المسح ولا يظهر له إدخال الـ ID مرة أخرى
         const initialSavedId = getSavedStudentId();
         if (initialSavedId && initialSavedId.length >= 7) {
             activateStudentProfile(initialSavedId, false);
@@ -515,21 +660,23 @@ if (navigator.onLine && (forceFetch || !stdName || stdName === "طالب" || std
             scannerStep.classList.add("d-none");
         }
 
-        // زر تغيير الرقم الجامعي من شريط الترحيب العلوي
-        document.getElementById("btn-change-saved-id")?.addEventListener("click", async () => {
-            if (html5QrScanner) {
-                try { await html5QrScanner.stop(); await html5QrScanner.clear(); } catch(e) {}
+        // حفظ الرقم الجامعي عند الضغط على زر الدخول في البداية
+        document.getElementById("attendance-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const sid = inputId.value.trim();
+            if (!sid || sid.length < 7) {
+                await showCustomAlert("تنبيه", "يرجى إدخال رقمك الجامعي الصحيح (وليس كود المحاضرة المكون من 6 أرقام).");
+                return;
             }
-            qrBox.classList.add("d-none");
-            document.getElementById("camera-tools")?.classList.add("d-none");
-            btnTriggerCam.classList.remove("d-none");
-
-            welcomeBar.classList.add("d-none");
-            scannerStep.classList.add("d-none");
-            resultStep.classList.add("d-none");
-            inputStep.classList.remove("d-none");
-            inputId.value = "";
-            inputId.focus();
+            const btn = document.getElementById("btn-submit");
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> جاري التحقق...`;
+            try {
+                await activateStudentProfile(sid, true);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `<span>تسجيل الدخول ومتابعة (Continue)</span> <i class="fa-solid fa-arrow-right"></i>`;
+            }
         });
 
         // حفظ الرقم الجامعي عند الضغط على زر الدخول في البداية
@@ -755,10 +902,12 @@ if (navigator.onLine) {
                     () => {}
                 );
 
-                // محرك الزوم والكشاف
+// محرك الزوم والكشاف (لا يظهر إلا إذا كانت شاشة الكاميرا مفتوحة فعلياً)
                 setTimeout(() => {
                     try {
+                        if (qrBox.classList.contains("d-none")) return;
                         const videoElem = document.querySelector("#qr-reader video");
+                        if (!videoElem) return;
                         const qrContainer = document.getElementById("qr-reader");
                         const stream = videoElem ? videoElem.srcObject : null;
                         const track = (stream && stream.getVideoTracks) ? stream.getVideoTracks()[0] : null;
@@ -815,16 +964,19 @@ if (navigator.onLine) {
                         }
                     } catch (err) {}
                 }, 400);
-            } catch (err) {
+} catch (err) {
                 await showCustomAlert("Permission Denied", "Please allow camera access in your browser settings to scan.");
                 btnTriggerCam.classList.remove("d-none");
                 qrBox.classList.add("d-none");
+                document.getElementById("camera-tools")?.classList.add("d-none");
             }
         }
 
-function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
+        function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
             welcomeBar.classList.add("d-none");
-            document.getElementById("receipt-box")?.classList.add("d-none"); // إخفاء الإيصال دائماً إلا عند النجاح
+            document.getElementById("receipt-box")?.classList.add("d-none");
+            document.getElementById("camera-tools")?.classList.add("d-none"); // إخفاء شريط الزوم والفلاش فوراً
+            qrBox.classList.add("d-none");
             scannerStep.classList.add("d-none");
             inputStep.classList.add("d-none");
             resultStep.classList.remove("d-none");
@@ -843,10 +995,12 @@ function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
             offlinePayload = null;
             activeSessionId = null;
             activeToken = null;
-            welcomeBar.classList.remove("d-none"); // إظهار الشريط مرة أخرى عند العودة للرئيسية
+            welcomeBar.classList.remove("d-none");
             scannerStep.classList.remove("d-none");
             btnTriggerCam.classList.remove("d-none");
             qrBox.classList.add("d-none");
+            document.getElementById("camera-tools")?.classList.add("d-none"); // ضمان اختفاء شريط الفلاش عند العودة
+            document.getElementById("btn-torch")?.classList.add("d-none");
         });
 
         async function showSyncErrorIfAny() {
@@ -907,7 +1061,14 @@ document.getElementById("btn-sync-now").addEventListener("click", () => runSync(
         });
 
 // ===== تسجيل الحضور الذكي والمؤمّن بكود الـ 6 أرقام =====
-        document.getElementById("btn-enter-pin")?.addEventListener("click", async () => {
+document.getElementById("btn-enter-pin")?.addEventListener("click", async () => {
+            // إغلاق الكاميرا وشريط الزوم والفلاش إذا كانت مفتوحة قبل فتح نافذة الـ PIN
+            if (html5QrScanner) {
+                try { await html5QrScanner.stop(); await html5QrScanner.clear(); } catch(e) {}
+            }
+            qrBox.classList.add("d-none");
+            document.getElementById("camera-tools")?.classList.add("d-none");
+            btnTriggerCam.classList.remove("d-none");            
             const studentIdVal = getSavedStudentId() || inputId.value.trim();
             if (!studentIdVal || studentIdVal.length < 7) {
                 welcomeBar.classList.add("d-none");
