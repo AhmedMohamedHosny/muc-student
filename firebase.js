@@ -16,10 +16,7 @@ import {
     where,
     getDocs,
     onSnapshot,
-    runTransaction, 
-    arrayUnion,
-    serverTimestamp,
-    Timestamp 
+    serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { CONFIG } from "./config.js";
 
@@ -29,7 +26,6 @@ export const db = getFirestore(app);
 
 function getLocalDeviceId() {
     try {
-        // بصمة عتادية مدمجة (شاشة + معالج + معالم المتصفح) لا تتغير بفتح Incognito
         const screenFeatures = `${screen.width}x${screen.height}x${screen.colorDepth}`;
         const cpuCores = navigator.hardwareConcurrency || 4;
         const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Africa/Cairo";
@@ -51,13 +47,12 @@ function getLocalDeviceId() {
             try { localStorage.setItem("muc_device_id", localToken); } catch(e) {}
         }
 
-        // دمج الهاردوير مع التوكن المحلي لمنع تبديل المتصفح
         return `${hardwareSignature}_${localToken}`;
     } catch (e) {
         return "dev_" + Math.random().toString(36).substring(2, 10);
     }
 }
-// قائمة الأرقام الجامعية لطلاب المحاضرة الثانية (167 طالباً) مدمجة لمنع فشل الاستدعاء
+
 const PRAXIS_LEC2_STUDENTS = new Set([
   "24120490","25120899","25120933","25221096","25221102","25120837","25120836","26121713","25120874",
   "26121631","26121641","26121677","26121654","26121694","26121676","26121674","26121657","26121667",
@@ -79,7 +74,17 @@ const PRAXIS_LEC2_STUDENTS = new Set([
   "25120981","25121051","25120850","25120901","25120908","25121042","25221103","25120970","25121012",
   "25221113","25121069","25121018","25121088","25120976"
 ]);
-// فحص فوري: أول رقم في الـ PIN يدل على المحاضرة (1 = محاضرة 1، 2 = محاضرة 2)
+
+// فحص صحة الكود الرقمي (Checksum) + عزل محاضرة 1 عن محاضرة 2
+export function isValidPinChecksum(pin) {
+    const s = String(pin || "").trim();
+    if (!/^\d{6}$/.test(s)) return false;
+    const d = s.split("").map(Number);
+    if (d[0] === 0) return false;
+    const expected = (d[0] * 7 + d[1] * 3 + d[2] * 9 + d[3] * 5 + d[4] * 2 + 4) % 10;
+    return d[5] === expected;
+}
+
 export function checkPinLectureMatch(pin, studentId) {
     const first = String(pin).charAt(0);
     const isLec2Std = PRAXIS_LEC2_STUDENTS.has(String(studentId).trim());
@@ -87,10 +92,17 @@ export function checkPinLectureMatch(pin, studentId) {
     if (first === "2" && !isLec2Std) return "WRONG_LEC_1";
     return null;
 }
-// قفل تزامني يمنع إرسال أكثر من طلب في نفس اللحظة لنفس الطالب (Double-Tap Guard)
+
 const activeSubmissionLocks = new Set();
 
-// 1. التسجيل الأونلاين المباشر بحماية وتفادي أخطاء الصلاحيات
+function withTimeout(promise, ms = 4500) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("NETWORK_TIMEOUT")), ms))
+    ]);
+}
+
+// 1. التسجيل المباشر على السيرفر (يعمل للمحاضرات الأونلاين + محاضرات الأوفلاين لو الطالب عنده نت)
 export async function recordStudentAttendance(sessionId, clientToken, studentIdInput, deviceId) {
     const cleanedStudentId = String(studentIdInput || "").trim();
     if (!cleanedStudentId) throw new Error("Please enter your Student ID.");
@@ -102,7 +114,7 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
     activeSubmissionLocks.add(lockKey);
 
     try {
-        if (!auth.currentUser) await signInAnonymously(auth);
+        if (!auth.currentUser) await withTimeout(signInAnonymously(auth), 4000);
 
         const safeDeviceId = String(deviceId || getLocalDeviceId()).replace(/[^a-zA-Z0-9_-]/g, "");
         const sessionRef = doc(db, "attendance_sessions", sessionId);
@@ -110,43 +122,43 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
         const recordRef = doc(db, "attendance_records", recordId);
         const deviceRef = doc(db, "attendance_devices", `${sessionId}_${safeDeviceId}`);
 
-        const sessionDoc = await getDoc(sessionRef);
+        const sessionDoc = await withTimeout(getDoc(sessionRef), 4500);
         if (!sessionDoc.exists()) {
-            throw new Error("Attendance session not found or already closed.");
+            throw new Error("SESSION_NOT_FOUND");
         }
         const sessionData = sessionDoc.data();
-        if (sessionData.status !== "active") {
+
+        // السماح بالتسجيل المباشر إذا كانت الجلسة نشطة أونلاين أو جلسة أوفلاين لم يعتمد الدكتور إغلاقها النهائي بعد
+        const isAllowedOfflineSession = sessionData.qrOffline === true && !sessionData.finalized;
+        if (sessionData.status !== "active" && !isAllowedOfflineSession) {
             throw new Error("Attendance session is currently closed by the instructor.");
         }
 
-        // 🔒 فحص أمني حاسم: منع تسجيل طالب المحاضرة الثانية في المحاضرة الأولى والعكس
+        // فحص عزل المحاضرة 1 عن المحاضرة 2
         const sessionCourseKey = `${sessionData.courseId || ""} ${sessionData.courseName || ""}`.toLowerCase();
         const isLec1Session = sessionCourseKey.includes("lec1") || sessionCourseKey.includes("l1") || sessionCourseKey.includes("محاضرة 1");
         const isLec2Session = sessionCourseKey.includes("lec2") || sessionCourseKey.includes("l2") || sessionCourseKey.includes("محاضرة 2");
 
         if (isLec1Session || isLec2Session) {
             const isLec2Std = PRAXIS_LEC2_STUDENTS.has(cleanedStudentId);
-            if (isLec1Session && isLec2Std) {
-                throw new Error("WRONG_LEC_2");
-            }
-            if (isLec2Session && !isLec2Std) {
-                throw new Error("WRONG_LEC_1");
-            }
+            if (isLec1Session && isLec2Std) throw new Error("WRONG_LEC_2");
+            if (isLec2Session && !isLec2Std) throw new Error("WRONG_LEC_1");
         }
 
-const t = sessionData.currentToken || {};
-        if (clientToken !== "PIN_VERIFIED" && (!clientToken || t.token !== clientToken)) {
+        const t = sessionData.currentToken || {};
+        const isOfflineToken = String(clientToken || "").startsWith("OFF_");
+        if (clientToken !== "PIN_VERIFIED" && !isOfflineToken && (!clientToken || t.token !== clientToken)) {
             throw new Error("QR Code expired! Please scan the updated code on the screen.");
         }
 
-        // 2. فحص التسجيل المكرر للطالب
-        const existingRecord = await getDoc(recordRef);
+        // فحص التسجيل المكرر للطالب
+        const existingRecord = await withTimeout(getDoc(recordRef), 4000);
         if (existingRecord.exists()) {
             throw new Error(`Attendance already recorded for Student ID (${cleanedStudentId})!`);
         }
 
-// 3. فحص أمني إجباري: التحقق من قيد الطالب الفعلي في هذا المقرر تحديداً
-        const studentDoc = await getDoc(doc(db, "students", cleanedStudentId));
+        // التحقق من قيد الطالب في المقرر
+        const studentDoc = await withTimeout(getDoc(doc(db, "students", cleanedStudentId)), 4500);
         if (!studentDoc.exists()) {
             throw new Error(`⚠️ الرقم الجامعي (${cleanedStudentId}) غير مسجل بقاعدة بيانات الجامعة!`);
         }
@@ -156,16 +168,16 @@ const t = sessionData.currentToken || {};
 
         const enrolledList = studentData.enrolledCourses || [];
         const currentCourseId = sessionData.courseId || "";
-        const isEnrolled = enrolledList.includes(currentCourseId) || 
+        const isEnrolled = !currentCourseId || currentCourseId === "MUC_COURSE" || enrolledList.includes(currentCourseId) || 
                            (studentData.sections && (studentData.sections[currentCourseId] || Object.keys(studentData.sections).some(k => k.toLowerCase() === currentCourseId.toLowerCase())));
 
         if (!isEnrolled) {
             throw new Error(`NOT_ENROLLED:${studentRealName}:${sessionData.courseName || "هذا المقرر"}`);
         }
 
-        // 4. فحص بصمة الهاتف (منع تسجيل الزميل)
+        // فحص بصمة الهاتف (منع تسجيل الزميل)
         try {
-            const deviceDoc = await getDoc(deviceRef);
+            const deviceDoc = await withTimeout(getDoc(deviceRef), 3500);
             if (deviceDoc.exists()) {
                 const devData = deviceDoc.data();
                 if (devData.studentId && devData.studentId !== cleanedStudentId) {
@@ -173,17 +185,16 @@ const t = sessionData.currentToken || {};
                 }
             }
         } catch (e) {
-            if (e.message.includes("Security Alert")) throw e;
+            if (e.message && e.message.includes("Security Alert")) throw e;
         }
 
-        const startTime = sessionData.startTime ? sessionData.startTime.toDate() : new Date();
+        const startTime = (sessionData.startTime && sessionData.startTime.toDate) ? sessionData.startTime.toDate() : new Date();
         const diffMinutes = (Date.now() - startTime.getTime()) / 60000;
-        const status = diffMinutes > (sessionData.lateThresholdMinutes || CONFIG.attendance.lateThresholdMinutes)
+        const status = (!isAllowedOfflineSession && diffMinutes > (sessionData.lateThresholdMinutes || CONFIG.attendance.lateThresholdMinutes))
             ? CONFIG.attendance.statuses.LATE
             : CONFIG.attendance.statuses.PRESENT;
 
-        // 5. تسجيل الحضور في سجلات الحضور
-        await setDoc(recordRef, {
+        await withTimeout(setDoc(recordRef, {
             recordId: recordId,
             sessionId: sessionId,
             courseId: sessionData.courseId || "MUC_COURSE",
@@ -193,20 +204,20 @@ const t = sessionData.currentToken || {};
             deviceId: safeDeviceId,
             status: status,
             recordedAt: serverTimestamp(),
-            method: "QR_SCAN"
-        }, { merge: true });
+            method: clientToken === "PIN_VERIFIED" ? "PIN_CODE" : "QR_SCAN"
+        }, { merge: true }), 4500);
 
-        // 6. قفل الهاتف للجلسة (محاولة آمنة)
         try {
-            await setDoc(deviceRef, {
+            await withTimeout(setDoc(deviceRef, {
                 sessionId: sessionId,
                 deviceId: safeDeviceId,
                 studentId: cleanedStudentId,
                 createdAt: serverTimestamp()
-            }, { merge: true });
-        } catch (e) {
-            console.warn("Device log skipped:", e.message);
-        }
+            }, { merge: true }), 3000);
+        } catch (e) {}
+
+        // لو كان للطالب أي سجل معلق سابق لنفس المحاضرة في الطابور المحلي، نمسحه فوراً لأن الحضور اترفع خلاص
+        removeFromQueue({ studentId: cleanedStudentId, sessionId: sessionId, scannedAt: Date.now() });
 
         const now = new Date();
         return {
@@ -225,12 +236,11 @@ const t = sessionData.currentToken || {};
 }
 
 export async function queueOfflineAttendance({ studentId, studentName, sessionId, courseId, courseName, lectureNumber, timeSlot, hash, sessionStart, sessionType, group, hostRole, doctorId, pin }) {
-        const cleanedStudentId = String(studentId).trim();
+    const cleanedStudentId = String(studentId).trim();
     if (!sessionId) {
         throw new Error("⚠️ رمز الحضور غير صالح، يرجى مسح الباركود مرة أخرى.");
     }
 
-    // 🔒 فحص عزل محاضرة 1 عن محاضرة 2 في الأوفلاين
     const sessionCourseKey = `${courseId || ""} ${courseName || ""}`.toLowerCase();
     const isLec1Session = sessionCourseKey.includes("lec1") || sessionCourseKey.includes("l1") || sessionCourseKey.includes("محاضرة 1");
     const isLec2Session = sessionCourseKey.includes("lec2") || sessionCourseKey.includes("l2") || sessionCourseKey.includes("محاضرة 2");
@@ -247,27 +257,23 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
 
     const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
     const deviceId = getLocalDeviceId();
-// 🔒 فحص أمني ذكي: منع تراكم 4 أو 5 سجلات لنفس المحاضرة عند تكرار المحاولة
     const todayCA = new Date().toLocaleDateString("en-CA");
     const nowMs = Date.now();
-    const LECTURE_WINDOW_MS = 90 * 60 * 1000; // 90 دقيقة (مدة المحاضرة الواحدة)
+    const LECTURE_WINDOW_MS = 90 * 60 * 1000;
 
-    // 1) إذا كان الطالب مسجلاً بالفعل بنفس الجلسة أو نفس الـ PIN أو نفس المقرر اليوم (أو مسح QR كامل خلال آخر 90 دقيقة)
     const exactOrQrExists = queue.some(q => {
         if (q.studentId !== cleanedStudentId) return false;
         if (q.sessionId === sessionId) return true;
         if (pin && q.pin && String(q.pin) === String(pin)) return true;
         if (courseId && q.courseId && q.courseId !== "MUC_COURSE" && q.courseId === courseId && q.startedAtDate === todayCA) return true;
-        // لو الطالب مسح باركود QR كامل في آخر 90 دقيقة ثم حاول يكتب PIN لنفس المحاضرة
         if (pin && !q.pin && (nowMs - (q.scannedAt || 0) < LECTURE_WINDOW_MS)) return true;
         return false;
     });
 
     if (exactOrQrExists) {
-        throw new Error("⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (سواء بالباركود أو الكود الرقمي) ومحفوظ على هاتفك!\n\nYou have already checked in for this lecture!");
+        throw new Error("⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل ومحفوظ على هاتفك!\n\nYou have already checked in for this lecture!");
     }
 
-    // 2) منع تسجيل طالبين مختلفين من نفس الهاتف في نفس المحاضرة
     const deviceExists = queue.some(q => q.studentId !== cleanedStudentId && (
         q.sessionId === sessionId || (nowMs - (q.scannedAt || 0) < LECTURE_WINDOW_MS)
     ));
@@ -275,11 +281,10 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
         throw new Error("⚠️ حماية أمنية: تم استخدام هذا الهاتف لتسجيل طالب آخر في هذه المحاضرة!");
     }
 
-    // 3) إذا كان الطالب قد أدخل كود PIN منذ دقائق وأعاد المحاولة بكود PIN أحدث (أو مسح QR)، نستبدل المحاولة القديمة لمنع تكرار العداد
     const cleanedQueue = queue.filter(q => {
         if (q.studentId !== cleanedStudentId) return true;
         const isRecentPinAttempt = Boolean(q.pin) && (nowMs - (q.scannedAt || 0) < LECTURE_WINDOW_MS);
-        return !isRecentPinAttempt; // يحذف محاولة الـ PIN القديمة ويحل محلها السجل الجديد
+        return !isRecentPinAttempt;
     });
 
     const record = {
@@ -304,21 +309,11 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
 
     cleanedQueue.push(record);
     localStorage.setItem("muc_pending_records", JSON.stringify(cleanedQueue));
-
-    // إذا كان الهاتف متصلاً بالإنترنت حالياً، يرفع الحضور فوراً
-    if (navigator.onLine) syncPendingAttendance(); // بدون await
-
     return record;
 }
 
 let isSyncing = false;
 
-function withTimeout(promise, ms = 10000) {
-    return Promise.race([
-        promise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms))
-    ]);
-}
 function checkLectureMatch(courseId, courseName, studentId) {
     const key = `${courseId || ""} ${courseName || ""}`.toLowerCase();
     const isLec1 = key.includes("lec1") || key.includes("l1") || key.includes("محاضرة 1");
@@ -329,6 +324,7 @@ function checkLectureMatch(courseId, courseName, studentId) {
     if (isLec2 && !isLec2Std) return "WRONG_LEC_1";
     return null;
 }
+
 function removeFromQueue(item) {
     const key = item.origSessionId || item.sessionId;
     const q = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
@@ -336,57 +332,47 @@ function removeFromQueue(item) {
         q.filter(x => {
             if (x.studentId !== item.studentId) return true;
             if (x.sessionId === key || x.sessionId === item.sessionId) return false;
-            // مسح أي محاولات PIN أخرى لنفس الطالب خلال نفس المحاضرة (90 دقيقة)
-            if (x.pin && Math.abs((x.scannedAt || 0) - (item.scannedAt || 0)) < 90 * 60 * 1000) return false;
+            if (Math.abs((x.scannedAt || 0) - (item.scannedAt || 0)) < 90 * 60 * 1000) return false;
             return true;
         })
     ));
 }
 
 export async function syncPendingAttendance() {
-    if (isSyncing || !navigator.onLine) return -1;
+    if (!navigator.onLine) return -1;
+    // إذا كانت هناك عملية رفع جارية بالفعل، ننتظرها حتى تنتهي بدلاً من الخروج الخاطئ
+    if (isSyncing) {
+        for (let w = 0; w < 10 && isSyncing; w++) {
+            await new Promise(r => setTimeout(r, 350));
+        }
+        return getPendingCount() === 0 ? 1 : 0;
+    }
+
     const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
     if (queue.length === 0) return 0;
 
     let uploaded = 0;
     isSyncing = true;
     try {
-        // 🔄 محاولة الاتصال بالفايربيز حتى 3 مرات أوتوماتيكياً للغلب على تأخير شبكة الموبايل
-        let connected = false;
-        for (let attempt = 1; attempt <= 3; attempt++) {
-            try {
-                if (!auth.currentUser) {
-                    await withTimeout(signInAnonymously(auth), 5000);
-                }
-                connected = true;
-                break; // نجاح الاتصال، اخرج من الحلقة
-            } catch (err) {
-                if (attempt < 3) {
-                    await new Promise(res => setTimeout(res, 1500)); // انتظار ثانية ونصف قبل إعادة المحاولة
-                }
-            }
+        if (!auth.currentUser) {
+            await withTimeout(signInAnonymously(auth), 4500);
         }
 
-        if (!connected && !auth.currentUser) {
-            throw new Error("Network connection pending");
-        }
-for (const item of queue) {
+        for (const item of queue) {
             try {
-                                // 0) سجل PIN أوفلاين: نحوّله لجلسة حقيقية بالكود
+                // أ) لو السجل عبارة عن PIN أوفلاين، نبحث عن الجلسة المطابقة له على السيرفر
                 if (item.pin) {
-                    item.origSessionId = item.sessionId;   // عشان removeFromQueue يلاقيه
+                    item.origSessionId = item.sessionId;
                     const ps = await withTimeout(
                         getDocs(query(collection(db, "attendance_sessions"), where("pinHistory", "array-contains", Number(item.pin)))),
-                        8000
+                        5000
                     );
-                    // نفس يوم التسجيل، عشان الكود مايتطابقش مع جلسة قديمة بالصدفة
                     const matches = ps.docs.filter(d => {
                         const sd0 = d.data().startedAtDate;
                         return !sd0 || !item.startedAtDate || sd0 === item.startedAtDate;
                     });
                     if (matches.length === 0) {
-                        // يفضل في الطابور، ويتشال بعد 48 ساعة
-                        if (Date.now() - (item.scannedAt || 0) > 48 * 3600 * 1000) removeFromQueue(item);
+                        if (Date.now() - (item.scannedAt || 0) > 6 * 3600 * 1000) removeFromQueue(item);
                         continue;
                     }
                     const sd = matches[0];
@@ -394,61 +380,72 @@ for (const item of queue) {
                     item.courseId = sd.data().courseId || "";
                     item.courseName = sd.data().courseName || item.courseName;
                 }
-                // 1) التحقق أولاً: هل المحاضرة لا تزال موجودة في السيرفر أم حذفها الدكتور؟
-                let sessionExists = true;
+
+                // ب) فحص الجلسة على السيرفر
+                let sessionDeletedOrFinalized = false;
+                let sessionExistsOnServer = false;
                 try {
-                    const sessSnap = await withTimeout(getDoc(doc(db, "attendance_sessions", item.sessionId)), 5000);
-                    if (!sessSnap.exists() || sessSnap.data()?.status === "deleted") {
-                        sessionExists = false;
+                    const sessSnap = await withTimeout(getDoc(doc(db, "attendance_sessions", item.sessionId)), 4500);
+                    if (sessSnap.exists()) {
+                        sessionExistsOnServer = true;
+                        const sData = sessSnap.data() || {};
+                        if (sData.status === "deleted" || sData.finalized === true) {
+                            sessionDeletedOrFinalized = true;
+                        }
+                        if (!item.courseId || item.courseId === "MUC_COURSE") item.courseId = sData.courseId || item.courseId;
+                        if (!item.courseName || item.courseName === "المقرر الدراسي") item.courseName = sData.courseName || item.courseName;
                     }
                 } catch (err) {
-                    // إذا كان الخطأ رفض صلاحية، فهذا يعني أن الجلسة حُذفت
-                    if (err.message && err.message.includes("permission-denied")) sessionExists = false;
+                    if (err.message && err.message.includes("permission-denied")) sessionDeletedOrFinalized = true;
                 }
 
-// إذا لم تكن المحاضرة قد رُفعت بعد من جهاز الدكتور، نُبقي السجل في هاتف الطالب للمحاولة اللاحقة
-                if (!sessionExists) {
-                    // إذا مر أكثر من 48 ساعة على الجلسة ولم ترفع، يتم تجاهلها
-                    if (Date.now() - (item.scannedAt || 0) > 48 * 3600 * 1000) {
-                        removeFromQueue(item);
-                    }
-                    continue;
-                }
-                                // 1.5) عزل المحاضرة 1 عن 2 (المحاضرة بتتعرف وقت الرفع في سجلات الـ PIN الأوفلاين)
-                const mismatch = checkLectureMatch(item.courseId, item.courseName, item.studentId);
-                if (mismatch) {
-                    localStorage.setItem("muc_sync_error", mismatch === "WRONG_LEC_2"
-                        ? `⚠️ حضور الرقم (${item.studentId}) لم يُسجَّل: هذه المحاضرة الأولى وأنت مسجل في المحاضرة الثانية. تواصل مع الدكتور.\n\nNot registered: this is Lecture 1 but you belong to Lecture 2. Please contact your doctor.`
-                        : `⚠️ حضور الرقم (${item.studentId}) لم يُسجَّل: هذه المحاضرة الثانية وأنت مسجل في المحاضرة الأولى. تواصل مع الدكتور.\n\nNot registered: this is Lecture 2 but you belong to Lecture 1. Please contact your doctor.`);
+                if (sessionDeletedOrFinalized) {
                     removeFromQueue(item);
                     continue;
                 }
-// 2) التحقق من وجود وقيد الطالب في السيرفر
+
+                // لو السجل جاي من مسح QR أوفلاين حقيقي من شاشة البروجيكتور (يحتوي على معرّف الجلسة والمقرر)، نرفعه فوراً حتى لو لاب الدكتور لسه متوصلش بالنت!
+                const isGenuineProjectorOfflineQr = !item.pin && String(item.sessionId).startsWith("off_") && item.courseId && item.courseId !== "MUC_COURSE";
+                if (!sessionExistsOnServer && !isGenuineProjectorOfflineQr) {
+                    if (Date.now() - (item.scannedAt || 0) > 6 * 3600 * 1000) removeFromQueue(item);
+                    continue;
+                }
+
+                const mismatch = checkLectureMatch(item.courseId, item.courseName, item.studentId);
+                if (mismatch) {
+                    localStorage.setItem("muc_sync_error", mismatch === "WRONG_LEC_2"
+                        ? `⚠️ حضور الرقم (${item.studentId}) لم يُسجَّل: هذه المحاضرة الأولى وأنت مسجل في المحاضرة الثانية.`
+                        : `⚠️ حضور الرقم (${item.studentId}) لم يُسجَّل: هذه المحاضرة الثانية وأنت مسجل في المحاضرة الأولى.`);
+                    removeFromQueue(item);
+                    continue;
+                }
+
                 let realStudentName = item.studentName || "طالب";
-                const stdSnap = await withTimeout(getDoc(doc(db, "students", item.studentId)), 6000);
+                const stdSnap = await withTimeout(getDoc(doc(db, "students", item.studentId)), 4500);
                 if (stdSnap.exists()) {
                     const sData = stdSnap.data();
                     realStudentName = sData.name || realStudentName;
                     localStorage.setItem(`muc_student_name_${item.studentId}`, realStudentName);
                     const enrolled = sData.enrolledCourses || [];
-                    if (item.courseId && !enrolled.includes(item.courseId)) {
+                    if (item.courseId && item.courseId !== "MUC_COURSE" && !enrolled.includes(item.courseId)) {
                         localStorage.setItem("muc_sync_error", `⚠️ الرقم (${item.studentId}) غير مقيد في هذا المقرر!`);
                         removeFromQueue(item);
                         continue;
                     }
                 } else {
-                    localStorage.setItem("muc_sync_error", `⚠️ الرقم الجامعي (${item.studentId}) غير مسجل بعد!`);
+                    localStorage.setItem("muc_sync_error", `⚠️ الرقم الجامعي (${item.studentId}) غير مسجل بقاعدة البيانات!`);
                     removeFromQueue(item);
                     continue;
                 }
-// فحص هل الطالب مسجل بالفعل في هذه الجلسة على السيرفر لمنع التعليق
-                const existingRecSnap = await withTimeout(getDoc(doc(db, "attendance_records", `${item.sessionId}_${item.studentId}`)), 5000);
-                if (existingRecSnap.exists()) {
-                    // الطالب حاضر بالفعل، نحذف السجل المكرر فوراً من هاتف الطالب لينظف البانر
-                    removeFromQueue(item);
-                    continue;
-                }
+
                 const recordId = `${item.sessionId}_${item.studentId}`;
+                const existingRecSnap = await withTimeout(getDoc(doc(db, "attendance_records", recordId)), 4000);
+                if (existingRecSnap.exists()) {
+                    removeFromQueue(item);
+                    uploaded++;
+                    continue;
+                }
+
                 const recordData = {
                     recordId,
                     sessionId: item.sessionId,
@@ -465,7 +462,7 @@ for (const item of queue) {
                 if (item.timeSlot) recordData.timeSlot = item.timeSlot;
                 if (item.hash) recordData.hash = item.hash;
 
-                await withTimeout(setDoc(doc(db, "attendance_records", recordId), recordData, { merge: true }));
+                await withTimeout(setDoc(doc(db, "attendance_records", recordId), recordData, { merge: true }), 4500);
 
                 try {
                     await withTimeout(setDoc(doc(db, "attendance_devices", `${item.sessionId}_${item.deviceId}`), {
@@ -473,21 +470,19 @@ for (const item of queue) {
                         deviceId: item.deviceId,
                         studentId: item.studentId,
                         createdAt: serverTimestamp()
-                    }, { merge: true }));
-                } catch (e) { console.warn(e.message); }
+                    }, { merge: true }), 3000);
+                } catch (e) {}
 
                 removeFromQueue(item);
                 uploaded++;
             } catch (err) {
-                // إذا رفض السيرفر الحفظ لأن المحاضرة ملغاة، احذف السجل المعلق
                 if (err.message && (err.message.includes("permission-denied") || err.message.includes("not found"))) {
                     removeFromQueue(item);
                 }
-                console.error("فشل رفع سجل الطالب:", item.studentId, err);
             }
         }
     } catch (e) {
-        console.warn("sync aborted:", e);
+        console.warn("sync notice:", e);
     } finally {
         isSyncing = false;
     }
@@ -495,34 +490,26 @@ for (const item of queue) {
 }
 
 export function getPendingCount() {
-    // 1) مسح شامل لمرة واحدة فقط لكل السجلات القديمة العالقة عند الطلاب فور فتح الموقع المحدث
-    if (!localStorage.getItem("muc_purge_old_sync_v1")) {
+    if (!localStorage.getItem("muc_purge_old_sync_v2")) {
         localStorage.removeItem("muc_pending_records");
         localStorage.removeItem("muc_sync_error");
-        localStorage.setItem("muc_purge_old_sync_v1", "done");
+        localStorage.setItem("muc_purge_old_sync_v2", "done");
         return 0;
     }
 
-    // 2) تنظيف تلقائي مستمر لأي سجل تالف أو قديم مر عليه أكثر من 6 ساعات
     const rawQueue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
     if (rawQueue.length === 0) return 0;
 
     const nowMs = Date.now();
-    const MAX_AGE_MS = 6 * 3600 * 1000; // 6 ساعات كحد أقصى لبقاء السجل المعلق
+    const MAX_AGE_MS = 6 * 3600 * 1000;
     const seenKeys = new Set();
 
     const cleanQueue = rawQueue.filter(item => {
-        // حذف أي سجل كان فيه الـ ID عبارة عن كود PIN من 6 أرقام بالخطأ
         const sid = String(item.studentId || "").trim();
         if (sid.length < 7) return false;
-
-        // حذف أي سجل قديم مر عليه أكثر من 6 ساعات
         if (nowMs - (item.scannedAt || 0) > MAX_AGE_MS) return false;
-
-        // منع وجود أكثر من سجل واحد لنفس الطالب في الطابور
         if (seenKeys.has(sid)) return false;
         seenKeys.add(sid);
-
         return true;
     });
 
@@ -533,12 +520,9 @@ export function getPendingCount() {
     return cleanQueue.length;
 }
 
-// منظم حركة المزامنة لمنع سقوط السيرفر عند خروج مئات الطلاب معاً (Jittered Queue)
 function triggerSmoothSync() {
     if (!navigator.onLine || isSyncing) return;
-    
-    // تأخير عشوائي بين ثانية واحدة و 7 ثوانٍ لتوزيع طلبات هواتف الطلاب على السيرفر
-    const randomJitterMs = Math.floor(Math.random() * 6000) + 1000;
+    const randomJitterMs = Math.floor(Math.random() * 4000) + 800;
     setTimeout(() => {
         syncPendingAttendance();
     }, randomJitterMs);
@@ -548,8 +532,8 @@ window.addEventListener("online", triggerSmoothSync);
 document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") triggerSmoothSync();
 });
-// فحص دوري منظم ومتباعد
-setInterval(triggerSmoothSync, 25000);
+setInterval(triggerSmoothSync, 20000);
+
 export function subscribeToCourseAttendance(courseId, onChange) {
     let sessions = null, records = null;
     const fire = () => { if (sessions && records) onChange({ sessions, records }); };
