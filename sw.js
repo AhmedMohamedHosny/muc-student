@@ -1,92 +1,94 @@
-// v18: أي تغيير في الملفات لازم ترفع الرقم ده عشان هواتف الطلبة تسحب التحديث
-const CACHE_NAME = "muc-student-offline-v18";
+const CACHE_NAME = "muc-student-offline-v5";
 
-const STATIC_ASSETS = [
-  "./",
-  "./index.html",
-  "./firebase.js",
-  "./config.js",
-  "./logo.jpg",
-  "https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js",
-  "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
-  "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js",
-  "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js",
-  "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+// الملفات الأساسية للموقع ومكتبة الكاميرا والفايربيز
+const CORE_ASSETS = [
+    "./",
+    "./index.html",
+    "./firebase.js",
+    "./config.js",
+    "./logo.jpg",
+    "./manifest.json",
+    "https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js",
+    "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css",
+    "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+    "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js",
+    "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js"
 ];
 
-self.addEventListener("install", (e) => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) =>
-      // كل ملف لوحده: لو واحد فشل الباقي يتخزن عادي
-      Promise.all(STATIC_ASSETS.map((u) =>
-        cache.add(u).catch((err) => console.warn("SW skip:", u, err))
-      ))
-    )
-  );
-  self.skipWaiting();
+// 1. التثبيت: حفظ كل ملف على حدة حتى لو فشل ملف فرعي لا يتعطل الكاش بالكامل
+self.addEventListener("install", (event) => {
+    self.skipWaiting(); // تفعيل فوري بدون انتظار إغلاق المتصفح
+    event.waitUntil(
+        caches.open(CACHE_NAME).then(async (cache) => {
+            for (const url of CORE_ASSETS) {
+                try {
+                    await cache.add(new Request(url, { cache: "reload" }));
+                } catch (err) {
+                    console.warn("SW Cache skip:", url);
+                }
+            }
+        })
+    );
 });
 
-self.addEventListener("activate", (e) => {
-  e.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.map((k) => (k !== CACHE_NAME ? caches.delete(k) : null))))
-      .then(() => self.clients.claim())
-  );
+// 2. التفعيل: مسح أي كاش قديم معلق والسيطرة الفورية على جميع الصفحات المفتوحة
+self.addEventListener("activate", (event) => {
+    event.waitUntil(
+        caches.keys().then((keys) =>
+            Promise.all(
+                keys.map((key) => {
+                    if (key !== CACHE_NAME) return caches.delete(key);
+                })
+            )
+        ).then(() => self.clients.claim())
+    );
 });
 
-// جلب من النت أولاً (مع مهلة)، ولو فشل أو النت ضعيف يرجع للكاش
-function networkFirst(req, cacheKey) {
-  return new Promise((resolve) => {
-    let done = false;
-    const fallback = () =>
-      caches.match(cacheKey || req, { ignoreSearch: true }).then((c) => c || caches.match("./index.html"));
+// 3. الاعتراض الذكي: فتح التطبيق فوراً وهو أوفلاين بدون شاشة خطأ المتصفح
+self.addEventListener("fetch", (event) => {
+    const req = event.request;
 
-    const timer = setTimeout(() => {
-      if (done) return;
-      fallback().then((c) => { if (c && !done) { done = true; resolve(c); } });
-    }, 4000);
+    // تجاهل طلبات فايربيز الحية (POST أو WebSockets)
+    if (req.method !== "GET" || req.url.includes("firestore.googleapis.com") || req.url.includes("identitytoolkit")) {
+        return;
+    }
 
-    fetch(req).then((res) => {
-      clearTimeout(timer);
-      if (res && res.status === 200) {
-        const clone = res.clone();
-        caches.open(CACHE_NAME).then((c) => c.put(cacheKey || req, clone));
-      }
-      if (!done) { done = true; resolve(res); }
-    }).catch(() => {
-      clearTimeout(timer);
-      if (!done) fallback().then((c) => { done = true; resolve(c || Response.error()); });
-    });
-  });
-}
+    // أ. إذا كان الطالب يفتح التطبيق أو الموقع (Navigation Request)
+    if (req.mode === "navigate") {
+        event.respondWith(
+            fetch(req)
+                .then((networkRes) => {
+                    const clone = networkRes.clone();
+                    caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", clone));
+                    return networkRes;
+                })
+                .catch(async () => {
+                    // لو الموبايل أوفلاين: افتح index.html من الكاش فوراً وتجاهل أي إضافات في الرابط
+                    const cache = await caches.open(CACHE_NAME);
+                    return (
+                        (await cache.match("./index.html", { ignoreSearch: true })) ||
+                        (await cache.match("index.html", { ignoreSearch: true })) ||
+                        (await cache.match("./", { ignoreSearch: true }))
+                    );
+                })
+        );
+        return;
+    }
 
-// المكتبات الخارجية ثابتة بنسخة محددة: الكاش أولاً
-function cacheFirst(req) {
-  return caches.match(req).then((cached) => {
-    if (cached) return cached;
-    return fetch(req).then((res) => {
-      if (res && res.status === 200) {
-        const clone = res.clone();
-        caches.open(CACHE_NAME).then((c) => c.put(req, clone));
-      }
-      return res;
-    });
-  });
-}
+    // ب. باقي الملفات (JS, CSS, الصور، المكتبات): Stale-While-Revalidate (يقرأ من الكاش فوراً ويحدث في الخلفية)
+    event.respondWith(
+        caches.match(req, { ignoreSearch: true }).then((cachedRes) => {
+            const fetchPromise = fetch(req)
+                .then((networkRes) => {
+                    if (networkRes && networkRes.status === 200) {
+                        const clone = networkRes.clone();
+                        caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
+                    }
+                    return networkRes;
+                })
+                .catch(() => cachedRes);
 
-self.addEventListener("fetch", (e) => {
-  const req = e.request;
-  if (req.method !== "GET") return;
-  if (!req.url.startsWith("http")) return;
-  if (/firestore\.googleapis\.com|identitytoolkit\.googleapis\.com|securetoken\.googleapis\.com/.test(req.url)) return;
-
-  const sameOrigin = new URL(req.url).origin === self.location.origin;
-
-  if (req.mode === "navigate") {
-    e.respondWith(networkFirst(req, "./index.html"));
-  } else if (sameOrigin) {
-    e.respondWith(networkFirst(req));
-  } else {
-    e.respondWith(cacheFirst(req));
-  }
+            return cachedRes || fetchPromise;
+        })
+    );
 });

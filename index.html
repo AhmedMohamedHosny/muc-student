@@ -192,20 +192,22 @@ background: #FDF2F3;
 </head>
 <body>
 <body style="padding-bottom: 50px;">
-<div class="card">
-
-        <!-- 1. شريط الترحيب العلوي المدمج بخط صغير وأنيق في قمة الكارت فوق اللوجو -->
-        <div id="student-welcome-bar" class="d-none" style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 50px; padding: 5px 12px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px;" dir="rtl">
-            <div style="display: flex; align-items: center; gap: 5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 0.74rem; font-weight: 700; color: #1E293B;">
-                <span>👋 مرحباً،</span>
-                <span id="welcome-student-name" style="color: #7A0C16; font-weight: 800; overflow: hidden; text-overflow: ellipsis;">طالب الجامعة</span>
-                <span style="color: #CBD5E1;">|</span>
-                <span id="welcome-student-id" style="color: #64748B; font-family: monospace; font-size: 0.73rem;">--</span>
-            </div>
-            <button type="button" id="btn-change-saved-id" style="background: #FEE2E2; border: 1px solid #FECACA; color: #DC2626; padding: 2px 8px; border-radius: 50px; font-size: 0.68rem; font-weight: 500; cursor: pointer; white-space: nowrap; flex-shrink: 0;">
-                <i class="fa-solid fa-pen-to-square"></i> تغيير الرقم
-            </button>
+<!-- شريط الترحيب ثابت فوق خالص في الشاشة الحمراء خارج الكارت الأبيض -->
+<div id="student-welcome-bar" class="d-none" style="position: fixed; top: 12px; left: 50%; transform: translateX(-50%); width: calc(100% - 2rem); max-width: 460px; z-index: 9999; background: rgba(25, 2, 5, 0.65); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(197, 155, 39, 0.55); border-radius: 14px; padding: 8px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.3);" dir="rtl">
+    <div style="text-align: right; line-height: 1.4;">
+        <div style="font-size: 0.78rem; font-weight: 800; color: #ffffff;">
+            👋 مرحباً، <span id="welcome-student-name" dir="auto" style="color: #FDE68A; font-weight: 800;">طالب الجامعة</span>
         </div>
+        <div style="font-size: 0.72rem; color: #E2E8F0; font-weight: 600;">
+            الرقم الجامعي: <span id="welcome-student-id" style="color: #C59B27; font-family: monospace; font-weight: 800; font-size: 0.78rem;">--</span>
+        </div>
+    </div>
+    <button type="button" id="btn-change-saved-id" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(252, 165, 165, 0.5); color: #FCA5A5; padding: 5px 10px; border-radius: 8px; font-size: 0.7rem; font-weight: 800; cursor: pointer; white-space: nowrap; flex-shrink: 0;">
+        <i class="fa-solid fa-pen-to-square"></i> تغيير الرقم
+    </button>
+</div>
+
+<div class="card" style="margin-top: 55px;">
 
         <img src="logo.jpg" alt="MUC Logo" class="logo">
         <div id="course-badge" class="session-badge">Smart Live Attendance</div>
