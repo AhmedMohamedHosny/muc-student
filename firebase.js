@@ -384,26 +384,18 @@ export async function syncPendingAttendance() {
 
         for (const item of queue) {
             try {
-                // أ) لو السجل عبارة عن PIN أوفلاين، نبحث عن الجلسة المطابقة له على السيرفر
+// أ) لو السجل عبارة عن PIN أوفلاين، نبحث عن الجلسة المطابقة له عبر وثيقة attendance_pins المباشرة
                 if (item.pin) {
                     item.origSessionId = item.sessionId;
-                    const ps = await withTimeout(
-                        getDocs(query(collection(db, "attendance_sessions"), where("pinHistory", "array-contains", Number(item.pin)))),
-                        5000
-                    );
-                    const matches = ps.docs.filter(d => {
-                        const sd0 = d.data().startedAtDate;
-                        return !sd0 || !item.startedAtDate || sd0 === item.startedAtDate;
-                    });
-                    if (matches.length === 0) {
-                        // الدكتور لسه مرفعش المحاضرة للسيرفر، يظل السجل محفوظاً حتى يرفعها الدكتور
+                    const pinSnap = await withTimeout(getDoc(doc(db, "attendance_pins", String(item.pin))), 4500);
+                    if (!pinSnap.exists()) {
                         if (Date.now() - (item.scannedAt || 0) > 12 * 3600 * 1000) removeFromQueue(item);
                         continue;
                     }
-                    const sd = matches[0];
-                    item.sessionId = sd.id;
-                    item.courseId = sd.data().courseId || "";
-                    item.courseName = sd.data().courseName || item.courseName;
+                    const pData = pinSnap.data() || {};
+                    item.sessionId = pData.sessionId || item.sessionId;
+                    item.courseId = pData.courseId || item.courseId || "";
+                    item.courseName = pData.courseName || item.courseName || "المقرر الدراسي";
                 }
 
                 // ب) فحص الجلسة على السيرفر
