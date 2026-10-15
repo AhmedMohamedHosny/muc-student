@@ -1177,7 +1177,7 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                 btnPin.disabled = true;
                 btnPin.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Verifying Code...`;
 
-// 1) إذا كان الطالب متصلاً بالإنترنت: نبحث عن الـ PIN في السيرفر أولاً لأي مقرر أو سكشن أو معمل
+                // 1) إذا كان الطالب متصلاً بالإنترنت: نبحث عن الـ PIN في السيرفر أولاً لأي مقرر أو سكشن أو معمل
                 if (navigator.onLine) {
                     try {
                         const { db, auth } = await import("./firebase.js");
@@ -1271,37 +1271,6 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                     pin: enteredPin
                 });
                 refreshPendingBanner();
-                            showResult(true, "Attendance Confirmed!", "Checked in and registered on server successfully via PIN code.");
-                            document.getElementById("rcpt-name").innerText = res.studentName;
-                            document.getElementById("rcpt-id").innerText = res.studentId;
-                            document.getElementById("rcpt-course").innerText = res.courseName;
-                            document.getElementById("rcpt-date").innerText = res.date;
-                            document.getElementById("rcpt-time").innerText = res.time;
-                            document.getElementById("rcpt-status").innerText = res.status === "Present" ? "Present ✔" : "Late";
-                            document.getElementById("receipt-box").classList.remove("d-none");
-                            return;
-                        }
-                    } catch (netErr) {
-                        const msg = String(netErr?.message || "");
-                        if (msg !== "NETWORK_TIMEOUT" && !msg.includes("Failed to fetch") && !msg.includes("network-request-failed") && !msg.includes("SESSION_NOT_ON_SERVER_YET")) {
-                            throw netErr;
-                        }
-                    }
-                }
-
-                // 4) حفظ الكود الصحيح في الأوفلاين (لو الطالب أوفلاين أو لاب الدكتور أوفلاين لم يرفع المحاضرة بعد)
-                await queueOfflineAttendance({
-                    studentId: studentIdVal,
-                    studentName: stdName,
-                    sessionId: `pin_${enteredPin}`,
-                    courseId: "",
-                    courseName: "PIN Lecture",
-                    lectureNumber: 1,
-                    timeSlot: 0,
-                    hash: "",
-                    pin: enteredPin
-                });
-                refreshPendingBanner();
                 showResult(true, "Saved Offline!", "PIN verified and saved on your phone. It will sync automatically once the lecture is uploaded.");
                 document.getElementById("rcpt-name").innerText = stdName;
                 document.getElementById("rcpt-id").innerText = studentIdVal;
@@ -1317,7 +1286,7 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                 btnPin.innerHTML = `<i class="fa-solid fa-keyboard"></i> <span>Enter 6-Digit PIN</span>`;
             }
         });
-setInterval(() => { refreshPendingBanner(); showSyncErrorIfAny(); }, 3000);
+        setInterval(() => { refreshPendingBanner(); showSyncErrorIfAny(); }, 3000);
         refreshPendingBanner();
         runSync(false);
     </script>
