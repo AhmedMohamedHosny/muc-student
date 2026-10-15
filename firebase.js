@@ -192,18 +192,28 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
             const hwKey = localStorage.getItem("muc_hw_bound_key") || safeDeviceId;
             const idLockRef = doc(db, "attendance_devices", `id_lock_${cleanedStudentId}`);
             const idLockSnap = await withTimeout(getDoc(idLockRef), 3000);
-            if (idLockSnap.exists()) {
+if (idLockSnap.exists()) {
                 const lockedDev = idLockSnap.data().deviceId;
                 if (lockedDev && lockedDev !== hwKey && lockedDev !== safeDeviceId) {
                     throw new Error("🚫 هذا الرقم الجامعي مسجل ومربوط بهاتف طالب آخر بالفعل! يرجى التحدث مع المشرف.");
                 }
             } else {
+                const ua = navigator.userAgent || "";
+                const quickPhoneName = /iPhone/i.test(ua) ? "Apple iPhone" : (/Android/i.test(ua) ? ((ua.match(/Android\s+[\d.]+;\s*([^;)]+)/i) || ["", "Android Phone"])[1].replace(/Build\/.*/i, "").trim()) : "هاتف ذكي");
                 await withTimeout(setDoc(idLockRef, {
                     studentId: cleanedStudentId,
                     studentName: studentRealName,
+                    department: studentData.department || "هندسة الحاسب",
+                    academicYear: String(studentData.academicYear || "2"),
                     deviceId: hwKey,
-                    lockedAt: serverTimestamp()
+                    legacyDeviceId: safeDeviceId,
+                    deviceName: quickPhoneName,
+                    userAgent: ua,
+                    screenInfo: `${screen.width}x${screen.height}`,
+                    lockedAt: serverTimestamp(),
+                    lockedAtISO: new Date().toISOString()
                 }, { merge: true }), 3000);
+                localStorage.setItem(`muc_lock_claimed_${cleanedStudentId}`, "1");
             }
         } catch (lockErr) {
             if (String(lockErr.message || "").includes("مربوط بهاتف طالب آخر")) throw lockErr;

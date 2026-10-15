@@ -33,8 +33,9 @@
             --bg: #4A040A;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Cairo', sans-serif; }
-        body {
-            background: radial-gradient(circle at top right, #93131E, #4A040A) fixed;
+body {
+            background: linear-gradient(135deg, rgba(11, 17, 32, 0.72), rgba(45, 5, 10, 0.80)), url('may.jpg') no-repeat center center fixed;
+            background-size: cover;
             color: #fff;
             min-height: 100vh;
             display: flex;
@@ -548,14 +549,64 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             });
         }
 
-        // دالة التحقق من ملكية الـ ID وتفعيله نهائياً
+// دالة ذكية لاستخراج اسم وموديل الهاتف والمتصفح ليظهر للمشرف في لوحة التحكم
+        async function getReadablePhoneName() {
+            try {
+                const ua = navigator.userAgent || "";
+                if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+                    try {
+                        const vals = await navigator.userAgentData.getHighEntropyValues(["model", "platform", "platformVersion"]);
+                        if (vals && vals.model) {
+                            return `${vals.model} (${vals.platform || "Android"} ${vals.platformVersion || ""})`.trim();
+                        }
+                    } catch (e) {}
+                }
+                let deviceModel = "هاتف ذكي";
+                if (/iPhone/i.test(ua)) {
+                    const iosVer = (ua.match(/OS (\d+_\d+)/) || ["", ""])[1].replace("_", ".");
+                    deviceModel = `Apple iPhone ${iosVer ? `(iOS ${iosVer})` : ""}`;
+                } else if (/iPad/i.test(ua)) {
+                    deviceModel = "Apple iPad";
+                } else if (/Android/i.test(ua)) {
+                    const m = ua.match(/Android\s+([\d.]+);\s*([^;)]+)/i);
+                    if (m) {
+                        const modelCode = m[2].replace(/Build\/.*/i, "").trim();
+                        deviceModel = `${modelCode} (Android ${m[1]})`;
+                    } else {
+                        deviceModel = "هاتف Android";
+                    }
+                } else if (/Windows/i.test(ua)) {
+                    deviceModel = "جهاز Windows PC";
+                } else if (/Mac/i.test(ua)) {
+                    deviceModel = "جهاز Mac";
+                }
+                let browser = "Browser";
+                if (/Edg/i.test(ua)) browser = "Edge";
+                else if (/CriOS|Chrome/i.test(ua)) browser = "Chrome";
+                else if (/Safari/i.test(ua)) browser = "Safari";
+                return `${deviceModel} — ${browser}`;
+            } catch (e) {
+                return "هاتف الطالب";
+            }
+        }
+
+        function clearStudentLocalBinding(cleanId) {
+            localStorage.removeItem("muc_saved_student_id");
+            localStorage.removeItem("muc_saved_student_name");
+            localStorage.removeItem(`muc_student_name_${cleanId}`);
+            localStorage.removeItem(`muc_lock_claimed_${cleanId}`);
+            document.cookie = "muc_saved_student_id=; max-age=0; path=/";
+            document.cookie = "muc_saved_student_name=; max-age=0; path=/";
+        }
+
+        // دالة التحقق من ملكية الـ ID وتفعيله نهائياً (مع طرد الهاتف إذا فك المشرف ربطه)
         async function activateStudentProfile(sid, isFirstTimeSetup = false) {
             const cleanId = String(sid || "").trim();
             if (!cleanId) return false;
 
             let stdName = getSavedStudentName(cleanId);
 
-            if (navigator.onLine && (isFirstTimeSetup || !stdName || stdName === "طالب" || stdName === "Student" || stdName === "طالب جامعة مايو")) {
+            if (navigator.onLine) {
                 try {
                     const { db, auth } = await import("./firebase.js");
                     const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
@@ -576,6 +627,10 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                     ]);
 
                     if (!res.stdSnap.exists()) {
+                        clearStudentLocalBinding(cleanId);
+                        welcomeBar.classList.add("d-none");
+                        scannerStep.classList.add("d-none");
+                        inputStep.classList.remove("d-none");
                         await showCustomAlert("الرقم الجامعي غير صحيح", `⚠️ الرقم الجامعي (${cleanId}) غير مسجل في قاعدة بيانات الجامعة! تأكد من كتابة الـ ID الصحيح.`);
                         return false;
                     }
@@ -583,9 +638,31 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                     const stdData = res.stdSnap.data() || {};
                     stdName = stdData.name || cleanId;
 
-                    // 🔒 فحص حاسم: هل هذا الـ ID مربوط بالفعل بهاتف طالب آخر؟
-                    const existingLockDevice = (res.lockSnap.exists() && res.lockSnap.data().deviceId) || stdData.boundDeviceId || "";
+                    const lockExists = res.lockSnap.exists();
+                    const lockData = lockExists ? (res.lockSnap.data() || {}) : {};
+                    const existingLockDevice = lockData.deviceId || stdData.boundDeviceId || "";
+
+                    // 1. إذا كان الهاتف محفوظاً محلياً من قبل، ولكن المشرف قام بفك القفل من لوحة التحكم (أو تم ربطه بهاتف آخر) -> نطرد هذا الهاتف فوراً!
+                    if (!isFirstTimeSetup) {
+                        const wasClaimedLocally = localStorage.getItem(`muc_lock_claimed_${cleanId}`) === "1";
+                        const kickedByAdmin = (!lockExists && wasClaimedLocally) || (existingLockDevice && existingLockDevice !== myHardwareKey && existingLockDevice !== deviceId);
+                        if (kickedByAdmin) {
+                            clearStudentLocalBinding(cleanId);
+                            inputId.value = "";
+                            welcomeBar.classList.add("d-none");
+                            scannerStep.classList.add("d-none");
+                            inputStep.classList.remove("d-none");
+                            await showCustomAlert(
+                                "تم إلغاء ربط هذا الهاتف",
+                                `🚫 قام مشرف المنظومة بإلغاء ربط هذا الهاتف بالرقم الجامعي (${cleanId}).\n\nيرجى إدخال رقمك الجامعي الصحيح فقط.`
+                            );
+                            return false;
+                        }
+                    }
+
+                    // 2. فحص حاسم: هل هذا الـ ID مربوط بالفعل بهاتف طالب آخر؟
                     if (existingLockDevice && existingLockDevice !== myHardwareKey && existingLockDevice !== deviceId) {
+                        clearStudentLocalBinding(cleanId);
                         await showCustomAlert(
                             "الرقم الجامعي مستخدم بالفعل!",
                             `🚫 عفواً، هناك شخص قام بالفعل باستخدام الرقم الجامعي (${cleanId}) وتسجيله على هاتف آخر!\n\nلا يمكن فتح نفس الـ ID على أكثر من هاتف. يرجى التحدث مع المشرف.\n\nThis Student ID is already claimed by another device. Please contact your supervisor.`
@@ -593,32 +670,44 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                         return false;
                     }
 
-                    // إذا كانت هذه أول مرة يسجل فيها الطالب رقمه، نظهر له شاشة التأكيد بالأنيميشن (Yes / No)
+                    const phoneName = await getReadablePhoneName();
+
+                    // 3. إذا كانت أول مرة يسجل فيها الطالب رقمه، نظهر له شاشة التأكيد بالأنيميشن (Yes / No)
                     if (isFirstTimeSetup) {
                         const isConfirmed = await askAnimatedIdConfirmation(cleanId, stdName);
                         if (!isConfirmed) {
                             inputId.focus();
                             return false;
                         }
+                    }
 
-                        // حجز الرقم الجامعي باسم هذا الهاتف نهائياً على السيرفر لمنع أي شخص آخر من كتابته!
+                    // 4. توثيق قفل الهاتف باسم الطالب ونوع تليفونه في السيرفر ليظهر للمشرف في لوحة التحكم
+                    if (isFirstTimeSetup || !lockExists) {
                         try {
                             await Promise.race([
                                 setDoc(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), {
                                     studentId: cleanId,
                                     studentName: stdName,
+                                    department: stdData.department || "هندسة الحاسب",
+                                    academicYear: String(stdData.academicYear || "2"),
                                     deviceId: myHardwareKey,
                                     legacyDeviceId: deviceId,
-                                    lockedAt: res.serverTimestamp()
+                                    deviceName: phoneName,
+                                    userAgent: navigator.userAgent || "",
+                                    screenInfo: `${screen.width}x${screen.height}`,
+                                    lockedAt: res.serverTimestamp(),
+                                    lockedAtISO: new Date().toISOString()
                                 }, { merge: true }),
                                 new Promise((r) => setTimeout(r, 3000))
                             ]);
+                            localStorage.setItem(`muc_lock_claimed_${cleanId}`, "1");
                         } catch (lockErr) {
                             console.warn("Lock write notice:", lockErr);
                         }
+                    } else {
+                        localStorage.setItem(`muc_lock_claimed_${cleanId}`, "1");
                     }
                 } catch (e) {
-                    // في حالة كون الطالب أوفلاين تماماً في المدرج ويربط رقمه لأول مرة
                     if (isFirstTimeSetup) {
                         const isConfirmed = await askAnimatedIdConfirmation(cleanId, stdName || "طالب جامعة مايو");
                         if (!isConfirmed) {
