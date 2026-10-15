@@ -679,24 +679,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             }
         });
 
-        // حفظ الرقم الجامعي عند الضغط على زر الدخول في البداية
-        document.getElementById("attendance-form").addEventListener("submit", async (e) => {
-            e.preventDefault();
-            const sid = inputId.value.trim();
-            if (!sid || sid.length < 7) {
-                await showCustomAlert("تنبيه", "يرجى إدخال رقمك الجامعي الصحيح (وليس كود المحاضرة المكون من 6 أرقام).");
-                return;
-            }
-            const btn = document.getElementById("btn-submit");
-            btn.disabled = true;
-            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> جاري التحقق...`;
-            try {
-                await activateStudentProfile(sid, true);
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = `<span>تسجيل الدخول ومتابعة (Continue)</span> <i class="fa-solid fa-arrow-right"></i>`;
-            }
-        });
+
 
         // 🔒 منع فتح الروابط الخارجية المباشرة خارج صفحة الطالب
         if (activeSessionId || activeToken) {

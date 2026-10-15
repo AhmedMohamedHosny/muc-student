@@ -187,27 +187,7 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
         } catch (e) {
             if (e.message && e.message.includes("Security Alert")) throw e;
         }
-
-        const startTime = (sessionData.startTime && sessionData.startTime.toDate) ? sessionData.startTime.toDate() : new Date();
-        const diffMinutes = (Date.now() - startTime.getTime()) / 60000;
-        const status = (!isAllowedOfflineSession && diffMinutes > (sessionData.lateThresholdMinutes || CONFIG.attendance.lateThresholdMinutes))
-            ? CONFIG.attendance.statuses.LATE
-            : CONFIG.attendance.statuses.PRESENT;
-
-        await withTimeout(setDoc(recordRef, {
-            recordId: recordId,
-            sessionId: sessionId,
-            courseId: sessionData.courseId || "MUC_COURSE",
-            courseName: sessionData.courseName || "Course",
-            studentId: cleanedStudentId,
-            studentName: studentRealName,
-            deviceId: safeDeviceId,
-            status: status,
-            recordedAt: serverTimestamp(),
-            method: clientToken === "PIN_VERIFIED" ? "PIN_CODE" : "QR_SCAN"
-        }, { merge: true }), 4500);
-
-// قفل الرقم الجامعي على هذا الهاتف نهائياً على السيرفر لمنع انتحال الشخصية
+        // قفل الرقم الجامعي على هذا الهاتف (قبل تسجيل الحضور)
         try {
             const hwKey = localStorage.getItem("muc_hw_bound_key") || safeDeviceId;
             const idLockRef = doc(db, "attendance_devices", `id_lock_${cleanedStudentId}`);
@@ -228,6 +208,27 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
         } catch (lockErr) {
             if (String(lockErr.message || "").includes("مربوط بهاتف طالب آخر")) throw lockErr;
         }
+        const startTime = (sessionData.startTime && sessionData.startTime.toDate) ? sessionData.startTime.toDate() : new Date();
+
+        const diffMinutes = (Date.now() - startTime.getTime()) / 60000;
+        const status = (!isAllowedOfflineSession && diffMinutes > (sessionData.lateThresholdMinutes || CONFIG.attendance.lateThresholdMinutes))
+            ? CONFIG.attendance.statuses.LATE
+            : CONFIG.attendance.statuses.PRESENT;
+
+        await withTimeout(setDoc(recordRef, {
+            recordId: recordId,
+            sessionId: sessionId,
+            courseId: sessionData.courseId || "MUC_COURSE",
+            courseName: sessionData.courseName || "Course",
+            studentId: cleanedStudentId,
+            studentName: studentRealName,
+            deviceId: safeDeviceId,
+            status: status,
+            recordedAt: serverTimestamp(),
+            method: clientToken === "PIN_VERIFIED" ? "PIN_CODE" : "QR_SCAN"
+        }, { merge: true }), 4500);
+
+
 
         removeFromQueue({ studentId: cleanedStudentId, sessionId: sessionId, courseId: sessionData.courseId, scannedAt: Date.now() });
 
