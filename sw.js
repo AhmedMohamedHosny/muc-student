@@ -1,4 +1,4 @@
-const CACHE_NAME = "muc-student-offline-v6";
+const CACHE_NAME = "muc-student-offline-v7";
 
 const CORE_ASSETS = [
     "./",
@@ -6,6 +6,7 @@ const CORE_ASSETS = [
     "./firebase.js",
     "./config.js",
     "./logo.jpg",
+    "./may.jpg",
     "./manifest.json",
     "https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js",
     "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css",

@@ -279,8 +279,8 @@ background: #FDF2F3;
             <p id="sync-feedback" style="font-size:0.78rem; margin-top:6px; font-weight:700;"></p>
         </div>
 
-        <!-- 2. شاشة البداية: إدخال الرقم الجامعي أولاً قبل أي شيء -->
-        <div id="input-step">
+<!-- 2. شاشة البداية: إدخال الرقم الجامعي أولاً قبل أي شيء -->
+        <div id="input-step" class="d-none">
             <div class=" d-none" id="scanned-lecture-box" style="background: #ECFDF5; border: 1px solid #A7F3D0; padding: 8px 12px; border-radius: 8px; margin-bottom: 1rem;">
                 <span style="font-size: 0.82rem; color: #065F46; font-weight: 700;">
                     <i class="fa-solid fa-circle-check"></i> Scanned Lecture: <strong id="detected-course-name">--</strong>
@@ -599,12 +599,23 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             document.cookie = "muc_saved_student_name=; max-age=0; path=/";
         }
 
-        // دالة التحقق من ملكية الـ ID وتفعيله نهائياً (مع طرد الهاتف إذا فك المشرف ربطه)
+ // دالة التحقق من ملكية الـ ID وتفعيله نهائياً (عرض فوري في 0 ثانية للطالب المسجل مسبقاً!)
         async function activateStudentProfile(sid, isFirstTimeSetup = false) {
             const cleanId = String(sid || "").trim();
             if (!cleanId) return false;
 
             let stdName = getSavedStudentName(cleanId);
+
+            // ⚡ إذا كان الطالب مسجلاً من قبل على هذا الهاتف: نفتح له شاشة المسح والترحيب فوراً في 0 ثانية بدون انتظار الشبكة!
+            if (!isFirstTimeSetup) {
+                inputId.value = cleanId;
+                welcomeNameEl.innerText = stdName || "طالب جامعة مايو";
+                welcomeIdEl.innerText = cleanId;
+                welcomeBar.classList.remove("d-none");
+                inputStep.classList.add("d-none");
+                resultStep.classList.add("d-none");
+                scannerStep.classList.remove("d-none");
+            }
 
             if (navigator.onLine) {
                 try {
@@ -642,7 +653,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                     const lockData = lockExists ? (res.lockSnap.data() || {}) : {};
                     const existingLockDevice = lockData.deviceId || stdData.boundDeviceId || "";
 
-                    // 1. إذا كان الهاتف محفوظاً محلياً من قبل، ولكن المشرف قام بفك القفل من لوحة التحكم (أو تم ربطه بهاتف آخر) -> نطرد هذا الهاتف فوراً!
+                    // 1. إذا كان المشرف قد فك ربط هذا الهاتف من لوحة التحكم -> نطرد الهاتف ونعيده لشاشة إدخال الـ ID
                     if (!isFirstTimeSetup) {
                         const wasClaimedLocally = localStorage.getItem(`muc_lock_claimed_${cleanId}`) === "1";
                         const kickedByAdmin = (!lockExists && wasClaimedLocally) || (existingLockDevice && existingLockDevice !== myHardwareKey && existingLockDevice !== deviceId);
@@ -663,6 +674,9 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                     // 2. فحص حاسم: هل هذا الـ ID مربوط بالفعل بهاتف طالب آخر؟
                     if (existingLockDevice && existingLockDevice !== myHardwareKey && existingLockDevice !== deviceId) {
                         clearStudentLocalBinding(cleanId);
+                        welcomeBar.classList.add("d-none");
+                        scannerStep.classList.add("d-none");
+                        inputStep.classList.remove("d-none");
                         await showCustomAlert(
                             "الرقم الجامعي مستخدم بالفعل!",
                             `🚫 عفواً، هناك شخص قام بالفعل باستخدام الرقم الجامعي (${cleanId}) وتسجيله على هاتف آخر!\n\nلا يمكن فتح نفس الـ ID على أكثر من هاتف. يرجى التحدث مع المشرف.\n\nThis Student ID is already claimed by another device. Please contact your supervisor.`
@@ -681,7 +695,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                         }
                     }
 
-                    // 4. توثيق قفل الهاتف باسم الطالب ونوع تليفونه في السيرفر ليظهر للمشرف في لوحة التحكم
+                    // 4. توثيق قفل الهاتف باسم الطالب ونوع تليفونه في السيرفر
                     if (isFirstTimeSetup || !lockExists) {
                         try {
                             await Promise.race([
@@ -738,7 +752,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             return true;
         }
 
-        // عند فتح الموقع: لو الطالب أكد رقمه سابقاً، يدخل فوراً على شاشة المسح ولا يظهر له إدخال الـ ID مرة أخرى
+        // عند فتح الموقع: لو الطالب أكد رقمه سابقاً، يدخل فوراً في 0 ثانية على شاشة المسح ولا تظهر له خانة الـ ID نهائياً
         const initialSavedId = getSavedStudentId();
         if (initialSavedId && initialSavedId.length >= 7) {
             activateStudentProfile(initialSavedId, false);
