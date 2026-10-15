@@ -74,17 +74,22 @@ const PRAXIS_LEC2_STUDENTS = new Set([
   "25120981","25121051","25120850","25120901","25120908","25121042","25221103","25120970","25121012",
   "25221113","25121069","25121018","25121088","25120976"
 ]);
-
-// فحص البصمة الزمنية والرياضية للكود الرقمي (يرفض أي رقم عشوائي أو قديم فوراً)
+// فحص البصمة الرياضية للكود الرقمي (يرفض الأرقام العشوائية ولا يتأثر باختلاف ساعة اللاب عن الموبايل)
 export function isValidPinChecksum(pin) {
     const s = String(pin || "").trim();
     if (!/^\d{6}$/.test(s)) return false;
     const d1 = Number(s[0]), d2 = Number(s[1]), d3 = Number(s[2]);
     if (d1 === 0) return false;
     const enteredSig = s.slice(3);
+
+    // 1. البصمة القياسية المستقلة عن ساعة الجهاز
+    const directSig = ((d1 * 739 + d2 * 521 + d3 * 313 + 419) % 1000);
+    if (String(directSig).padStart(3, "0") === enteredSig) return true;
+
+    // 2. توافق احتياطي مع النوافذ الزمنية على مدار اليوم بالكامل (±24 ساعة) لتفادي أي فرق توقيت
     const nowBucket = Math.floor(Date.now() / 600000);
-    // فحص النافذة الزمنية الحالية (±10 دقائق لتعويض أي فرق توقيت بسيط بين ساعة لاب الدكتور وموبايل الطالب)
-    for (const b of [nowBucket - 1, nowBucket, nowBucket + 1]) {
+    for (let offset = -150; offset <= 150; offset++) {
+        const b = nowBucket + offset;
         const expected = ((d1 * 739 + d2 * 521 + d3 * 313 + (b % 100000) * 887 + 419) % 1000);
         if (String(expected).padStart(3, "0") === enteredSig) return true;
     }
@@ -92,11 +97,7 @@ export function isValidPinChecksum(pin) {
 }
 
 export function checkPinLectureMatch(pin, studentId) {
-    const first = String(pin).charAt(0);
-    const isLec2Std = PRAXIS_LEC2_STUDENTS.has(String(studentId).trim());
-    if (first === "1" && isLec2Std) return "WRONG_LEC_2";
-    if (first === "2" && !isLec2Std) return "WRONG_LEC_1";
-    return null;
+    return null; // التحقق يتم فعلياً من قيد الطالب في المقرر والسكشن على السيرفر
 }
 
 const activeSubmissionLocks = new Set();

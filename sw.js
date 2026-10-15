@@ -1,4 +1,4 @@
-const CACHE_NAME = "muc-student-offline-v7";
+const CACHE_NAME = "muc-student-offline-v8";
 
 const CORE_ASSETS = [
     "./",
