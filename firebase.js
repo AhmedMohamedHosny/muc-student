@@ -74,7 +74,7 @@ const PRAXIS_LEC2_STUDENTS = new Set([
   "25120981","25121051","25120850","25120901","25120908","25121042","25221103","25120970","25121012",
   "25221113","25121069","25121018","25121088","25120976"
 ]);
-// فحص البصمة الرياضية للكود الرقمي (يرفض الأرقام العشوائية ولا يتأثر باختلاف ساعة اللاب عن الموبايل)
+// فحص البصمة الرياضية الزمنية للكود الرقمي (يقبل الكود الحالي فقط ويرفض الأكواد القديمة أو العشوائية)
 export function isValidPinChecksum(pin) {
     const s = String(pin || "").trim();
     if (!/^\d{6}$/.test(s)) return false;
@@ -82,14 +82,10 @@ export function isValidPinChecksum(pin) {
     if (d1 === 0) return false;
     const enteredSig = s.slice(3);
 
-    // 1. البصمة القياسية المستقلة عن ساعة الجهاز
-    const directSig = ((d1 * 739 + d2 * 521 + d3 * 313 + 419) % 1000);
-    if (String(directSig).padStart(3, "0") === enteredSig) return true;
-
-    // 2. توافق احتياطي مع النوافذ الزمنية على مدار اليوم بالكامل (±24 ساعة) لتفادي أي فرق توقيت
-    const nowBucket = Math.floor(Date.now() / 600000);
-    for (let offset = -150; offset <= 150; offset++) {
-        const b = nowBucket + offset;
+    // فحص شريحة الـ 15 ثانية الحالية (مع سماحية ±4 شرائح فقط لتفادي فرق الثواني بين ساعة اللاب والموبايل)
+    const nowSlot = Math.floor(Date.now() / 15000);
+    for (let offset = -4; offset <= 4; offset++) {
+        const b = nowSlot + offset;
         const expected = ((d1 * 739 + d2 * 521 + d3 * 313 + (b % 100000) * 887 + 419) % 1000);
         if (String(expected).padStart(3, "0") === enteredSig) return true;
     }
