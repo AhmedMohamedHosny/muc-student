@@ -385,18 +385,39 @@ export async function syncPendingAttendance() {
 
         for (const item of queue) {
             try {
-// أ) لو السجل عبارة عن PIN أوفلاين، نبحث عن الجلسة المطابقة له عبر وثيقة attendance_pins المباشرة
+// أ) لو السجل عبارة عن PIN أوفلاين، نبحث في attendance_pins ثم احتياطياً في attendance_sessions (pinHistory)
                 if (item.pin) {
-                    item.origSessionId = item.sessionId;
-                    const pinSnap = await withTimeout(getDoc(doc(db, "attendance_pins", String(item.pin))), 4500);
-                    if (!pinSnap.exists()) {
+                    item.origSessionId = item.origSessionId || item.sessionId;
+                    let matchedSessionData = null;
+
+                    try {
+                        const pinSnap = await withTimeout(getDoc(doc(db, "attendance_pins", String(item.pin))), 4000);
+                        if (pinSnap.exists()) {
+                            matchedSessionData = pinSnap.data() || {};
+                        }
+                    } catch (e) {}
+
+                    if (!matchedSessionData) {
+                        try {
+                            const qSnap = await withTimeout(getDocs(query(
+                                collection(db, "attendance_sessions"),
+                                where("pinHistory", "array-contains", Number(item.pin))
+                            )), 4500);
+                            if (!qSnap.empty) {
+                                const docMatch = qSnap.docs[0];
+                                matchedSessionData = { sessionId: docMatch.id, ...docMatch.data() };
+                            }
+                        } catch (e) {}
+                    }
+
+                    if (!matchedSessionData || !matchedSessionData.sessionId) {
                         if (Date.now() - (item.scannedAt || 0) > 12 * 3600 * 1000) removeFromQueue(item);
                         continue;
                     }
-                    const pData = pinSnap.data() || {};
-                    item.sessionId = pData.sessionId || item.sessionId;
-                    item.courseId = pData.courseId || item.courseId || "";
-                    item.courseName = pData.courseName || item.courseName || "المقرر الدراسي";
+
+                    item.sessionId = matchedSessionData.sessionId;
+                    item.courseId = matchedSessionData.courseId || item.courseId || "";
+                    item.courseName = matchedSessionData.courseName || item.courseName || "المقرر الدراسي";
                 }
 
                 // ب) فحص الجلسة على السيرفر

@@ -1,4 +1,4 @@
-const CACHE_NAME = "muc-student-offline-v8";
+const CACHE_NAME = "muc-student-offline-v9";
 
 const CORE_ASSETS = [
     "./",
@@ -83,19 +83,18 @@ self.addEventListener("fetch", (event) => {
         return;
     }
 
-    event.respondWith(
-        caches.match(req, { ignoreSearch: true }).then((cachedRes) => {
-            const fetchPromise = fetchWithFastTimeout(req, 2000)
-                .then((networkRes) => {
-                    if (networkRes && networkRes.status === 200) {
-                        const clone = networkRes.clone();
-                        caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
-                    }
-                    return networkRes;
-                })
-                .catch(() => cachedRes);
-
-            return cachedRes || fetchPromise;
-        })
+event.respondWith(
+        fetchWithFastTimeout(req, 1800)
+            .then((networkRes) => {
+                if (networkRes && networkRes.status === 200) {
+                    const clone = networkRes.clone();
+                    caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
+                }
+                return networkRes;
+            })
+            .catch(async () => {
+                const cache = await caches.open(CACHE_NAME);
+                return (await cache.match(req, { ignoreSearch: true })) || Response.error();
+            })
     );
 });

@@ -1184,41 +1184,53 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                         const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
                         const { doc, getDoc, collection, query, where, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
 
-                        const verifyPinOnServer = async () => {
+const verifyPinOnServer = async () => {
                             if (!auth.currentUser) await signInAnonymously(auth);
                             const pinNum = Number(enteredPin);
 
                             // أ) البحث السريع المباشر في جدول attendance_pins
-                            const pinDoc = await getDoc(doc(db, "attendance_pins", String(enteredPin)));
-                            if (pinDoc.exists()) {
-                                const pData = pinDoc.data() || {};
-                                const sSnap = await getDoc(doc(db, "attendance_sessions", pData.sessionId));
-                                if (sSnap.exists()) {
-                                    const sData = sSnap.data() || {};
+                            try {
+                                const pinDoc = await getDoc(doc(db, "attendance_pins", String(enteredPin)));
+                                if (pinDoc.exists()) {
+                                    const pData = pinDoc.data() || {};
+                                    const sSnap = await getDoc(doc(db, "attendance_sessions", pData.sessionId));
+                                    if (sSnap.exists()) {
+                                        const sData = sSnap.data() || {};
+                                        // للأونلاين: ينتهي الكود فوراً بمجرد تغيره على الشاشة أو انتهاء وقته
+                                        if (sData.status === "active" && !sData.qrOffline) {
+                                            if (
+                                                (sData.activePinCode && Number(sData.activePinCode) !== pinNum) ||
+                                                (pData.expiresAtMs && Date.now() > Number(pData.expiresAtMs)) ||
+                                                (sData.pinExpiresAtMs && Date.now() > Number(sData.pinExpiresAtMs))
+                                            ) {
+                                                return { status: "EXPIRED" };
+                                            }
+                                        }
+                                        return { status: "VALID", sessionDoc: sSnap, pinMeta: pData };
+                                    }
+                                }
+                            } catch (e) {}
+
+                            // ب) بحث احتياطي في الجلسات التي تحتوي على هذا الـ PIN
+                            try {
+                                const qSnap = await getDocs(query(
+                                    collection(db, "attendance_sessions"),
+                                    where("pinHistory", "array-contains", pinNum)
+                                ));
+                                if (!qSnap.empty) {
+                                    const activeDoc = qSnap.docs.find(d => d.data().status === "active") || qSnap.docs[0];
+                                    const sData = activeDoc.data() || {};
                                     if (sData.status === "active" && !sData.qrOffline) {
-                                        if (sData.activePinCode && Number(sData.activePinCode) !== pinNum && Number(sData.prevPinCode) !== pinNum) {
+                                        if (
+                                            (sData.activePinCode && Number(sData.activePinCode) !== pinNum) ||
+                                            (sData.pinExpiresAtMs && Date.now() > Number(sData.pinExpiresAtMs))
+                                        ) {
                                             return { status: "EXPIRED" };
                                         }
                                     }
-                                    return { status: "VALID", sessionDoc: sSnap, pinMeta: pData };
+                                    return { status: "VALID", sessionDoc: activeDoc, pinMeta: sData };
                                 }
-                            }
-
-                            // ب) بحث احتياطي في الجلسات النشطة التي تحتوي على هذا الـ PIN
-                            const qSnap = await getDocs(query(
-                                collection(db, "attendance_sessions"),
-                                where("pinHistory", "array-contains", pinNum)
-                            ));
-                            if (!qSnap.empty) {
-                                const activeDoc = qSnap.docs.find(d => d.data().status === "active") || qSnap.docs[0];
-                                const sData = activeDoc.data() || {};
-                                if (sData.status === "active" && !sData.qrOffline) {
-                                    if (sData.activePinCode && Number(sData.activePinCode) !== pinNum && Number(sData.prevPinCode) !== pinNum) {
-                                        return { status: "EXPIRED" };
-                                    }
-                                }
-                                return { status: "VALID", sessionDoc: activeDoc, pinMeta: sData };
-                            }
+                            } catch (e) {}
 
                             return { status: "NOT_FOUND" };
                         };
@@ -1254,8 +1266,12 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                     }
                 }
 
-                // 2) إذا كان الطالب أوفلاين (أو الدكتور فاتح أوفلاين في القاعة ولم يرفع الجلسة بعد): نفحص البصمة الرياضية ونحفظه أوفلاين
-                if (!isValidPinChecksum(enteredPin)) {
+// 2) فحص البصمة الرياضية محلياً ومباشرة (لا يتأثر بأي كاش قديم)
+                const d1 = Number(enteredPin[0]), d2 = Number(enteredPin[1]), d3 = Number(enteredPin[2]);
+                const directSig = String((d1 * 739 + d2 * 521 + d3 * 313 + 419) % 1000).padStart(3, "0");
+                const isChecksumOk = (d1 !== 0 && directSig === enteredPin.slice(3)) || (typeof isValidPinChecksum === "function" && isValidPinChecksum(enteredPin));
+
+                if (!isChecksumOk) {
                     throw new Error(`❌ الكود الرقمي (${enteredPin}) غير صحيح أو منتهي الصلاحية! يرجى نقل الكود الحالي الظاهر على شاشة المدرج.\n\nInvalid or expired PIN code!`);
                 }
 
@@ -1270,8 +1286,25 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                     hash: "",
                     pin: enteredPin
                 });
+
+                if (navigator.onLine) {
+                    await syncPendingAttendance();
+                }
                 refreshPendingBanner();
-                showResult(true, "Saved Offline!", "PIN verified and saved on your phone. It will sync automatically once the lecture is uploaded.");
+
+                const syncErr = localStorage.getItem("muc_sync_error");
+                if (syncErr) {
+                    localStorage.removeItem("muc_sync_error");
+                    throw new Error(syncErr);
+                }
+
+                if (getPendingCount() === 0) {
+                    showResult(true, "Attendance Confirmed!", "Checked in and registered on server successfully via PIN code.");
+                    document.getElementById("rcpt-status").innerText = "Present ✔";
+                } else {
+                    showResult(true, "Saved Offline!", "PIN verified and saved on your phone. It will sync automatically once the lecture is uploaded.");
+                    document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
+                }
                 document.getElementById("rcpt-name").innerText = stdName;
                 document.getElementById("rcpt-id").innerText = studentIdVal;
                 document.getElementById("rcpt-course").innerText = "Lecture PIN Code";
