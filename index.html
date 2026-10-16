@@ -459,7 +459,7 @@ background: #FDF2F3;
     </div>
     <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
     <script type="module">
-import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum } from "./firebase.js";
+import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum, decodePinMetadata } from "./firebase.js";
         // 🌐 Language Switcher Logic
         let currentLang = "en";
         document.getElementById("btn-lang-toggle")?.addEventListener("click", () => {
@@ -739,8 +739,25 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                         return false;
                     }
 
-                    const stdData = res.stdSnap.data() || {};
+const stdData = res.stdSnap.data() || {};
                     stdName = stdData.name || cleanId;
+                    try {
+                        const myCourses = stdData.enrolledCourses || [];
+                        localStorage.setItem("muc_student_courses", JSON.stringify(myCourses));
+                        const { collection, query, where, limit, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+                        const mapCache = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}");
+                        myCourses.forEach(cid => {
+                            getDocs(query(collection(res.db, "attendance_sessions"), where("courseId", "==", cid), limit(1))).then(sSnap => {
+                                if (!sSnap.empty) {
+                                    const sData = sSnap.docs[0].data() || {};
+                                    if (sData.courseName) {
+                                        mapCache[cid] = sData.courseName;
+                                        localStorage.setItem("muc_course_names_map", JSON.stringify(mapCache));
+                                    }
+                                }
+                            }).catch(() => {});
+                        });
+                    } catch (e) {}
 
                     const lockExists = res.lockSnap.exists();
                     const lockData = lockExists ? (res.lockSnap.data() || {}) : {};
@@ -1318,11 +1335,12 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             const btnPin = document.getElementById("btn-enter-pin");
             const stdName = getSavedStudentName(studentIdVal) || "طالب";
 
-            // فك شفرة البادئة لمعرفة هل الـ PIN مولد من شاشة أونلاين (k زوجي) أم شاشة أوفلاين (k فردي)
-            const pinPrefixNum = Number(enteredPin.slice(0, 3));
-            const pinK = Math.floor((pinPrefixNum - 100) / 15);
-            const isOfflineModePin = (pinK % 2 === 1);
-            const extractedLecNum = ((pinPrefixNum - 100) % 15) || 15;
+// فك شفرة الكود لاستخراج (نوع المحاضرة + رقم المحاضرة + اسم الكورس الأصلي)
+            const decodedPin = decodePinMetadata(enteredPin);
+            const isOfflineModePin = decodedPin.isOfflineModePin;
+            const extractedLecNum = decodedPin.lectureNumber;
+            const extractedCourseId = decodedPin.courseId;
+            const extractedCourseName = decodedPin.courseName;
 
             try {
                 btnPin.disabled = true;
@@ -1441,13 +1459,12 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                 if (!isOfflineModePin || !isValidPinChecksum(enteredPin)) {
                     throw new Error(`❌ الكود الرقمي (${enteredPin}) غير صحيح أو منتهي الصلاحية! يرجى نقل الكود الحالي الظاهر على شاشة المدرج.\n\nInvalid or expired PIN code!`);
                 }
-
-                await queueOfflineAttendance({
+await queueOfflineAttendance({
                     studentId: studentIdVal,
                     studentName: stdName,
                     sessionId: `pin_${enteredPin}`,
-                    courseId: "",
-                    courseName: "Offline PIN Session",
+                    courseId: extractedCourseId,
+                    courseName: extractedCourseName,
                     lectureNumber: extractedLecNum,
                     timeSlot: 0,
                     hash: "",
@@ -1458,7 +1475,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                 showResult(true, "Saved Offline!", "PIN verified and saved on your phone. It will sync automatically once the lecture is uploaded.");
                 document.getElementById("rcpt-name").innerText = stdName;
                 document.getElementById("rcpt-id").innerText = studentIdVal;
-                document.getElementById("rcpt-course").innerText = "Offline Lecture (PIN)";
+                document.getElementById("rcpt-course").innerText = extractedCourseName;
                 document.getElementById("rcpt-lecture").innerText = `Lecture #${extractedLecNum}`;
                 document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
                 document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");

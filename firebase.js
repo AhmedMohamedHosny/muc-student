@@ -74,25 +74,102 @@ const PRAXIS_LEC2_STUDENTS = new Set([
   "25120981","25121051","25120850","25120901","25120908","25121042","25221103","25120970","25121012",
   "25221113","25121069","25121018","25121088","25120976"
 ]);
-// فحص البصمة الرياضية الزمنية للكود الرقمي (يقبل الكود الحالي فقط ويرفض الأكواد القديمة أو العشوائية)
+export function getCoursePinIndex(courseId) {
+    const s = String(courseId || "").trim().toLowerCase();
+    if (!s) return 0;
+    let h = 0;
+    for (let i = 0; i < s.length; i++) {
+        h = (h * 31 + s.charCodeAt(i)) % 30;
+    }
+    return Math.abs(h) % 30;
+}
+
+const KNOWN_MUC_COURSES = {
+    "praxis_programming_lec1": "Praxis Programming — Lecture 1",
+    "praxis_programming_lec2": "Praxis Programming — Lecture 2",
+    "cse216": "Web Design and Database (CSE216)",
+    "cse_web_design": "Web Design and Database (CSE216)",
+    "cse_modern_workshop": "Modern Workshop",
+    "cse122": "Logic Design (CSE122)"
+};
+
+function formatReadableCourseId(cid) {
+    if (!cid) return "";
+    if (KNOWN_MUC_COURSES[cid]) return KNOWN_MUC_COURSES[cid];
+    return String(cid)
+        .replace(/^cse_/, "")
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+export function decodePinMetadata(pin) {
+    const s = String(pin || "").trim();
+    const prefix4 = Number(s.slice(0, 4));
+    const codeVal = prefix4 - 1000;
+    const isOfflineModePin = (codeVal % 2) === 1;
+    const extractedLecNum = (Math.floor(codeVal / 2) % 15) || 15;
+    const courseIdx = Math.floor(codeVal / 30) % 30;
+
+    let courseId = "";
+    let courseName = "";
+
+    try {
+        const cachedMap = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}");
+        const enrolled = JSON.parse(localStorage.getItem("muc_student_courses") || "[]");
+
+        // 1. البحث في مقررات الطالب المقيد بها أولاً (دقة 100%)
+        for (const cid of enrolled) {
+            if (getCoursePinIndex(cid) === courseIdx) {
+                courseId = cid;
+                courseName = cachedMap[cid] || formatReadableCourseId(cid);
+                break;
+            }
+        }
+        // 2. البحث في خريطة أسماء المقررات المحفوظة
+        if (!courseName) {
+            for (const [cid, cname] of Object.entries(cachedMap)) {
+                if (getCoursePinIndex(cid) === courseIdx) {
+                    courseId = cid;
+                    courseName = cname;
+                    break;
+                }
+            }
+        }
+        // 3. البحث في القاموس المدمج
+        if (!courseName) {
+            for (const [cid, cname] of Object.entries(KNOWN_MUC_COURSES)) {
+                if (getCoursePinIndex(cid) === courseIdx) {
+                    courseId = cid;
+                    courseName = cname;
+                    break;
+                }
+            }
+        }
+    } catch (e) {}
+
+    return {
+        isOfflineModePin,
+        lectureNumber: extractedLecNum,
+        courseIdx,
+        courseId: courseId || "MUC_COURSE",
+        courseName: courseName || "Course Session"
+    };
+}
+
 export function isValidPinChecksum(pin) {
     const s = String(pin || "").trim();
     if (!/^\d{6}$/.test(s)) return false;
-    const d1 = Number(s[0]), d2 = Number(s[1]), d3 = Number(s[2]);
+    const d1 = Number(s[0]), d2 = Number(s[1]), d3 = Number(s[2]), d4 = Number(s[3]);
     if (d1 === 0) return false;
-    const enteredSig = s.slice(3);
 
-    // 1. البصمة القياسية المستقلة عن فروق توقيت الساعات بين اللابتوب والموبايل
+    // 1. البصمة الرباعية الجديدة (تحمل اسم المقرر ورقم المحاضرة ونوعها)
+    const sig2 = ((d1 * 73 + d2 * 59 + d3 * 31 + d4 * 17 + 43) % 100);
+    if (String(sig2).padStart(2, "0") === s.slice(4)) return true;
+
+    // 2. توافق مع البصمة الثلاثية السابقة
     const directSig = ((d1 * 739 + d2 * 521 + d3 * 313 + 419) % 1000);
-    if (String(directSig).padStart(3, "0") === enteredSig) return true;
+    if (String(directSig).padStart(3, "0") === s.slice(3)) return true;
 
-    // 2. توافق احتياطي مع النوافذ الزمنية
-    const nowSlot = Math.floor(Date.now() / 15000);
-    for (let offset = -20; offset <= 20; offset++) {
-        const b = nowSlot + offset;
-        const expected = ((d1 * 739 + d2 * 521 + d3 * 313 + (b % 100000) * 887 + 419) % 1000);
-        if (String(expected).padStart(3, "0") === enteredSig) return true;
-    }
     return false;
 }
 
@@ -399,14 +476,22 @@ export async function syncPendingAttendance() {
                         }
                     } catch (e) {}
 
-                    if (!matchedSessionData) {
+if (!matchedSessionData) {
                         try {
                             const qSnap = await withTimeout(getDocs(query(
                                 collection(db, "attendance_sessions"),
                                 where("pinHistory", "array-contains", Number(item.pin))
                             )), 4500);
                             if (!qSnap.empty) {
-                                const docMatch = qSnap.docs[0];
+                                const sortedDocs = qSnap.docs.slice().sort((a, b) => {
+                                    const tA = (a.data().startTime && a.data().startTime.seconds) || 0;
+                                    const tB = (b.data().startTime && b.data().startTime.seconds) || 0;
+                                    return tB - tA;
+                                });
+                                const docMatch = sortedDocs.find(d =>
+                                    (!item.courseId || item.courseId === "MUC_COURSE" || d.data().courseId === item.courseId) &&
+                                    (!item.lectureNumber || Number(d.data().lectureNumber) === Number(item.lectureNumber))
+                                ) || sortedDocs[0];
                                 matchedSessionData = { sessionId: docMatch.id, ...docMatch.data() };
                             }
                         } catch (e) {}
