@@ -102,58 +102,110 @@ background: #FDF2F3;
             font-size: 0.9rem;
         }
         .receipt-row:last-child { border-bottom: none; }
-/* تصميم الدائرة للنتيجة مع أنيميشن سلس */
+/* أنيميشن SVG الاحترافي للنجاح والفشل مع موجات التوهج */
 .icon-circle {
-    width: 75px;
-    height: 75px;
+    width: 88px;
+    height: 88px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 2.2rem;
-    margin: 0 auto 1.2rem;
+    margin: 0 auto 1.25rem;
     position: relative;
 }
 
-/* انيميشن نجاح العملية (توهج وتكبير ناعم) */
-@keyframes mucSuccessPop {
-    0% { transform: scale(0.4); opacity: 0; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6); }
-    70% { transform: scale(1.12); opacity: 1; box-shadow: 0 0 0 16px rgba(16, 185, 129, 0); }
-    100% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+.icon-circle svg {
+    width: 88px;
+    height: 88px;
+    display: block;
+    overflow: visible;
 }
 
-/* انيميشن فشل العملية (اهتزاز وتنبيه أحمر) */
-@keyframes mucFailShake {
-    0%, 100% { transform: translateX(0); }
-    20%, 60% { transform: translateX(-8px); }
-    40%, 80% { transform: translateX(8px); }
+@keyframes mucCardEntrance {
+    0% { opacity: 0; transform: translateY(18px) scale(0.94); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-@keyframes mucFailPulse {
-    0% { transform: scale(0.5); opacity: 0; }
+@keyframes mucCircleScale {
+    0% { transform: scale(0.2); opacity: 0; }
+    65% { transform: scale(1.08); opacity: 1; }
     100% { transform: scale(1); opacity: 1; }
 }
 
-.icon-success { 
-    background: #ECFDF5; 
-    color: var(--success); 
+@keyframes mucStrokeDraw {
+    to { stroke-dashoffset: 0; }
+}
+
+@keyframes mucRippleRing {
+    0% { transform: scale(0.85); opacity: 0.75; }
+    100% { transform: scale(1.55); opacity: 0; }
+}
+
+@keyframes mucErrorShake {
+    0%, 100% { transform: translateX(0); }
+    15%, 45%, 75% { transform: translateX(-9px) rotate(-2deg); }
+    30%, 60%, 90% { transform: translateX(9px) rotate(2deg); }
+}
+
+.icon-success {
+    background: radial-gradient(circle, #ECFDF5 0%, #D1FAE5 100%);
+    box-shadow: 0 10px 25px rgba(16, 185, 129, 0.28);
+    animation: mucCircleScale 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.icon-success::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
     border: 3px solid #10B981;
-    animation: mucSuccessPop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    animation: mucRippleRing 1.1s cubic-bezier(0.16, 1, 0.3, 1) 0.15s forwards;
+    pointer-events: none;
 }
 
-.icon-danger { 
-    background: #FEF2F2; 
-    color: var(--danger); 
+.icon-danger {
+    background: radial-gradient(circle, #FEF2F2 0%, #FEE2E2 100%);
+    box-shadow: 0 10px 25px rgba(239, 68, 68, 0.28);
+    animation: mucCircleScale 0.35s ease-out forwards, mucErrorShake 0.5s ease-in-out 0.12s;
+}
+
+.icon-danger::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
     border: 3px solid #EF4444;
-    animation: mucFailPulse 0.35s ease-out forwards, mucFailShake 0.45s ease-in-out 0.1s;
+    animation: mucRippleRing 1s ease-out 0.1s forwards;
+    pointer-events: none;
 }
 
-/* حركة تدريجية لظهور كارت النتيجة بالكامل */
-#result-step {
-    animation: idModalPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+.muc-svg-ring {
+    stroke-dasharray: 260;
+    stroke-dashoffset: 260;
+    animation: mucStrokeDraw 0.55s cubic-bezier(0.65, 0, 0.45, 1) forwards;
 }
-        .icon-success { background: #ECFDF5; color: var(--success); }
-        .icon-danger { background: #FEF2F2; color: var(--danger); }
+
+.muc-svg-check {
+    stroke-dasharray: 100;
+    stroke-dashoffset: 100;
+    animation: mucStrokeDraw 0.42s cubic-bezier(0.65, 0, 0.45, 1) 0.28s forwards;
+}
+
+.muc-svg-cross-1 {
+    stroke-dasharray: 80;
+    stroke-dashoffset: 80;
+    animation: mucStrokeDraw 0.28s ease-out 0.22s forwards;
+}
+
+.muc-svg-cross-2 {
+    stroke-dasharray: 80;
+    stroke-dashoffset: 80;
+    animation: mucStrokeDraw 0.28s ease-out 0.4s forwards;
+}
+
+#result-step {
+    animation: mucCardEntrance 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
         .d-none { display: none !important; }
 .btn-scan { 
     background: #1E293B !important; 
@@ -840,7 +892,58 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             startCameraScanner();
         });
 
-// دالة تنفيذ تسجيل الحضور الذكي بمجرد لقط الـ QR (أونلاين وأوفلاين)
+// 🔊 محرك المؤثرات الصوتية الذكي للنجاح والفشل (Web Audio API - يعمل 100% أوفلاين بدون ملفات)
+        function playFeedbackSound(isSuccess) {
+            try {
+                if (navigator.vibrate) {
+                    navigator.vibrate(isSuccess ? [70] : [130, 60, 130]);
+                }
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!AudioCtx) return;
+                const ctx = new AudioCtx();
+                const now = ctx.currentTime;
+
+                if (isSuccess) {
+                    // نغمة نجاح ثلاثية مبهجة ونقية (C5 -> E5 -> C6)
+                    const notes = [523.25, 659.25, 1046.50];
+                    notes.forEach((freq, idx) => {
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        osc.type = "sine";
+                        osc.frequency.setValueAtTime(freq, now + idx * 0.09);
+
+                        gain.gain.setValueAtTime(0.001, now + idx * 0.09);
+                        gain.gain.exponentialRampToValueAtTime(0.22, now + idx * 0.09 + 0.02);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.09 + 0.38);
+
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.start(now + idx * 0.09);
+                        osc.stop(now + idx * 0.09 + 0.4);
+                    });
+                } else {
+                    // نغمة خطأ وتنبيه مزدوجة واضحة (F3 -> C3)
+                    const errNotes = [196.00, 146.83];
+                    errNotes.forEach((freq, idx) => {
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        osc.type = "triangle";
+                        osc.frequency.setValueAtTime(freq, now + idx * 0.16);
+
+                        gain.gain.setValueAtTime(0.001, now + idx * 0.16);
+                        gain.gain.exponentialRampToValueAtTime(0.28, now + idx * 0.16 + 0.02);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.16 + 0.22);
+
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.start(now + idx * 0.16);
+                        osc.stop(now + idx * 0.16 + 0.24);
+                    });
+                }
+            } catch (e) {}
+        }
+
+        // دالة تنفيذ تسجيل الحضور الذكي بمجرد لقط الـ QR (أونلاين وأوفلاين)
         async function processInstantQrCheckIn() {
             const sid = getSavedStudentId() || inputId.value.trim();
             const studentRealName = getSavedStudentName(sid) || "طالب";
@@ -895,57 +998,34 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                     return;
                 }
 
-                // ب. لو الباركود لمحاضرة أونلاين
-                try {
-                    if (!navigator.onLine) throw new Error("NETWORK_TIMEOUT");
-                    const res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
-                    if (res.studentName) {
-                        saveStudentIdPermanently(sid, res.studentName);
-                        welcomeNameEl.innerText = res.studentName;
-                    }
-                    refreshPendingBanner();
-                    const typeName = res.sessionType === "lab" ? "Lab" : (res.sessionType === "section" ? "Section" : "Lecture");
-                    const lecNum = res.lectureNumber || window.lastScannedLecNo || 1;
-                    showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been recorded on the live classroom screen.");
-                    document.getElementById("rcpt-name").innerText = res.studentName;
-                    document.getElementById("rcpt-id").innerText = res.studentId;
-                    document.getElementById("rcpt-course").innerText = res.courseName;
-                    document.getElementById("rcpt-lecture").innerText = `${typeName} #${lecNum}`;
-                    document.getElementById("rcpt-date").innerText = res.date;
-                    document.getElementById("rcpt-time").innerText = res.time;
-                    document.getElementById("rcpt-status").innerText = res.status === "Present" ? "Present ✔" : "Late";
-                    document.getElementById("receipt-box").classList.remove("d-none");
-                } catch (onlineErr) {
-                    const m = String(onlineErr?.message || "");
-                    if (m === "NETWORK_TIMEOUT" || m.includes("Failed to fetch") || m.includes("network-request-failed") || !navigator.onLine) {
-                        const fallbackLec = window.lastScannedLecNo || 1;
-                        const fallbackCourse = window.lastScannedCourseName || "Live Lecture";
-                        await queueOfflineAttendance({
-                            studentId: sid,
-                            studentName: studentRealName,
-                            sessionId: activeSessionId,
-                            courseId: "MUC_COURSE",
-                            courseName: fallbackCourse,
-                            lectureNumber: fallbackLec,
-                            timeSlot: 0,
-                            hash: activeToken || ""
-                        });
-                        refreshPendingBanner();
-                        showResult(true, "Saved Offline!", "No internet in hall. Your scan is saved on your phone and will sync once connected.");
-                        document.getElementById("rcpt-name").innerText = studentRealName;
-                        document.getElementById("rcpt-id").innerText = sid;
-                        document.getElementById("rcpt-course").innerText = fallbackCourse;
-                        document.getElementById("rcpt-lecture").innerText = `Lecture #${fallbackLec}`;
-                        document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
-                        document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
-                        document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
-                        document.getElementById("receipt-box").classList.remove("d-none");
-                        return;
-                    }
-                    throw onlineErr;
+                // ب. لو الباركود لمحاضرة أونلاين: يشترط وجود إنترنت لدى الطالب!
+                if (!navigator.onLine) {
+                    throw new Error("🌐 هذه المحاضرة أونلاين (مباشرة) وتتطلب اتصالاً بالإنترنت لتسجيل حضورك فوراً على شاشة المدرج!\n\nيرجى فتح بيانات الهاتف (Mobile Data) أو الـ Wi-Fi والمحاولة مرة أخرى.");
                 }
+
+                const res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
+                if (res.studentName) {
+                    saveStudentIdPermanently(sid, res.studentName);
+                    welcomeNameEl.innerText = res.studentName;
+                }
+                refreshPendingBanner();
+                const typeName = res.sessionType === "lab" ? "Lab" : (res.sessionType === "section" ? "Section" : "Lecture");
+                const lecNum = res.lectureNumber || window.lastScannedLecNo || 1;
+                showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been recorded on the live classroom screen.");
+                document.getElementById("rcpt-name").innerText = res.studentName;
+                document.getElementById("rcpt-id").innerText = res.studentId;
+                document.getElementById("rcpt-course").innerText = res.courseName;
+                document.getElementById("rcpt-lecture").innerText = `${typeName} #${lecNum}`;
+                document.getElementById("rcpt-date").innerText = res.date;
+                document.getElementById("rcpt-time").innerText = res.time;
+                document.getElementById("rcpt-status").innerText = res.status === "Present" ? "Present ✔" : "Late";
+                document.getElementById("receipt-box").classList.remove("d-none");
             } catch (err) {
                 const errMsg = String(err.message || "");
+                if (errMsg === "NETWORK_TIMEOUT" || errMsg.includes("Failed to fetch") || errMsg.includes("network-request-failed")) {
+                    showResult(false, "Online Connection Required", "🌐 هذه المحاضرة أونلاين (مباشرة) وتتطلب اتصالاً فعلياً بالإنترنت لتسجيل الحضور!\n\nيرجى التأكد من جودة اتصال الإنترنت والمحاولة مرة أخرى.");
+                    return;
+                }
                 isExpiredQrError = errMsg.includes("expired") || errMsg.includes("صلاحية");
                 showResult(false, "Check-in Failed", friendlyError(err));
             }
@@ -1003,7 +1083,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                                         ts: Number(parsed.searchParams.get("ts") || Date.now())
                                     };
                                     courseBadge.innerText = "حضور أوفلاين (Offline Mode)";
-} else {
+                                } else {
                                     activeSessionId = sParam;
                                     activeToken = tParam;
                                     window.lastScannedLecNo = Number(parsed.searchParams.get("lec") || 1);
@@ -1021,7 +1101,6 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                             qrBox.classList.add("d-none");
                             btnTriggerCam.classList.remove("d-none");
 
-                            // 🚀 تسجيل فوري بدون السؤال عن الـ ID مرة ثانية
                             await processInstantQrCheckIn();
                         } catch (e) {
                             if (e && e.message === "INVALID_QR") {
@@ -1032,7 +1111,6 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                     () => {}
                 );
 
-// محرك الزوم والكشاف (لا يظهر إلا إذا كانت شاشة الكاميرا مفتوحة فعلياً)
                 setTimeout(() => {
                     try {
                         if (qrBox.classList.contains("d-none")) return;
@@ -1094,7 +1172,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                         }
                     } catch (err) {}
                 }, 400);
-} catch (err) {
+            } catch (err) {
                 await showCustomAlert("Permission Denied", "Please allow camera access in your browser settings to scan.");
                 btnTriggerCam.classList.remove("d-none");
                 qrBox.classList.add("d-none");
@@ -1102,7 +1180,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             }
         }
 
-function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
+        function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
             welcomeBar.classList.add("d-none");
             document.getElementById("receipt-box")?.classList.add("d-none");
             document.getElementById("camera-tools")?.classList.add("d-none");
@@ -1113,15 +1191,29 @@ function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
             document.getElementById("btn-retry").classList.toggle("d-none", !canRetry);
 
             const icon = document.getElementById("status-icon");
-            // إعادة تعيين كلاسات الانيميشن لإجبار المتصفح على تشغيلها من جديد
             icon.className = "icon-circle";
-            void icon.offsetWidth; // Trigger reflow
+            void icon.offsetWidth;
             icon.className = "icon-circle " + (isSuccess ? "icon-success" : "icon-danger");
-            
-            // أيقونات دلالية معبرة
-            icon.innerHTML = isSuccess 
-                ? `<i class="fa-solid fa-circle-check"></i>` 
-                : `<i class="fa-solid fa-circle-xmark"></i>`;
+
+            // رسم الـ SVG المتحرك للصح أو الغلط
+            if (isSuccess) {
+                icon.innerHTML = `
+                    <svg viewBox="0 0 88 88" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle class="muc-svg-ring" cx="44" cy="44" r="40" stroke="#10B981" stroke-width="4.5" stroke-linecap="round"/>
+                        <path class="muc-svg-check" d="M27 45.5L38.5 57L62 33" stroke="#059669" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                `;
+            } else {
+                icon.innerHTML = `
+                    <svg viewBox="0 0 88 88" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle class="muc-svg-ring" cx="44" cy="44" r="40" stroke="#EF4444" stroke-width="4.5" stroke-linecap="round"/>
+                        <path class="muc-svg-cross-1" d="M31 31L57 57" stroke="#DC2626" stroke-width="6" stroke-linecap="round"/>
+                        <path class="muc-svg-cross-2" d="M57 31L31 57" stroke="#DC2626" stroke-width="6" stroke-linecap="round"/>
+                    </svg>
+                `;
+            }
+
+            playFeedbackSound(isSuccess);
 
             document.getElementById("status-title").innerText = title;
             document.getElementById("status-msg").innerText = msg;
@@ -1136,7 +1228,7 @@ function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
             scannerStep.classList.remove("d-none");
             btnTriggerCam.classList.remove("d-none");
             qrBox.classList.add("d-none");
-            document.getElementById("camera-tools")?.classList.add("d-none"); // ضمان اختفاء شريط الفلاش عند العودة
+            document.getElementById("camera-tools")?.classList.add("d-none");
             document.getElementById("btn-torch")?.classList.add("d-none");
         });
 
@@ -1186,18 +1278,18 @@ function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
             }
         }
 
-document.getElementById("btn-sync-now").addEventListener("click", () => runSync(true));
+        document.getElementById("btn-sync-now").addEventListener("click", () => runSync(true));
         document.getElementById("btn-clear-pending")?.addEventListener("click", () => {
             localStorage.removeItem("muc_pending_records");
             refreshPendingBanner();
             document.getElementById("sync-feedback").innerText = "";
         });
-                window.addEventListener("online", () => runSync(false));
+        window.addEventListener("online", () => runSync(false));
         document.addEventListener("visibilitychange", () => {
             if (document.visibilityState === "visible") runSync(false);
         });
 
-document.getElementById("btn-enter-pin")?.addEventListener("click", async () => {
+        document.getElementById("btn-enter-pin")?.addEventListener("click", async () => {
             if (html5QrScanner) {
                 try { await html5QrScanner.stop(); await html5QrScanner.clear(); } catch(e) {}
             }
@@ -1226,9 +1318,20 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
             const btnPin = document.getElementById("btn-enter-pin");
             const stdName = getSavedStudentName(studentIdVal) || "طالب";
 
+            // فك شفرة البادئة لمعرفة هل الـ PIN مولد من شاشة أونلاين (k زوجي) أم شاشة أوفلاين (k فردي)
+            const pinPrefixNum = Number(enteredPin.slice(0, 3));
+            const pinK = Math.floor((pinPrefixNum - 100) / 15);
+            const isOfflineModePin = (pinK % 2 === 1);
+            const extractedLecNum = ((pinPrefixNum - 100) % 15) || 15;
+
             try {
                 btnPin.disabled = true;
                 btnPin.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Verifying Code...`;
+
+                // إذا كان الـ PIN خاصاً بمحاضرة أونلاين والطالب قافل الإنترنت -> نرفض فوراً وننبهه!
+                if (!isOfflineModePin && !navigator.onLine) {
+                    throw new Error("🌐 هذه المحاضرة أونلاين (مباشرة) وتتطلب اتصالاً بالإنترنت لتسجيل حضورك فوراً على شاشة المدرج!\n\nيرجى فتح بيانات الهاتف (Mobile Data) أو الـ Wi-Fi والمحاولة مرة أخرى.");
+                }
 
                 // 1) إذا كان الطالب متصلاً بالإنترنت: نتحقق من السيرفر أولاً
                 if (navigator.onLine) {
@@ -1241,7 +1344,6 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                             if (!auth.currentUser) await signInAnonymously(auth);
                             const pinNum = Number(enteredPin);
 
-                            // أ) البحث المباشر في جدول attendance_pins
                             try {
                                 const pinDoc = await getDoc(doc(db, "attendance_pins", String(enteredPin)));
                                 if (pinDoc.exists()) {
@@ -1266,7 +1368,6 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                                 }
                             } catch (e) {}
 
-                            // ب) بحث احتياطي في الجلسات
                             try {
                                 const qSnap = await getDocs(query(
                                     collection(db, "attendance_sessions"),
@@ -1306,7 +1407,7 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                         if (pinCheck.status === "VALID" && pinCheck.sessionDoc) {
                             const res = await recordStudentAttendance(pinCheck.sessionDoc.id, "PIN_VERIFIED", studentIdVal, deviceId);
                             const typeName = res.sessionType === "lab" ? "Lab" : (res.sessionType === "section" ? "Section" : "Lecture");
-                            const lecNum = res.lectureNumber || pinCheck.pinMeta?.lectureNumber || (((Number(enteredPin.slice(0, 3)) - 100) % 15) || 15);
+                            const lecNum = res.lectureNumber || pinCheck.pinMeta?.lectureNumber || extractedLecNum;
 
                             refreshPendingBanner();
                             showResult(true, "Attendance Confirmed!", "Checked in and registered on server successfully via PIN code.");
@@ -1320,21 +1421,26 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                             document.getElementById("receipt-box").classList.remove("d-none");
                             return;
                         }
+
+                        // إذا كان الطالب متصلاً بالإنترنت والكود زوجي (أونلاين) ولم يجده في السيرفر -> إذن الكود غلط أو منتهي!
+                        if (!isOfflineModePin && pinCheck.status === "NOT_FOUND") {
+                            throw new Error(`❌ الكود الرقمي (${enteredPin}) غير صحيح أو منتهي الصلاحية! يرجى نقل الكود الحالي الظاهر على شاشة المدرج.\n\nInvalid or expired PIN code!`);
+                        }
                     } catch (netErr) {
                         const msg = String(netErr?.message || "");
+                        if (!isOfflineModePin && (msg === "NETWORK_TIMEOUT" || msg.includes("Failed to fetch") || msg.includes("network-request-failed"))) {
+                            throw new Error("🌐 هذه المحاضرة أونلاين (مباشرة) وتتطلب اتصالاً فعلياً بالإنترنت لتسجيل الحضور!\n\nيرجى التأكد من اتصال الإنترنت والمحاولة مرة أخرى.");
+                        }
                         if (msg !== "NETWORK_TIMEOUT" && !msg.includes("Failed to fetch") && !msg.includes("network-request-failed") && !msg.includes("SESSION_NOT_ON_SERVER_YET")) {
                             throw netErr;
                         }
                     }
                 }
 
-                // 2) وضع الأوفلاين (إذا كان موبايل الطالب بدون نت، أو لابتوب الدكتور في المدرج بدون نت ولم يرفع الجلسة بعد):
-                // نفحص البصمة الزمنية الحالية (لا تقبل إلا الكود الظاهر على الشاشة في الدقيقة الحالية فقط!)
-                if (!isValidPinChecksum(enteredPin)) {
+                // 2) وضع الأوفلاين (يُسمح به فقط إذا كان الكود فردياً خاصاً بمحاضرة أوفلاين وضمن نافذة الـ 15 ثانية الحالية!)
+                if (!isOfflineModePin || !isValidPinChecksum(enteredPin)) {
                     throw new Error(`❌ الكود الرقمي (${enteredPin}) غير صحيح أو منتهي الصلاحية! يرجى نقل الكود الحالي الظاهر على شاشة المدرج.\n\nInvalid or expired PIN code!`);
                 }
-
-                const extractedLecNum = ((Number(enteredPin.slice(0, 3)) - 100) % 15) || 15;
 
                 await queueOfflineAttendance({
                     studentId: studentIdVal,
