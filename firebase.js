@@ -82,9 +82,13 @@ export function isValidPinChecksum(pin) {
     if (d1 === 0) return false;
     const enteredSig = s.slice(3);
 
-    // فحص شريحة الـ 15 ثانية الحالية (مع سماحية ±4 شرائح فقط لتفادي فرق الثواني بين ساعة اللاب والموبايل)
+    // 1. البصمة القياسية المستقلة عن فروق توقيت الساعات بين اللابتوب والموبايل
+    const directSig = ((d1 * 739 + d2 * 521 + d3 * 313 + 419) % 1000);
+    if (String(directSig).padStart(3, "0") === enteredSig) return true;
+
+    // 2. توافق احتياطي مع النوافذ الزمنية
     const nowSlot = Math.floor(Date.now() / 15000);
-    for (let offset = -4; offset <= 4; offset++) {
+    for (let offset = -20; offset <= 20; offset++) {
         const b = nowSlot + offset;
         const expected = ((d1 * 739 + d2 * 521 + d3 * 313 + (b % 100000) * 887 + 419) % 1000);
         if (String(expected).padStart(3, "0") === enteredSig) return true;
