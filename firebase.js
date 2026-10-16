@@ -243,12 +243,14 @@ if (idLockSnap.exists()) {
 
         removeFromQueue({ studentId: cleanedStudentId, sessionId: sessionId, courseId: sessionData.courseId, scannedAt: Date.now() });
 
-        const now = new Date();
+const now = new Date();
         return {
             success: true,
             studentName: studentRealName,
             studentId: cleanedStudentId,
             courseName: sessionData.courseName || "Course",
+            lectureNumber: Number(sessionData.lectureNumber || 1),
+            sessionType: sessionData.sessionType || "lecture",
             status: status,
             date: now.toLocaleDateString("en-US"),
             time: now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
