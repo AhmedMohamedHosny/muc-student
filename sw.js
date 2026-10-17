@@ -1,4 +1,4 @@
-const CACHE_NAME = "muc-student-offline-v11";
+const CACHE_NAME = "muc-student-offline-v20";
 
 const CORE_ASSETS = [
     "./",
@@ -14,20 +14,6 @@ const CORE_ASSETS = [
     "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js",
     "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js"
 ];
-
-// دالة جلب بمهلة قصيرة (1.5 ثانية) لمنع تعليق التليفونات في المدرج عندما تكون إشارة الداتا وهمية
-function fetchWithFastTimeout(req, timeoutMs = 1500) {
-    return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("SW_TIMEOUT")), timeoutMs);
-        fetch(req).then(res => {
-            clearTimeout(timer);
-            resolve(res);
-        }).catch(err => {
-            clearTimeout(timer);
-            reject(err);
-        });
-    });
-}
 
 self.addEventListener("install", (event) => {
     self.skipWaiting();
@@ -59,42 +45,45 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
     const req = event.request;
 
+    // استثناء سيرفرات قواعد البيانات والمصادقة
     if (req.method !== "GET" || req.url.includes("firestore.googleapis.com") || req.url.includes("identitytoolkit")) {
         return;
     }
 
+    // طلبات فتح التطبيق والصفحات (Navigation)
     if (req.mode === "navigate") {
         event.respondWith(
-            fetchWithFastTimeout(req, 1500)
+            fetch(req)
                 .then((networkRes) => {
-                    const clone = networkRes.clone();
-                    caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", clone));
+                    if (networkRes && networkRes.status === 200) {
+                        const clone = networkRes.clone();
+                        caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", clone));
+                    }
                     return networkRes;
                 })
                 .catch(async () => {
                     const cache = await caches.open(CACHE_NAME);
-                    return (
-                        (await cache.match("./index.html", { ignoreSearch: true })) ||
-                        (await cache.match("index.html", { ignoreSearch: true })) ||
-                        (await cache.match("./", { ignoreSearch: true }))
-                    );
+                    const matched = (await cache.match("./index.html", { ignoreSearch: true })) ||
+                                    (await cache.match("index.html", { ignoreSearch: true })) ||
+                                    (await cache.match("./", { ignoreSearch: true }));
+                    // عدم إرجاع undefined أبداً لمنع انهيار PWA
+                    return matched || Response.error();
                 })
         );
         return;
     }
 
-event.respondWith(
-        fetchWithFastTimeout(req, 1800)
-            .then((networkRes) => {
+    // طلبات الأصول والملفات
+    event.respondWith(
+        caches.match(req, { ignoreSearch: true }).then((cachedRes) => {
+            if (cachedRes) return cachedRes;
+            return fetch(req).then((networkRes) => {
                 if (networkRes && networkRes.status === 200) {
                     const clone = networkRes.clone();
                     caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
                 }
                 return networkRes;
-            })
-            .catch(async () => {
-                const cache = await caches.open(CACHE_NAME);
-                return (await cache.match(req, { ignoreSearch: true })) || Response.error();
-            })
+            }).catch(() => Response.error());
+        })
     );
 });

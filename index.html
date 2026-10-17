@@ -900,13 +900,32 @@ const stdData = res.stdSnap.data() || {};
             activeSessionId = null;
             activeToken = null;
         }
-
-        // ✅ فتح الكاميرا مباشرة من الموقع بدون اشتراط تثبيت التطبيق
-        let html5QrScanner = null;
+let html5QrScanner = null;
         btnTriggerCam?.addEventListener("click", async () => {
-            btnTriggerCam.classList.add("d-none");
-            qrBox.classList.remove("d-none");
-            startCameraScanner();
+            // التحقق من صلاحية الكاميرا قبل فتح الصندوق الأسود لتفادي حظر أندرويد
+            try {
+                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                    const streamTest = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                    // إغلاق مسار الاختبار فوراً بعد التأكد من منح الإذن
+                    streamTest.getTracks().forEach(t => t.stop());
+                }
+                btnTriggerCam.classList.add("d-none");
+                qrBox.classList.remove("d-none");
+                startCameraScanner();
+            } catch (err) {
+                const msg = String(err?.message || err?.name || "");
+                if (msg.includes("NotAllowedError") || msg.includes("Permission") || msg.includes("bubble") || msg.includes("overlay")) {
+                    await showCustomAlert(
+                        "تنبيه صلاحية الكاميرا",
+                        "تعذر فتح إذن الكاميرا بسبب وجود تطبيق عائم على الشاشة (مثل: فقاعات ماسنجر، تطبيق تسجيل الشاشة، أو فلتر الإضاءة الليلية).\n\nيرجى إغلاق أي نافذة عائمة وسحب فقاعات الشات لأسفل، ثم إعادة المحاولة.",
+                        true
+                    );
+                } else {
+                    btnTriggerCam.classList.add("d-none");
+                    qrBox.classList.remove("d-none");
+                    startCameraScanner();
+                }
+            }
         });
 
 // 🔊 محرك المؤثرات الصوتية الذكي للنجاح والفشل (Web Audio API - يعمل 100% أوفلاين بدون ملفات)
@@ -1189,12 +1208,22 @@ const stdData = res.stdSnap.data() || {};
                         }
                     } catch (err) {}
                 }, 400);
-            } catch (err) {
-                await showCustomAlert("Permission Denied", "Please allow camera access in your browser settings to scan.");
-                btnTriggerCam.classList.remove("d-none");
-                qrBox.classList.add("d-none");
-                document.getElementById("camera-tools")?.classList.add("d-none");
-            }
+} catch (err) {
+    btnTriggerCam.classList.remove("d-none");
+    qrBox.classList.add("d-none");
+    document.getElementById("camera-tools")?.classList.add("d-none");
+
+    const errStr = String(err?.message || err?.name || "");
+    if (errStr.includes("overlay") || errStr.includes("bubble") || errStr.includes("NotAllowedError")) {
+        await showCustomAlert(
+            "حظر إذن الكاميرا",
+            "نظام الحماية في هاتفك يمنع إظهار إذن الكاميرا لوجود تطبيق عائم.\n\nأغلق فقاعات ماسنجر أو أيقونات الشاشة العائمة، ثم اضغط على زر المسح مجدداً.",
+            true
+        );
+    } else {
+        await showCustomAlert("تعذر تشغيل الكاميرا", "يرجى التأكد من السماح بصلاحية الكاميرا للموقع من إعدادات المتصفح أو استخدام خيار كود الـ PIN.", true);
+    }
+}
         }
 
         function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
