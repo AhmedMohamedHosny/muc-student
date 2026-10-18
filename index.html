@@ -848,11 +848,23 @@ const stdData = res.stdSnap.data() || {};
                 }
             }
 
-            if (!stdName) stdName = "طالب جامعة مايو";
-            saveStudentIdPermanently(cleanId, stdName);
-            inputId.value = cleanId;
+// 🛡️ معالجة ذكية للاسم: عدم تثبيت "طالب جامعة مايو" في الكاش إذا تعذر الاتصال
+            if (!stdName || stdName === "طالب جامعة مايو") {
+                // محاولة استخراج الاسم من ملف البيانات المحلي المدمج إن وجد
+                try {
+                    const localMap = JSON.parse(localStorage.getItem(`muc_student_name_${cleanId}`) || "null");
+                    if (localMap) stdName = localMap;
+                } catch(e) {}
+            }
 
-            welcomeNameEl.innerText = stdName;
+            if (stdName && stdName !== "طالب جامعة مايو") {
+                saveStudentIdPermanently(cleanId, stdName);
+                welcomeNameEl.innerText = stdName;
+            } else {
+                welcomeNameEl.innerText = `طالب (${cleanId})`;
+            }
+
+            inputId.value = cleanId;
             welcomeIdEl.innerText = cleanId;
             welcomeBar.classList.remove("d-none");
 
