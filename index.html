@@ -912,13 +912,16 @@ const stdData = res.stdSnap.data() || {};
             activeSessionId = null;
             activeToken = null;
         }
+const footerCreditsBar = document.getElementById("app-footer-credits");
 let html5QrScanner = null;
         btnTriggerCam?.addEventListener("click", async () => {
-            // التحقق من صلاحية الكاميرا قبل فتح الصندوق الأسود لتفادي حظر أندرويد
+            // إخفاء شريط الترحيب وسطر التصميم فور فتح شاشة الكاميرا
+            welcomeBar.classList.add("d-none");
+            footerCreditsBar?.classList.add("d-none");
+
             try {
                 if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
                     const streamTest = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-                    // إغلاق مسار الاختبار فوراً بعد التأكد من منح الإذن
                     streamTest.getTracks().forEach(t => t.stop());
                 }
                 btnTriggerCam.classList.add("d-none");
@@ -927,6 +930,9 @@ let html5QrScanner = null;
             } catch (err) {
                 const msg = String(err?.message || err?.name || "");
                 if (msg.includes("NotAllowedError") || msg.includes("Permission") || msg.includes("bubble") || msg.includes("overlay")) {
+                    // إعادة إظهارهما إذا لم تفتح الكاميرا وظل الطالب في الشاشة الرئيسية
+                    welcomeBar.classList.remove("d-none");
+                    footerCreditsBar?.classList.remove("d-none");
                     await showCustomAlert(
                         "تنبيه صلاحية الكاميرا",
                         "تعذر فتح إذن الكاميرا بسبب وجود تطبيق عائم على الشاشة (مثل: فقاعات ماسنجر، تطبيق تسجيل الشاشة، أو فلتر الإضاءة الليلية).\n\nيرجى إغلاق أي نافذة عائمة وسحب فقاعات الشات لأسفل، ثم إعادة المحاولة.",
@@ -1224,6 +1230,8 @@ let html5QrScanner = null;
     btnTriggerCam.classList.remove("d-none");
     qrBox.classList.add("d-none");
     document.getElementById("camera-tools")?.classList.add("d-none");
+    welcomeBar.classList.remove("d-none");
+    footerCreditsBar?.classList.remove("d-none");
 
     const errStr = String(err?.message || err?.name || "");
     if (errStr.includes("overlay") || errStr.includes("bubble") || errStr.includes("NotAllowedError")) {
@@ -1240,6 +1248,7 @@ let html5QrScanner = null;
 
         function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
             welcomeBar.classList.add("d-none");
+            footerCreditsBar?.classList.add("d-none");
             document.getElementById("receipt-box")?.classList.add("d-none");
             document.getElementById("camera-tools")?.classList.add("d-none");
             qrBox.classList.add("d-none");
@@ -1283,13 +1292,13 @@ let html5QrScanner = null;
             activeSessionId = null;
             activeToken = null;
             welcomeBar.classList.remove("d-none");
+            footerCreditsBar?.classList.remove("d-none");
             scannerStep.classList.remove("d-none");
             btnTriggerCam.classList.remove("d-none");
             qrBox.classList.add("d-none");
             document.getElementById("camera-tools")?.classList.add("d-none");
             document.getElementById("btn-torch")?.classList.add("d-none");
         });
-
         async function showSyncErrorIfAny() {
             const modal = document.getElementById("custom-app-modal");
             if (!modal.classList.contains("d-none")) return;
