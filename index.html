@@ -1533,26 +1533,68 @@ await queueOfflineAttendance({
         refreshPendingBanner();
         runSync(false);
     </script>
-<!-- الشريط الثابت لحقوق التصميم والتطوير (داعم للغتين العربية والإنجليزية تلقائياً) -->
-<div id="app-footer-credits" style="position: fixed; bottom: 0; left: 0; right: 0; text-align: center; padding: 0.35rem 0.75rem; font-size: 0.76rem; font-weight: 600; background: rgba(0, 0, 0, 0.22); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); border-top: 1px solid rgba(255, 255, 255, 0.08); z-index: 9999; display: flex; align-items: center; justify-content: center; gap: 6px; opacity: 0.82;">    
+<!-- الشريط الثابت لحقوق التصميم والتطوير بتأثير مضيء (Glowing Developer Signature) -->
+<div id="app-footer-credits" style="position: fixed; bottom: 0; left: 0; right: 0; text-align: center; padding: 0.42rem 0.75rem; font-size: 0.78rem; font-weight: 700; background: rgba(15, 2, 5, 0.78); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid rgba(197, 155, 39, 0.35); z-index: 9999; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);">
+    
     <!-- النص العربي -->
-    <div class="footer-ar" style="display: flex; align-items: center; gap: 8px; color: #C59B27;">
-        <span style="color: #C59B27; font-weight: 800;">&lt;/&gt;</span>
-        <span>تم تصميم وتنفيذ البرنامج بواسطة فريق عمل من كلية الهندسة جامعة مايو بالقاهرة</span>
-        <span style="color: #C59B27; font-weight: 800;">&lt;/&gt;</span>
+    <div class="footer-ar" style="display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; color: #F1F5F9;">
+        <span class="footer-code-icon">&lt;/&gt;</span>
+        <span>تم تصميم وتطوير البرنامج بواسطة</span>
+        <span class="dev-glow-badge" dir="ltr">Eng: Ahmed M Hosny</span>
+        <span style="color: #CBD5E1;">— جامعة مايو بالقاهرة</span>
+        <span class="footer-code-icon">&lt;/&gt;</span>
     </div>
 
-    <!-- النص الإنجليزي (مطابق لشاشتك بالضبط) -->
-    <div class="footer-en" style="display: none; align-items: center; gap: 8px;">
-        <span style="color: #C59B27; font-weight: 800;">&lt;/&gt;</span>
-        <span style="color: #93131E;">Designed and developed by Faculty of Engineering, May University in Cairo</span>
-        <span style="color: #C59B27; font-weight: 800;">&lt;/&gt;</span>
+    <!-- النص الإنجليزي -->
+    <div class="footer-en" style="display: none; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; color: #F1F5F9;">
+        <span class="footer-code-icon">&lt;/&gt;</span>
+        <span>Designed &amp; Developed by</span>
+        <span class="dev-glow-badge">Eng: Ahmed M Hosny</span>
+        <span style="color: #CBD5E1;">— May University in Cairo</span>
+        <span class="footer-code-icon">&lt;/&gt;</span>
     </div>
 
 </div>
 
-<!-- تنسيقات التبديل التلقائي حسب لغة الصفحة -->
+<!-- تنسيقات الإضاءة والتوهج والتبديل التلقائي حسب لغة الصفحة -->
 <style>
+    @keyframes devNameShimmer {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
+
+    @keyframes devGlowPulse {
+        0%, 100% {
+            box-shadow: 0 0 8px rgba(245, 158, 11, 0.45), inset 0 0 6px rgba(253, 224, 71, 0.2);
+            border-color: rgba(253, 224, 71, 0.65);
+        }
+        50% {
+            box-shadow: 0 0 16px rgba(253, 224, 71, 0.85), 0 0 28px rgba(245, 158, 11, 0.45), inset 0 0 10px rgba(253, 224, 71, 0.35);
+            border-color: #FDE047;
+        }
+    }
+
+    .dev-glow-badge {
+        display: inline-block;
+        padding: 1px 10px;
+        border-radius: 50px;
+        background: rgba(122, 12, 22, 0.65);
+        border: 1px solid rgba(253, 224, 71, 0.6);
+        font-weight: 800;
+        font-size: 0.8rem;
+        letter-spacing: 0.4px;
+        color: #FDE047;
+        text-shadow: 0 0 8px rgba(253, 224, 71, 0.9), 0 0 16px rgba(245, 158, 11, 0.7);
+        animation: devGlowPulse 2.2s infinite ease-in-out;
+    }
+
+    .footer-code-icon {
+        color: #F59E0B;
+        font-weight: 900;
+        text-shadow: 0 0 8px rgba(245, 158, 11, 0.8);
+    }
+
     /* إذا كانت الصفحة بالإنجليزية (dir="ltr" أو lang="en") */
     html[dir="ltr"] .footer-ar,
     html[lang="en"] .footer-ar,
