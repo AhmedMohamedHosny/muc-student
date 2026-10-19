@@ -814,17 +814,21 @@ const lockExists = res.lockSnap.exists();
                         }
                     }
 
-// 4. توثيق قفل الهاتف (الأول أو الثاني) في السيرفر مع حفظ تفاصيل كل هاتف بشكل مستقل
+// 4. توثيق قفل الهاتف (الأول أو الثاني) في السيرفر مع حفظ توقيت وموديل كل هاتف بدقة تامة
                     if (isFirstTimeSetup || !lockExists || !isMyDeviceBound) {
                         try {
+                            const nowISO = new Date().toISOString();
                             let existingDevices = Array.isArray(lockData.devices) ? [...lockData.devices] : [];
+
                             if (existingDevices.length === 0 && lockData.deviceId) {
+                                const rawName = String(lockData.deviceName || "");
+                                const namePart1 = rawName.includes(" + ") ? rawName.split(" + ")[0].trim() : (rawName.includes(" | ") ? rawName.split(" | ")[0].replace(/^[هاتف 1]\s*/, "").trim() : (rawName || "هاتف 1"));
                                 existingDevices.push({
                                     deviceId: lockData.deviceId,
                                     legacyDeviceId: lockData.legacyDeviceId || lockData.deviceId,
-                                    deviceName: lockData.deviceName || "هاتف 1",
+                                    deviceName: namePart1,
                                     screenInfo: lockData.screenInfo || "",
-                                    lockedAtISO: lockData.lockedAtISO || new Date().toISOString()
+                                    lockedAtISO: lockData.firstLockedAtISO || lockData.lockedAtISO || nowISO
                                 });
                             }
 
@@ -833,10 +837,27 @@ const lockExists = res.lockSnap.exists();
                                 legacyDeviceId: deviceId,
                                 deviceName: phoneName,
                                 screenInfo: `${screen.width}x${screen.height}`,
-                                lockedAtISO: new Date().toISOString()
+                                lockedAtISO: nowISO
                             };
 
-                            const updatedDevicesList = [...existingDevices.filter(d => d.deviceId !== myHardwareKey && d.deviceId !== deviceId), currentDeviceObj].slice(0, 2);
+                            let updatedDevicesList = [];
+                            let firstTime = lockData.firstLockedAtISO || (existingDevices[0]?.lockedAtISO) || nowISO;
+                            let secondTime = lockData.secondLockedAtISO || "";
+
+                            if (existingDevices.length === 0) {
+                                updatedDevicesList = [currentDeviceObj];
+                                firstTime = nowISO;
+                            } else {
+                                const otherDev = existingDevices.find(d => d.deviceId !== myHardwareKey && d.deviceId !== deviceId);
+                                if (otherDev) {
+                                    updatedDevicesList = [otherDev, currentDeviceObj];
+                                    firstTime = otherDev.lockedAtISO || firstTime;
+                                    secondTime = nowISO;
+                                } else {
+                                    updatedDevicesList = [currentDeviceObj];
+                                    firstTime = currentDeviceObj.lockedAtISO || nowISO;
+                                }
+                            }
 
                             await Promise.race([
                                 setDoc(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), {
@@ -850,8 +871,10 @@ const lockExists = res.lockSnap.exists();
                                     secondDeviceId: updatedDevicesList[1]?.deviceId || "",
                                     deviceName: updatedDevicesList.map((d, i) => `[هاتف ${i+1}] ${d.deviceName}`).join(" | "),
                                     screenInfo: updatedDevicesList[0]?.screenInfo || `${screen.width}x${screen.height}`,
+                                    firstLockedAtISO: firstTime,
+                                    secondLockedAtISO: secondTime,
                                     lockedAt: res.serverTimestamp(),
-                                    lockedAtISO: new Date().toISOString()
+                                    lockedAtISO: secondTime || firstTime
                                 }, { merge: true }),
                                 new Promise((r) => setTimeout(r, 3000))
                             ]);

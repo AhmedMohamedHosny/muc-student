@@ -322,21 +322,24 @@ const currentLecNum = Number(sessionData.lectureNumber || 1);
             if (e.message && e.message.includes("Security Alert")) throw e;
         }
 
-// قفل الرقم الجامعي بحد أقصى هاتفين (2 Devices) مع حفظ بيانات كل هاتف بالتفصيل
+// قفل الرقم الجامعي بحد أقصى هاتفين (2 Devices) مع حفظ توقيت وموديل كل هاتف بصورة مستقلة
         try {
             const hwKey = localStorage.getItem("muc_hw_bound_key") || safeDeviceId;
             const idLockRef = doc(db, "attendance_devices", `id_lock_${cleanedStudentId}`);
             const idLockSnap = await withTimeout(getDoc(idLockRef), 3000);
             const lockData = idLockSnap.exists() ? (idLockSnap.data() || {}) : {};
+            const nowISO = new Date().toISOString();
 
             let boundDevicesList = Array.isArray(lockData.devices) ? [...lockData.devices] : [];
             if (boundDevicesList.length === 0 && lockData.deviceId) {
+                const rawName = String(lockData.deviceName || "");
+                const namePart1 = rawName.includes(" + ") ? rawName.split(" + ")[0].trim() : (rawName.includes(" | ") ? rawName.split(" | ")[0].replace(/^[هاتف 1]\s*/, "").trim() : (rawName || "هاتف 1"));
                 boundDevicesList.push({
                     deviceId: lockData.deviceId,
                     legacyDeviceId: lockData.legacyDeviceId || lockData.deviceId,
-                    deviceName: lockData.deviceName || "هاتف 1",
+                    deviceName: namePart1,
                     screenInfo: lockData.screenInfo || "",
-                    lockedAtISO: lockData.lockedAtISO || new Date().toISOString()
+                    lockedAtISO: lockData.firstLockedAtISO || lockData.lockedAtISO || nowISO
                 });
             }
 
@@ -353,10 +356,27 @@ const currentLecNum = Number(sessionData.lectureNumber || 1);
                     legacyDeviceId: safeDeviceId,
                     deviceName: quickPhoneName,
                     screenInfo: `${screen.width}x${screen.height}`,
-                    lockedAtISO: new Date().toISOString()
+                    lockedAtISO: nowISO
                 };
 
-                const updatedList = [...boundDevicesList.filter(d => d.deviceId !== hwKey && d.deviceId !== safeDeviceId), newDevObj].slice(0, 2);
+                let updatedList = [];
+                let firstTime = lockData.firstLockedAtISO || (boundDevicesList[0]?.lockedAtISO) || nowISO;
+                let secondTime = lockData.secondLockedAtISO || "";
+
+                if (boundDevicesList.length === 0) {
+                    updatedList = [newDevObj];
+                    firstTime = nowISO;
+                } else {
+                    const otherDev = boundDevicesList.find(d => d.deviceId !== hwKey && d.deviceId !== safeDeviceId);
+                    if (otherDev) {
+                        updatedList = [otherDev, newDevObj];
+                        firstTime = otherDev.lockedAtISO || firstTime;
+                        secondTime = nowISO;
+                    } else {
+                        updatedList = [newDevObj];
+                        firstTime = newDevObj.lockedAtISO || nowISO;
+                    }
+                }
 
                 await withTimeout(setDoc(idLockRef, {
                     studentId: cleanedStudentId,
@@ -369,8 +389,10 @@ const currentLecNum = Number(sessionData.lectureNumber || 1);
                     secondDeviceId: updatedList[1]?.deviceId || "",
                     deviceName: updatedList.map((d, i) => `[هاتف ${i+1}] ${d.deviceName}`).join(" | "),
                     screenInfo: updatedList[0]?.screenInfo || `${screen.width}x${screen.height}`,
+                    firstLockedAtISO: firstTime,
+                    secondLockedAtISO: secondTime,
                     lockedAt: serverTimestamp(),
-                    lockedAtISO: new Date().toISOString()
+                    lockedAtISO: secondTime || firstTime
                 }, { merge: true }), 3000);
                 localStorage.setItem(`muc_lock_claimed_${cleanedStudentId}`, "1");
             }
