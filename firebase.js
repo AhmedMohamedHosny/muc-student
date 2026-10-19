@@ -311,11 +311,14 @@ const t = sessionData.currentToken || {};
             ? CONFIG.attendance.statuses.LATE
             : CONFIG.attendance.statuses.PRESENT;
 
+const isPraxis = String(sessionData.courseId || "").toLowerCase().includes("praxis") || String(sessionData.courseName || "").toLowerCase().includes("praxis");
+        const cleanSavedCourseName = isPraxis ? "Praxis Programming" : String(sessionData.courseName || "Course").replace(/\s*[-–—]?\s*(Lecture|محاضرة|Lec)\s*[12]/gi, "").trim();
+
         await withTimeout(setDoc(recordRef, {
             recordId: recordId,
             sessionId: sessionId,
             courseId: sessionData.courseId || "MUC_COURSE",
-            courseName: sessionData.courseName || "Course",
+            courseName: cleanSavedCourseName,
             studentId: cleanedStudentId,
             studentName: studentRealName,
             deviceId: safeDeviceId,
@@ -329,11 +332,11 @@ const t = sessionData.currentToken || {};
         removeFromQueue({ studentId: cleanedStudentId, sessionId: sessionId, courseId: sessionData.courseId, scannedAt: Date.now() });
 
 const now = new Date();
-        return {
+return {
             success: true,
             studentName: studentRealName,
             studentId: cleanedStudentId,
-            courseName: sessionData.courseName || "Course",
+            courseName: cleanSavedCourseName,
             lectureNumber: Number(sessionData.lectureNumber || 1),
             sessionType: sessionData.sessionType || "lecture",
             status: status,
@@ -563,11 +566,14 @@ const enrolled = sData.enrolledCourses || [];
                     continue;
                 }
 
+const isPraxisSync = String(item.courseId || "").toLowerCase().includes("praxis") || String(item.courseName || "").toLowerCase().includes("praxis");
+                const cleanSyncCourseName = isPraxisSync ? "Praxis Programming" : String(item.courseName || "المقرر الدراسي").replace(/\s*[-–—]?\s*(Lecture|محاضرة|Lec)\s*[12]/gi, "").trim();
+
                 const recordData = {
                     recordId,
                     sessionId: item.sessionId,
                     courseId: item.courseId || "MUC_COURSE",
-                    courseName: item.courseName || "المقرر الدراسي",
+                    courseName: cleanSyncCourseName,
                     studentId: item.studentId,
                     studentName: realStudentName,
                     deviceId: item.deviceId || getLocalDeviceId(),
