@@ -1075,7 +1075,7 @@ let html5QrScanner = null;
 
                     document.getElementById("rcpt-name").innerText = getSavedStudentName(sid) || studentRealName;
                     document.getElementById("rcpt-id").innerText = sid;
-                    document.getElementById("rcpt-course").innerText = offlinePayload.cn || "Course";
+document.getElementById("rcpt-course").innerText = String(offlinePayload.cn || "").toLowerCase().includes("praxis") ? "Praxis Programming" : (offlinePayload.cn || "Course");
                     document.getElementById("rcpt-lecture").innerText = `Lecture #${realLectureNum}`;
                     document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
                     document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
@@ -1099,7 +1099,7 @@ let html5QrScanner = null;
                 showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been recorded on the live classroom screen.");
                 document.getElementById("rcpt-name").innerText = res.studentName;
                 document.getElementById("rcpt-id").innerText = res.studentId;
-                document.getElementById("rcpt-course").innerText = res.courseName;
+document.getElementById("rcpt-course").innerText = String(res.courseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : res.courseName;
                 document.getElementById("rcpt-lecture").innerText = `${typeName} #${lecNum}`;
                 document.getElementById("rcpt-date").innerText = res.date;
                 document.getElementById("rcpt-time").innerText = res.time;
@@ -1556,7 +1556,7 @@ await queueOfflineAttendance({
                 showResult(true, "Saved Offline!", "PIN verified and saved on your phone. It will sync automatically once the lecture is uploaded.");
                 document.getElementById("rcpt-name").innerText = stdName;
                 document.getElementById("rcpt-id").innerText = studentIdVal;
-                document.getElementById("rcpt-course").innerText = extractedCourseName;
+document.getElementById("rcpt-course").innerText = String(extractedCourseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : extractedCourseName;
                 document.getElementById("rcpt-lecture").innerText = `Lecture #${extractedLecNum}`;
                 document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
                 document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");

@@ -84,9 +84,15 @@ export function getCoursePinIndex(courseId) {
     return Math.abs(h) % 30;
 }
 
+export function cleanCourseDisplayName(name) {
+    const s = String(name || "");
+    if (s.toLowerCase().includes("praxis")) return "Praxis Programming";
+    return s.replace(/\s*[-–—]?\s*(محاضرة|Lecture|Lec)\s*[12]/gi, "").trim() || "Praxis Programming";
+}
+
 const KNOWN_MUC_COURSES = {
-    "praxis_programming_lec1": "Praxis Programming — Lecture 1",
-    "praxis_programming_lec2": "Praxis Programming — Lecture 2",
+    "praxis_programming_lec1": "Praxis Programming",
+    "praxis_programming_lec2": "Praxis Programming",
     "cse216": "Web Design and Database (CSE216)",
     "cse_web_design": "Web Design and Database (CSE216)",
     "cse_modern_workshop": "Modern Workshop",
@@ -96,10 +102,7 @@ const KNOWN_MUC_COURSES = {
 function formatReadableCourseId(cid) {
     if (!cid) return "";
     if (KNOWN_MUC_COURSES[cid]) return KNOWN_MUC_COURSES[cid];
-    return String(cid)
-        .replace(/^cse_/, "")
-        .replace(/_/g, " ")
-        .replace(/\b\w/g, c => c.toUpperCase());
+    return cleanCourseDisplayName(String(cid).replace(/^cse_/, "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()));
 }
 
 export function decodePinMetadata(pin) {
@@ -117,7 +120,6 @@ export function decodePinMetadata(pin) {
         const cachedMap = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}");
         const enrolled = JSON.parse(localStorage.getItem("muc_student_courses") || "[]");
 
-        // 1. البحث في مقررات الطالب المقيد بها أولاً (دقة 100%)
         for (const cid of enrolled) {
             if (getCoursePinIndex(cid) === courseIdx) {
                 courseId = cid;
@@ -125,7 +127,6 @@ export function decodePinMetadata(pin) {
                 break;
             }
         }
-        // 2. البحث في خريطة أسماء المقررات المحفوظة
         if (!courseName) {
             for (const [cid, cname] of Object.entries(cachedMap)) {
                 if (getCoursePinIndex(cid) === courseIdx) {
@@ -135,7 +136,6 @@ export function decodePinMetadata(pin) {
                 }
             }
         }
-        // 3. البحث في القاموس المدمج
         if (!courseName) {
             for (const [cid, cname] of Object.entries(KNOWN_MUC_COURSES)) {
                 if (getCoursePinIndex(cid) === courseIdx) {
@@ -152,8 +152,33 @@ export function decodePinMetadata(pin) {
         lectureNumber: extractedLecNum,
         courseIdx,
         courseId: courseId || "MUC_COURSE",
-        courseName: courseName || "Course Session"
+        courseName: cleanCourseDisplayName(courseName || "Praxis Programming")
     };
+}
+
+// دوال تتبع المحاضرات المسجلة لمنع تكرار تسجيل نفس المحاضرة
+export function markLectureAttendedLocally(sid, courseId, lecNum) {
+    try {
+        const key = `muc_attended_history_${sid}`;
+        const hist = JSON.parse(localStorage.getItem(key) || "{}");
+        const cKey = String(courseId).toLowerCase().includes("praxis") ? "praxis" : String(courseId).toLowerCase();
+        hist[`${cKey}_L${lecNum}`] = {
+            date: new Date().toLocaleDateString("en-CA"),
+            timestamp: Date.now()
+        };
+        localStorage.setItem(key, JSON.stringify(hist));
+    } catch(e) {}
+}
+
+export function isLectureAlreadyAttendedLocally(sid, courseId, lecNum) {
+    try {
+        const key = `muc_attended_history_${sid}`;
+        const hist = JSON.parse(localStorage.getItem(key) || "{}");
+        const cKey = String(courseId).toLowerCase().includes("praxis") ? "praxis" : String(courseId).toLowerCase();
+        return Boolean(hist[`${cKey}_L${lecNum}`]);
+    } catch(e) {
+        return false;
+    }
 }
 
 export function isValidPinChecksum(pin) {
@@ -222,9 +247,44 @@ const t = sessionData.currentToken || {};
             throw new Error("QR Code expired! Please scan the updated code on the screen.");
         }
 
+const currentLecNum = Number(sessionData.lectureNumber || 1);
+        const isPraxis = String(sessionData.courseId || "").toLowerCase().includes("praxis") || String(sessionData.courseName || "").toLowerCase().includes("praxis");
+
+        // 1. فحص الكاش المحلي بجهاز الطالب
+        if (isLectureAlreadyAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum)) {
+            throw new Error(`⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (Lecture #${currentLecNum})!`);
+        }
+
+        // 2. فحص السجل المباشر للجلسة
         const existingRecord = await withTimeout(getDoc(recordRef), 4000);
         if (existingRecord.exists()) {
-            throw new Error(`Attendance already recorded for Student ID (${cleanedStudentId})!`);
+            markLectureAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum);
+            throw new Error(`⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (Lecture #${currentLecNum})!`);
+        }
+
+        // 3. فحص قاعدة البيانات السحابية بالكامل للتأكد أن الطالب لم يسجل في الفترة الأولى لنفس المحاضرة
+        try {
+            const qAlready = query(
+                collection(db, "attendance_records"),
+                where("studentId", "==", cleanedStudentId)
+            );
+            const prevSnap = await withTimeout(getDocs(qAlready), 3500);
+            const alreadyAttended = prevSnap.docs.some(docSnap => {
+                const r = docSnap.data();
+                const rCourse = String(r.courseId || "").toLowerCase();
+                const sCourse = String(sessionData.courseId || "").toLowerCase();
+                const matchCourse = (rCourse === sCourse) || (rCourse.includes("praxis") && sCourse.includes("praxis")) || isPraxis;
+                const matchLec = Number(r.lectureNumber || 0) === currentLecNum;
+                const matchSession = r.sessionId === sessionId;
+                return matchCourse && (matchLec || matchSession);
+            });
+
+            if (alreadyAttended) {
+                markLectureAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum);
+                throw new Error(`⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (Lecture #${currentLecNum})!`);
+            }
+        } catch (checkErr) {
+            if (String(checkErr.message || "").includes("لقد قمت بتسجيل حضورك")) throw checkErr;
         }
 
         const studentDoc = await withTimeout(getDoc(doc(db, "students", cleanedStudentId)), 4500);
@@ -327,11 +387,12 @@ const t = sessionData.currentToken || {};
 const isPraxis = String(sessionData.courseId || "").toLowerCase().includes("praxis") || String(sessionData.courseName || "").toLowerCase().includes("praxis");
         const cleanSavedCourseName = isPraxis ? "Praxis Programming" : String(sessionData.courseName || "Course").replace(/\s*[-–—]?\s*(Lecture|محاضرة|Lec)\s*[12]/gi, "").trim();
 
-        await withTimeout(setDoc(recordRef, {
+await withTimeout(setDoc(recordRef, {
             recordId: recordId,
             sessionId: sessionId,
             courseId: sessionData.courseId || "MUC_COURSE",
             courseName: cleanSavedCourseName,
+            lectureNumber: currentLecNum,
             studentId: cleanedStudentId,
             studentName: studentRealName,
             deviceId: safeDeviceId,
@@ -339,6 +400,8 @@ const isPraxis = String(sessionData.courseId || "").toLowerCase().includes("prax
             recordedAt: serverTimestamp(),
             method: clientToken === "PIN_VERIFIED" ? "PIN_CODE" : "QR_SCAN"
         }, { merge: true }), 4500);
+
+        markLectureAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum);
 
 
 
@@ -375,20 +438,27 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
     const todayCA = new Date().toLocaleDateString("en-CA");
     const nowMs = Date.now();
     const SAME_LEC_WINDOW_MS = 45 * 60 * 1000;
+const isPraxis = String(courseId || "").toLowerCase().includes("praxis") || String(courseName || "").toLowerCase().includes("praxis");
+    const targetLec = Number(lectureNumber || 1);
+
+    // فحص هل المحاضرة مسجلة في الهاتف مسبقاً
+    if (isLectureAlreadyAttendedLocally(cleanedStudentId, courseId, targetLec)) {
+        throw new Error(`⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (Lecture #${targetLec})!\n\nYou have already checked in for Lecture #${targetLec}!`);
+    }
 
     const exactOrQrExists = queue.some(q => {
         if (q.studentId !== cleanedStudentId) return false;
         if (q.sessionId === sessionId) return true;
         if (pin && q.pin && String(q.pin) === String(pin)) return true;
-        if (courseId && q.courseId && q.courseId !== "MUC_COURSE" && q.courseId === courseId && Number(q.lectureNumber || 1) === Number(lectureNumber || 1) && q.startedAtDate === todayCA) return true;
-        if (pin && !q.pin && (nowMs - (q.scannedAt || 0) < SAME_LEC_WINDOW_MS)) return true;
+        const qIsPraxis = String(q.courseId || "").toLowerCase().includes("praxis") || String(q.courseName || "").toLowerCase().includes("praxis");
+        const matchCourse = (q.courseId === courseId) || (isPraxis && qIsPraxis);
+        if (matchCourse && Number(q.lectureNumber || 1) === targetLec) return true;
         return false;
     });
 
     if (exactOrQrExists) {
-        throw new Error("⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل ومحفوظ على هاتفك!\n\nYou have already checked in for this lecture!");
+        throw new Error(`⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (Lecture #${targetLec}) ومحفوظ على هاتفك!\n\nYou have already checked in for Lecture #${targetLec}!`);
     }
-
     const deviceExists = queue.some(q => q.studentId !== cleanedStudentId && (
         q.sessionId === sessionId || (nowMs - (q.scannedAt || 0) < SAME_LEC_WINDOW_MS)
     ));
@@ -426,6 +496,7 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
     cleanedQueue.push(record);
     localStorage.setItem("muc_pending_records", JSON.stringify(cleanedQueue));
     return record;
+    markLectureAttendedLocally(cleanedStudentId, courseId, targetLec);
 }
 
 let isSyncing = false;
