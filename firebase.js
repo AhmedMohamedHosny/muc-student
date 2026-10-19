@@ -262,40 +262,53 @@ const t = sessionData.currentToken || {};
             if (e.message && e.message.includes("Security Alert")) throw e;
         }
 
-        // قفل الرقم الجامعي بحد أقصى هاتفين (2 Devices) لكل طالب
+// قفل الرقم الجامعي بحد أقصى هاتفين (2 Devices) مع حفظ بيانات كل هاتف بالتفصيل
         try {
             const hwKey = localStorage.getItem("muc_hw_bound_key") || safeDeviceId;
             const idLockRef = doc(db, "attendance_devices", `id_lock_${cleanedStudentId}`);
             const idLockSnap = await withTimeout(getDoc(idLockRef), 3000);
             const lockData = idLockSnap.exists() ? (idLockSnap.data() || {}) : {};
-            const boundDevices = Array.isArray(lockData.deviceIds) ? [...lockData.deviceIds] : (lockData.deviceId ? [lockData.deviceId] : []);
-            const legacyDevices = Array.isArray(lockData.legacyDeviceIds) ? [...lockData.legacyDeviceIds] : (lockData.legacyDeviceId ? [lockData.legacyDeviceId] : []);
-            const isMyDev = boundDevices.includes(hwKey) || boundDevices.includes(safeDeviceId) || legacyDevices.includes(safeDeviceId);
 
-            if (idLockSnap.exists() && !isMyDev && boundDevices.length >= 2) {
+            let boundDevicesList = Array.isArray(lockData.devices) ? [...lockData.devices] : [];
+            if (boundDevicesList.length === 0 && lockData.deviceId) {
+                boundDevicesList.push({
+                    deviceId: lockData.deviceId,
+                    legacyDeviceId: lockData.legacyDeviceId || lockData.deviceId,
+                    deviceName: lockData.deviceName || "هاتف 1",
+                    screenInfo: lockData.screenInfo || "",
+                    lockedAtISO: lockData.lockedAtISO || new Date().toISOString()
+                });
+            }
+
+            const isMyDev = boundDevicesList.some(d => d.deviceId === hwKey || d.deviceId === safeDeviceId || d.legacyDeviceId === safeDeviceId);
+
+            if (idLockSnap.exists() && !isMyDev && boundDevicesList.length >= 2) {
                 throw new Error("🚫 هذا الرقم الجامعي مسجل ومربوط بهاتفين بالفعل (الحد الأقصى هاتفان)! يرجى التحدث مع المشرف.");
             } else if (!idLockSnap.exists() || !isMyDev) {
                 const ua = navigator.userAgent || "";
                 const quickPhoneName = /iPhone/i.test(ua) ? "Apple iPhone" : (/Android/i.test(ua) ? ((ua.match(/Android\s+[\d.]+;\s*([^;)]+)/i) || ["", "Android Phone"])[1].replace(/Build\/.*/i, "").trim()) : "هاتف ذكي");
-                const updatedDevices = [...new Set([...boundDevices, hwKey])].slice(0, 2);
-                const updatedLegacy = [...new Set([...legacyDevices, safeDeviceId])].slice(0, 2);
-                const combinedPhoneName = lockData.deviceName
-                    ? (lockData.deviceName.includes(quickPhoneName) ? lockData.deviceName : `${lockData.deviceName} + ${quickPhoneName}`)
-                    : quickPhoneName;
+                
+                const newDevObj = {
+                    deviceId: hwKey,
+                    legacyDeviceId: safeDeviceId,
+                    deviceName: quickPhoneName,
+                    screenInfo: `${screen.width}x${screen.height}`,
+                    lockedAtISO: new Date().toISOString()
+                };
+
+                const updatedList = [...boundDevicesList.filter(d => d.deviceId !== hwKey && d.deviceId !== safeDeviceId), newDevObj].slice(0, 2);
 
                 await withTimeout(setDoc(idLockRef, {
                     studentId: cleanedStudentId,
                     studentName: studentRealName,
                     department: studentData.department || "هندسة الحاسب",
                     academicYear: String(studentData.academicYear || "2"),
-                    deviceId: updatedDevices[0] || hwKey,
-                    secondDeviceId: updatedDevices[1] || "",
-                    deviceIds: updatedDevices,
-                    legacyDeviceId: updatedLegacy[0] || safeDeviceId,
-                    legacyDeviceIds: updatedLegacy,
-                    deviceName: combinedPhoneName,
-                    userAgent: ua,
-                    screenInfo: `${screen.width}x${screen.height}`,
+                    devices: updatedList,
+                    deviceIds: updatedList.map(d => d.deviceId),
+                    deviceId: updatedList[0]?.deviceId || hwKey,
+                    secondDeviceId: updatedList[1]?.deviceId || "",
+                    deviceName: updatedList.map((d, i) => `[هاتف ${i+1}] ${d.deviceName}`).join(" | "),
+                    screenInfo: updatedList[0]?.screenInfo || `${screen.width}x${screen.height}`,
                     lockedAt: serverTimestamp(),
                     lockedAtISO: new Date().toISOString()
                 }, { merge: true }), 3000);

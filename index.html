@@ -814,14 +814,29 @@ const lockExists = res.lockSnap.exists();
                         }
                     }
 
-                    // 4. توثيق قفل الهاتف (الأول أو الثاني) في السيرفر
+// 4. توثيق قفل الهاتف (الأول أو الثاني) في السيرفر مع حفظ تفاصيل كل هاتف بشكل مستقل
                     if (isFirstTimeSetup || !lockExists || !isMyDeviceBound) {
                         try {
-                            const updatedDevices = [...new Set([...boundDevices, myHardwareKey])].slice(0, 2);
-                            const updatedLegacy = [...new Set([...legacyDevices, deviceId])].slice(0, 2);
-                            const combinedPhoneName = lockData.deviceName 
-                                ? (lockData.deviceName.includes(phoneName) ? lockData.deviceName : `${lockData.deviceName} + ${phoneName}`)
-                                : phoneName;
+                            let existingDevices = Array.isArray(lockData.devices) ? [...lockData.devices] : [];
+                            if (existingDevices.length === 0 && lockData.deviceId) {
+                                existingDevices.push({
+                                    deviceId: lockData.deviceId,
+                                    legacyDeviceId: lockData.legacyDeviceId || lockData.deviceId,
+                                    deviceName: lockData.deviceName || "هاتف 1",
+                                    screenInfo: lockData.screenInfo || "",
+                                    lockedAtISO: lockData.lockedAtISO || new Date().toISOString()
+                                });
+                            }
+
+                            const currentDeviceObj = {
+                                deviceId: myHardwareKey,
+                                legacyDeviceId: deviceId,
+                                deviceName: phoneName,
+                                screenInfo: `${screen.width}x${screen.height}`,
+                                lockedAtISO: new Date().toISOString()
+                            };
+
+                            const updatedDevicesList = [...existingDevices.filter(d => d.deviceId !== myHardwareKey && d.deviceId !== deviceId), currentDeviceObj].slice(0, 2);
 
                             await Promise.race([
                                 setDoc(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), {
@@ -829,14 +844,12 @@ const lockExists = res.lockSnap.exists();
                                     studentName: stdName,
                                     department: stdData.department || "هندسة الحاسب",
                                     academicYear: String(stdData.academicYear || "2"),
-                                    deviceId: updatedDevices[0] || myHardwareKey,
-                                    secondDeviceId: updatedDevices[1] || "",
-                                    deviceIds: updatedDevices,
-                                    legacyDeviceId: updatedLegacy[0] || deviceId,
-                                    legacyDeviceIds: updatedLegacy,
-                                    deviceName: combinedPhoneName,
-                                    userAgent: navigator.userAgent || "",
-                                    screenInfo: `${screen.width}x${screen.height}`,
+                                    devices: updatedDevicesList,
+                                    deviceIds: updatedDevicesList.map(d => d.deviceId),
+                                    deviceId: updatedDevicesList[0]?.deviceId || myHardwareKey,
+                                    secondDeviceId: updatedDevicesList[1]?.deviceId || "",
+                                    deviceName: updatedDevicesList.map((d, i) => `[هاتف ${i+1}] ${d.deviceName}`).join(" | "),
+                                    screenInfo: updatedDevicesList[0]?.screenInfo || `${screen.width}x${screen.height}`,
                                     lockedAt: res.serverTimestamp(),
                                     lockedAtISO: new Date().toISOString()
                                 }, { merge: true }),
