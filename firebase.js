@@ -216,17 +216,7 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
             throw new Error("Attendance session is currently closed by the instructor.");
         }
 
-        const sessionCourseKey = `${sessionData.courseId || ""} ${sessionData.courseName || ""}`.toLowerCase();
-        const isLec1Session = sessionCourseKey.includes("lec1") || sessionCourseKey.includes("l1") || sessionCourseKey.includes("محاضرة 1");
-        const isLec2Session = sessionCourseKey.includes("lec2") || sessionCourseKey.includes("l2") || sessionCourseKey.includes("محاضرة 2");
-
-        if (isLec1Session || isLec2Session) {
-            const isLec2Std = PRAXIS_LEC2_STUDENTS.has(cleanedStudentId);
-            if (isLec1Session && isLec2Std) throw new Error("WRONG_LEC_2");
-            if (isLec2Session && !isLec2Std) throw new Error("WRONG_LEC_1");
-        }
-
-        const t = sessionData.currentToken || {};
+const t = sessionData.currentToken || {};
         const isOfflineToken = String(clientToken || "").startsWith("OFF_");
         if (clientToken !== "PIN_VERIFIED" && !isOfflineToken && (!clientToken || t.token !== clientToken)) {
             throw new Error("QR Code expired! Please scan the updated code on the screen.");
@@ -247,7 +237,13 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
 
         const enrolledList = studentData.enrolledCourses || [];
         const currentCourseId = sessionData.courseId || "";
-        const isEnrolled = !currentCourseId || currentCourseId === "MUC_COURSE" || enrolledList.includes(currentCourseId) || 
+        const isPraxisCourse = String(currentCourseId).toLowerCase().includes("praxis");
+        const isEnrolledInAnyPraxis = isPraxisCourse && (
+            enrolledList.some(id => String(id).toLowerCase().includes("praxis") || String(id).toLowerCase().includes("cse212")) ||
+            (studentData.sections && Object.keys(studentData.sections).some(k => k.toLowerCase().includes("praxis") || k.toLowerCase().includes("cse212")))
+        );
+
+        const isEnrolled = !currentCourseId || currentCourseId === "MUC_COURSE" || enrolledList.includes(currentCourseId) || isEnrolledInAnyPraxis ||
                            (studentData.sections && (studentData.sections[currentCourseId] || Object.keys(studentData.sections).some(k => k.toLowerCase() === currentCourseId.toLowerCase())));
 
         if (!isEnrolled) {
@@ -265,27 +261,39 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
         } catch (e) {
             if (e.message && e.message.includes("Security Alert")) throw e;
         }
-        // قفل الرقم الجامعي على هذا الهاتف (قبل تسجيل الحضور)
+
+        // قفل الرقم الجامعي بحد أقصى هاتفين (2 Devices) لكل طالب
         try {
             const hwKey = localStorage.getItem("muc_hw_bound_key") || safeDeviceId;
             const idLockRef = doc(db, "attendance_devices", `id_lock_${cleanedStudentId}`);
             const idLockSnap = await withTimeout(getDoc(idLockRef), 3000);
-if (idLockSnap.exists()) {
-                const lockedDev = idLockSnap.data().deviceId;
-                if (lockedDev && lockedDev !== hwKey && lockedDev !== safeDeviceId) {
-                    throw new Error("🚫 هذا الرقم الجامعي مسجل ومربوط بهاتف طالب آخر بالفعل! يرجى التحدث مع المشرف.");
-                }
-            } else {
+            const lockData = idLockSnap.exists() ? (idLockSnap.data() || {}) : {};
+            const boundDevices = Array.isArray(lockData.deviceIds) ? [...lockData.deviceIds] : (lockData.deviceId ? [lockData.deviceId] : []);
+            const legacyDevices = Array.isArray(lockData.legacyDeviceIds) ? [...lockData.legacyDeviceIds] : (lockData.legacyDeviceId ? [lockData.legacyDeviceId] : []);
+            const isMyDev = boundDevices.includes(hwKey) || boundDevices.includes(safeDeviceId) || legacyDevices.includes(safeDeviceId);
+
+            if (idLockSnap.exists() && !isMyDev && boundDevices.length >= 2) {
+                throw new Error("🚫 هذا الرقم الجامعي مسجل ومربوط بهاتفين بالفعل (الحد الأقصى هاتفان)! يرجى التحدث مع المشرف.");
+            } else if (!idLockSnap.exists() || !isMyDev) {
                 const ua = navigator.userAgent || "";
                 const quickPhoneName = /iPhone/i.test(ua) ? "Apple iPhone" : (/Android/i.test(ua) ? ((ua.match(/Android\s+[\d.]+;\s*([^;)]+)/i) || ["", "Android Phone"])[1].replace(/Build\/.*/i, "").trim()) : "هاتف ذكي");
+                const updatedDevices = [...new Set([...boundDevices, hwKey])].slice(0, 2);
+                const updatedLegacy = [...new Set([...legacyDevices, safeDeviceId])].slice(0, 2);
+                const combinedPhoneName = lockData.deviceName
+                    ? (lockData.deviceName.includes(quickPhoneName) ? lockData.deviceName : `${lockData.deviceName} + ${quickPhoneName}`)
+                    : quickPhoneName;
+
                 await withTimeout(setDoc(idLockRef, {
                     studentId: cleanedStudentId,
                     studentName: studentRealName,
                     department: studentData.department || "هندسة الحاسب",
                     academicYear: String(studentData.academicYear || "2"),
-                    deviceId: hwKey,
-                    legacyDeviceId: safeDeviceId,
-                    deviceName: quickPhoneName,
+                    deviceId: updatedDevices[0] || hwKey,
+                    secondDeviceId: updatedDevices[1] || "",
+                    deviceIds: updatedDevices,
+                    legacyDeviceId: updatedLegacy[0] || safeDeviceId,
+                    legacyDeviceIds: updatedLegacy,
+                    deviceName: combinedPhoneName,
                     userAgent: ua,
                     screenInfo: `${screen.width}x${screen.height}`,
                     lockedAt: serverTimestamp(),
@@ -294,7 +302,7 @@ if (idLockSnap.exists()) {
                 localStorage.setItem(`muc_lock_claimed_${cleanedStudentId}`, "1");
             }
         } catch (lockErr) {
-            if (String(lockErr.message || "").includes("مربوط بهاتف طالب آخر")) throw lockErr;
+            if (String(lockErr.message || "").includes("مربوط بهاتفين")) throw lockErr;
         }
         const startTime = (sessionData.startTime && sessionData.startTime.toDate) ? sessionData.startTime.toDate() : new Date();
 
@@ -344,19 +352,7 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
         throw new Error("⚠️ رمز الحضور غير صالح، يرجى مسح الباركود مرة أخرى.");
     }
 
-    const sessionCourseKey = `${courseId || ""} ${courseName || ""}`.toLowerCase();
-    const isLec1Session = sessionCourseKey.includes("lec1") || sessionCourseKey.includes("l1") || sessionCourseKey.includes("محاضرة 1");
-    const isLec2Session = sessionCourseKey.includes("lec2") || sessionCourseKey.includes("l2") || sessionCourseKey.includes("محاضرة 2");
 
-    if (isLec1Session || isLec2Session) {
-        const isLec2Std = PRAXIS_LEC2_STUDENTS.has(cleanedStudentId);
-        if (isLec1Session && isLec2Std) {
-            throw new Error("⚠️ غير مصرح: أنت مسجل في (محاضرة 2) ولا يمكنك تسجيل الحضور في محاضرة 1!");
-        }
-        if (isLec2Session && !isLec2Std) {
-            throw new Error("⚠️ غير مصرح: أنت مسجل في (محاضرة 1) ولا يمكنك تسجيل الحضور في محاضرة 2!");
-        }
-    }
 
     const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
     const deviceId = getLocalDeviceId();
@@ -419,13 +415,6 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
 let isSyncing = false;
 
 function checkLectureMatch(courseId, courseName, studentId) {
-    const key = `${courseId || ""} ${courseName || ""}`.toLowerCase();
-    const isLec1 = key.includes("lec1") || key.includes("l1") || key.includes("محاضرة 1");
-    const isLec2 = key.includes("lec2") || key.includes("l2") || key.includes("محاضرة 2");
-    if (!isLec1 && !isLec2) return null;
-    const isLec2Std = PRAXIS_LEC2_STUDENTS.has(String(studentId).trim());
-    if (isLec1 && isLec2Std) return "WRONG_LEC_2";
-    if (isLec2 && !isLec2Std) return "WRONG_LEC_1";
     return null;
 }
 
@@ -552,8 +541,10 @@ if (!matchedSessionData) {
                     const sData = stdSnap.data();
                     realStudentName = sData.name || realStudentName;
                     localStorage.setItem(`muc_student_name_${item.studentId}`, realStudentName);
-                    const enrolled = sData.enrolledCourses || [];
-                    if (item.courseId && item.courseId !== "MUC_COURSE" && !enrolled.includes(item.courseId)) {
+const enrolled = sData.enrolledCourses || [];
+                    const isPraxisSync = String(item.courseId || "").toLowerCase().includes("praxis") && enrolled.some(id => String(id).toLowerCase().includes("praxis"));
+                    if (item.courseId && item.courseId !== "MUC_COURSE" && !enrolled.includes(item.courseId) && !isPraxisSync) {
+
                         localStorage.setItem("muc_sync_error", `⚠️ الرقم (${item.studentId}) غير مقيد في مقرر (${item.courseName || item.courseId})!`);
                         removeFromQueue(item);
                         continue;

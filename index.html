@@ -759,14 +759,23 @@ const stdData = res.stdSnap.data() || {};
                         });
                     } catch (e) {}
 
-                    const lockExists = res.lockSnap.exists();
+const lockExists = res.lockSnap.exists();
                     const lockData = lockExists ? (res.lockSnap.data() || {}) : {};
-                    const existingLockDevice = lockData.deviceId || stdData.boundDeviceId || "";
+                    
+                    // استخراج قائمة الأجهزة المربوطة بهذا الرقم الجامعي (بحد أقصى جهازين)
+                    const boundDevices = Array.isArray(lockData.deviceIds) 
+                        ? [...lockData.deviceIds] 
+                        : (lockData.deviceId ? [lockData.deviceId] : []);
+                    const legacyDevices = Array.isArray(lockData.legacyDeviceIds)
+                        ? [...lockData.legacyDeviceIds]
+                        : (lockData.legacyDeviceId ? [lockData.legacyDeviceId] : []);
 
-                    // 1. إذا كان المشرف قد فك ربط هذا الهاتف من لوحة التحكم -> نطرد الهاتف ونعيده لشاشة إدخال الـ ID
+                    const isMyDeviceBound = boundDevices.includes(myHardwareKey) || boundDevices.includes(deviceId) || legacyDevices.includes(deviceId);
+
+                    // 1. إذا كان المشرف قد فك ربط هذا الهاتف من لوحة التحكم -> نطرد الهاتف
                     if (!isFirstTimeSetup) {
                         const wasClaimedLocally = localStorage.getItem(`muc_lock_claimed_${cleanId}`) === "1";
-                        const kickedByAdmin = (!lockExists && wasClaimedLocally) || (existingLockDevice && existingLockDevice !== myHardwareKey && existingLockDevice !== deviceId);
+                        const kickedByAdmin = (!lockExists && wasClaimedLocally) || (lockExists && boundDevices.length > 0 && !isMyDeviceBound && wasClaimedLocally);
                         if (kickedByAdmin) {
                             clearStudentLocalBinding(cleanId);
                             inputId.value = "";
@@ -781,15 +790,15 @@ const stdData = res.stdSnap.data() || {};
                         }
                     }
 
-                    // 2. فحص حاسم: هل هذا الـ ID مربوط بالفعل بهاتف طالب آخر؟
-                    if (existingLockDevice && existingLockDevice !== myHardwareKey && existingLockDevice !== deviceId) {
+                    // 2. فحص الحد الأقصى للأجهزة: مسموح بجهازين (2) فقط لكل طالب
+                    if (!isMyDeviceBound && boundDevices.length >= 2) {
                         clearStudentLocalBinding(cleanId);
                         welcomeBar.classList.add("d-none");
                         scannerStep.classList.add("d-none");
                         inputStep.classList.remove("d-none");
                         await showCustomAlert(
                             "الرقم الجامعي مستخدم بالفعل!",
-                            `🚫 عفواً، هناك شخص قام بالفعل باستخدام الرقم الجامعي (${cleanId}) وتسجيله على هاتف آخر!\n\nلا يمكن فتح نفس الـ ID على أكثر من هاتف. يرجى التحدث مع المشرف.\n\nThis Student ID is already claimed by another device. Please contact your supervisor.`
+                            `🚫 عفواً، الرقم الجامعي (${cleanId}) مربوط بالفعل بهاتفين (الحد الأقصى المسموح به هو هاتفان فقط)!\n\nيرجى التحدث مع المشرف لفك القفل.\n\nThis Student ID is already bound to 2 devices.`
                         );
                         return false;
                     }
@@ -805,18 +814,27 @@ const stdData = res.stdSnap.data() || {};
                         }
                     }
 
-                    // 4. توثيق قفل الهاتف باسم الطالب ونوع تليفونه في السيرفر
-                    if (isFirstTimeSetup || !lockExists) {
+                    // 4. توثيق قفل الهاتف (الأول أو الثاني) في السيرفر
+                    if (isFirstTimeSetup || !lockExists || !isMyDeviceBound) {
                         try {
+                            const updatedDevices = [...new Set([...boundDevices, myHardwareKey])].slice(0, 2);
+                            const updatedLegacy = [...new Set([...legacyDevices, deviceId])].slice(0, 2);
+                            const combinedPhoneName = lockData.deviceName 
+                                ? (lockData.deviceName.includes(phoneName) ? lockData.deviceName : `${lockData.deviceName} + ${phoneName}`)
+                                : phoneName;
+
                             await Promise.race([
                                 setDoc(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), {
                                     studentId: cleanId,
                                     studentName: stdName,
                                     department: stdData.department || "هندسة الحاسب",
                                     academicYear: String(stdData.academicYear || "2"),
-                                    deviceId: myHardwareKey,
-                                    legacyDeviceId: deviceId,
-                                    deviceName: phoneName,
+                                    deviceId: updatedDevices[0] || myHardwareKey,
+                                    secondDeviceId: updatedDevices[1] || "",
+                                    deviceIds: updatedDevices,
+                                    legacyDeviceId: updatedLegacy[0] || deviceId,
+                                    legacyDeviceIds: updatedLegacy,
+                                    deviceName: combinedPhoneName,
                                     userAgent: navigator.userAgent || "",
                                     screenInfo: `${screen.width}x${screen.height}`,
                                     lockedAt: res.serverTimestamp(),
