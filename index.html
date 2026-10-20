@@ -459,7 +459,7 @@ background: #FDF2F3;
     </div>
     <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
     <script type="module">
-import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum, decodePinMetadata } from "./firebase.js";
+import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum, decodePinMetadata, verifyPinOnServerFast, getCoursePinIndex } from "./firebase.js?v=25";
         // 🌐 Language Switcher Logic
         let currentLang = "en";
         document.getElementById("btn-lang-toggle")?.addEventListener("click", () => {
@@ -1151,18 +1151,19 @@ let html5QrScanner = null;
             try {
                 // أ. لو الباركود لمحاضرة أوفلاين
                 if (offlinePayload) {
-                    // 🛑 التحقق من قيد الطالب قبل قبول باركود الأوفلاين
                     const enrolledLocal = JSON.parse(localStorage.getItem("muc_student_courses") || "[]").map(c => String(c).toLowerCase().trim());
-                    const targetCidLower = String(offlinePayload.c || "").toLowerCase().trim();
-                    const isPraxisTarget = targetCidLower.includes("praxis") || String(offlinePayload.cn || "").toLowerCase().includes("praxis");
+                    if (enrolledLocal.length > 0) {
+                        const targetCidLower = String(offlinePayload.c || "").toLowerCase().trim();
+                        const isPraxisTarget = targetCidLower.includes("praxis") || String(offlinePayload.cn || "").toLowerCase().includes("praxis");
+                        const targetIdx = (targetCidLower && targetCidLower !== "muc_course") ? getCoursePinIndex(targetCidLower) : -1;
 
-                    const isLocallyEnrolled = (enrolledLocal.length === 0) || 
-                                              targetCidLower === "muc_course" ||
-                                              enrolledLocal.includes(targetCidLower) ||
-                                              (isPraxisTarget && enrolledLocal.some(c => c.includes("praxis") || c.includes("cse212")));
+                        const isLocallyEnrolled = (targetCidLower && targetCidLower !== "muc_course" && enrolledLocal.includes(targetCidLower)) ||
+                                                  (targetIdx >= 0 && enrolledLocal.some(c => getCoursePinIndex(c) === targetIdx)) ||
+                                                  (isPraxisTarget && enrolledLocal.some(c => c.includes("praxis") || c.includes("cse212")));
 
-                    if (!isLocallyEnrolled) {
-                        throw new Error(`NOT_ENROLLED:${studentRealName}:${offlinePayload.cn || "هذا المقرر"}`);
+                        if (!isLocallyEnrolled) {
+                            throw new Error(`NOT_ENROLLED:${studentRealName}:${offlinePayload.cn || "هذا المقرر"}`);
+                        }
                     }
 
                     const realLectureNum = Number(offlinePayload.l ?? offlinePayload.ln ?? offlinePayload.lectureNumber ?? 1);
@@ -1204,7 +1205,7 @@ let html5QrScanner = null;
 
                     document.getElementById("rcpt-name").innerText = getSavedStudentName(sid) || studentRealName;
                     document.getElementById("rcpt-id").innerText = sid;
-document.getElementById("rcpt-course").innerText = String(offlinePayload.cn || "").toLowerCase().includes("praxis") ? "Praxis Programming" : (offlinePayload.cn || "Course");
+                    document.getElementById("rcpt-course").innerText = String(offlinePayload.cn || "").toLowerCase().includes("praxis") ? "Praxis Programming" : (offlinePayload.cn || "Course");
                     document.getElementById("rcpt-lecture").innerText = `Lecture #${realLectureNum}`;
                     document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
                     document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
@@ -1212,12 +1213,24 @@ document.getElementById("rcpt-course").innerText = String(offlinePayload.cn || "
                     return;
                 }
 
-                // ب. لو الباركود لمحاضرة أونلاين: يشترط وجود إنترنت لدى الطالب!
+                // ب. لو الباركود لمحاضرة أونلاين
                 if (!navigator.onLine) {
                     throw new Error("🌐 هذه المحاضرة أونلاين (مباشرة) وتتطلب اتصالاً بالإنترنت لتسجيل حضورك فوراً على شاشة المدرج!\n\nيرجى فتح بيانات الهاتف (Mobile Data) أو الـ Wi-Fi والمحاولة مرة أخرى.");
                 }
 
-                const res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
+                let res;
+                try {
+                    res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
+                } catch (firstErr) {
+                    const fm = String(firstErr?.message || "");
+                    if (fm === "NETWORK_TIMEOUT" || fm.includes("Failed to fetch") || fm.includes("network-request-failed")) {
+                        // محاولة ثانية تلقائية فورية عند ازدحام الشبكة بالمدرج
+                        res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
+                    } else {
+                        throw firstErr;
+                    }
+                }
+
                 if (res.studentName) {
                     saveStudentIdPermanently(sid, res.studentName);
                     welcomeNameEl.innerText = res.studentName;
@@ -1228,7 +1241,7 @@ document.getElementById("rcpt-course").innerText = String(offlinePayload.cn || "
                 showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been recorded on the live classroom screen.");
                 document.getElementById("rcpt-name").innerText = res.studentName;
                 document.getElementById("rcpt-id").innerText = res.studentId;
-document.getElementById("rcpt-course").innerText = String(res.courseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : res.courseName;
+                document.getElementById("rcpt-course").innerText = String(res.courseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : res.courseName;
                 document.getElementById("rcpt-lecture").innerText = `${typeName} #${lecNum}`;
                 document.getElementById("rcpt-date").innerText = res.date;
                 document.getElementById("rcpt-time").innerText = res.time;
@@ -1237,7 +1250,7 @@ document.getElementById("rcpt-course").innerText = String(res.courseName || "").
             } catch (err) {
                 const errMsg = String(err.message || "");
                 if (errMsg === "NETWORK_TIMEOUT" || errMsg.includes("Failed to fetch") || errMsg.includes("network-request-failed")) {
-                    showResult(false, "Online Connection Required", "🌐 هذه المحاضرة أونلاين (مباشرة) وتتطلب اتصالاً فعلياً بالإنترنت لتسجيل الحضور!\n\nيرجى التأكد من جودة اتصال الإنترنت والمحاولة مرة أخرى.");
+                    showResult(false, "Weak Network Signal", "⚠️ إشارة الإنترنت في المدرج ضعيفة جداً حالياً. يرجى الضغط على Try Again للمحاولة مرة أخرى.");
                     return;
                 }
                 isExpiredQrError = errMsg.includes("expired") || errMsg.includes("صلاحية");
@@ -1516,7 +1529,7 @@ document.getElementById("rcpt-course").innerText = String(res.courseName || "").
             if (document.visibilityState === "visible") runSync(false);
         });
 
-        document.getElementById("btn-enter-pin")?.addEventListener("click", async () => {
+document.getElementById("btn-enter-pin")?.addEventListener("click", async () => {
             if (html5QrScanner) {
                 try { await html5QrScanner.stop(); await html5QrScanner.clear(); } catch(e) {}
             }
@@ -1532,7 +1545,7 @@ document.getElementById("rcpt-course").innerText = String(res.courseName || "").
                 return;
             }
 
-const enteredPin = await showCustomPrompt("Lecture PIN Code", "أدخل كود المحاضرة المكون من 6 أرقام الظاهر على الشاشة:", "");
+            const enteredPin = await showCustomPrompt("Lecture PIN Code", "أدخل كود المحاضرة المكون من 6 أرقام الظاهر على الشاشة:", "");
             const modalInput = document.getElementById("modal-app-input");
             if (modalInput) modalInput.value = "";
             if (!enteredPin) return;
@@ -1545,31 +1558,32 @@ const enteredPin = await showCustomPrompt("Lecture PIN Code", "أدخل كود �
             const btnPin = document.getElementById("btn-enter-pin");
             const stdName = getSavedStudentName(studentIdVal) || "طالب";
 
-            // فك شفرة الكود لاستخراج (نوع المحاضرة + رقم المحاضرة + اسم الكورس الأصلي)
             const decodedPin = decodePinMetadata(enteredPin);
             const isOfflineModePin = decodedPin.isOfflineModePin;
             const extractedLecNum = decodedPin.lectureNumber;
             const extractedCourseId = decodedPin.courseId;
             const extractedCourseName = decodedPin.courseName;
 
-            // 🛑 فحص أمان صارم: التأكد من قيد الطالب في هذا المقرر قبل قبول الـ PIN
+            // 🛑 فحص قيد الطالب الصارم بالاسم وببصمة المقرر الرقمية (courseIdx)
             try {
                 const enrolledLocal = JSON.parse(localStorage.getItem("muc_student_courses") || "[]").map(c => String(c).toLowerCase().trim());
-                const targetCidLower = String(extractedCourseId || "").toLowerCase().trim();
-                const isPraxisTarget = targetCidLower.includes("praxis") || String(extractedCourseName).toLowerCase().includes("praxis");
+                if (enrolledLocal.length > 0) {
+                    const targetCidLower = String(extractedCourseId || "").toLowerCase().trim();
+                    const isPraxisTarget = targetCidLower.includes("praxis") || String(extractedCourseName).toLowerCase().includes("praxis");
 
-                const isLocallyEnrolled = (enrolledLocal.length === 0) || 
-                                          targetCidLower === "muc_course" ||
-                                          enrolledLocal.includes(targetCidLower) ||
-                                          (isPraxisTarget && enrolledLocal.some(c => c.includes("praxis") || c.includes("cse212")));
+                    const isLocallyEnrolled =
+                        (targetCidLower && targetCidLower !== "muc_course" && enrolledLocal.includes(targetCidLower)) ||
+                        enrolledLocal.some(c => getCoursePinIndex(c) === decodedPin.courseIdx) ||
+                        (isPraxisTarget && enrolledLocal.some(c => c.includes("praxis") || c.includes("cse212")));
 
-                if (!isLocallyEnrolled) {
-                    await showCustomAlert(
-                        "غير مسجل بالمقرر",
-                        `🚫 عفواً يا ${stdName}، أنت غير مقيد في مقرر (${extractedCourseName})!\n\nلا يمكنك تسجيل حضور هذه المحاضرة.`,
-                        true
-                    );
-                    return;
+                    if (!isLocallyEnrolled) {
+                        await showCustomAlert(
+                            "غير مسجل بالمقرر",
+                            `🚫 عفواً يا ${stdName}، أنت غير مقيد في هذا المقرر الدراسي!\n\nلا يمكنك تسجيل حضور هذه المحاضرة.`,
+                            true
+                        );
+                        return;
+                    }
                 }
             } catch (checkErr) {}
 
@@ -1577,100 +1591,27 @@ const enteredPin = await showCustomPrompt("Lecture PIN Code", "أدخل كود �
                 btnPin.disabled = true;
                 btnPin.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Verifying Code...`;
 
-                // إذا كان الـ PIN خاصاً بمحاضرة أونلاين والطالب قافل الإنترنت -> نرفض فوراً وننبهه!
                 if (!isOfflineModePin && !navigator.onLine) {
                     throw new Error("🌐 هذه المحاضرة أونلاين (مباشرة) وتتطلب اتصالاً بالإنترنت لتسجيل حضورك فوراً على شاشة المدرج!\n\nيرجى فتح بيانات الهاتف (Mobile Data) أو الـ Wi-Fi والمحاولة مرة أخرى.");
                 }
 
-                // 1) إذا كان الطالب متصلاً بالإنترنت: نتحقق من السيرفر أولاً
+                // 1) التحقق المباشر السريع على السيرفر
                 if (navigator.onLine) {
                     try {
-                        const { db, auth } = await import("./firebase.js");
-                        const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
-                        const { doc, getDoc, collection, query, where, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
-
-const verifyPinOnServer = async () => {
-                            if (!auth.currentUser) await signInAnonymously(auth);
-                            const pinNum = Number(enteredPin);
-
-                            const checkOnce = async () => {
-                                try {
-                                    const pinDoc = await getDoc(doc(db, "attendance_pins", String(enteredPin)));
-                                    if (pinDoc.exists()) {
-                                        const pData = pinDoc.data() || {};
-                                        const sSnap = await getDoc(doc(db, "attendance_sessions", pData.sessionId));
-                                        if (!sSnap.exists()) return { status: "NOT_ON_SERVER_YET" };
-                                        const sData = sSnap.data() || {};
-                                        if (sData.status === "deleted" || sData.finalized === true || sData.pinClosed === true) {
-                                            return { status: "EXPIRED" };
-                                        }
-                                        if (!sData.qrOffline && sData.status !== "active") {
-                                            return { status: "EXPIRED" };
-                                        }
-                                        const isCurrentOrPrevPin =
-                                            !sData.activePinCode ||
-                                            Number(sData.activePinCode) === pinNum ||
-                                            Number(sData.prevPinCode) === pinNum;
-
-                                        if (!isCurrentOrPrevPin) {
-                                            return { status: "EXPIRED" };
-                                        }
-                                        return { status: "VALID", sessionDoc: sSnap, pinMeta: pData };
-                                    }
-                                } catch (e) {}
-
-                                try {
-                                    const qSnap = await getDocs(query(
-                                        collection(db, "attendance_sessions"),
-                                        where("pinHistory", "array-contains", pinNum)
-                                    ));
-                                    if (!qSnap.empty) {
-                                        const activeDoc = qSnap.docs.find(d => d.data().status === "active" || d.data().qrOffline === true) || qSnap.docs[0];
-                                        const sData = activeDoc.data() || {};
-                                        if (sData.status === "deleted" || sData.finalized === true || sData.pinClosed === true) {
-                                            return { status: "EXPIRED" };
-                                        }
-                                        if (!sData.qrOffline && sData.status !== "active") {
-                                            return { status: "EXPIRED" };
-                                        }
-                                        const isCurrentOrPrevPin =
-                                            !sData.activePinCode ||
-                                            Number(sData.activePinCode) === pinNum ||
-                                            Number(sData.prevPinCode) === pinNum;
-
-                                        if (!isCurrentOrPrevPin) {
-                                            return { status: "EXPIRED" };
-                                        }
-                                        return { status: "VALID", sessionDoc: activeDoc, pinMeta: sData };
-                                    }
-                                } catch (e) {}
-
-                                return { status: "NOT_FOUND" };
-                            };
-
-                            let resCheck = await checkOnce();
-                            if (resCheck.status === "NOT_FOUND" || resCheck.status === "NOT_ON_SERVER_YET") {
-                                await new Promise(r => setTimeout(r, 1200));
-                                resCheck = await checkOnce();
-                            }
-                            return resCheck;
-                        };
-
-                        const pinCheck = await Promise.race([
-                            verifyPinOnServer(),
-                            new Promise((_, rej) => setTimeout(() => rej(new Error("NETWORK_TIMEOUT")), 6000))
-                        ]);
-
-                        if (pinCheck.status === "NOT_ON_SERVER_YET") {
-                            throw new Error("⏳ جاري تثبيت الجلسة على السيرفر.. يرجى الضغط على Try Again بعد ثوانٍ.");
-                        }
+                        const pinCheck = await verifyPinOnServerFast(enteredPin);
 
                         if (pinCheck.status === "EXPIRED" || pinCheck.status === "DELETED") {
                             throw new Error(`⏰ انتهت صلاحية الكود الرقمي (${enteredPin}) لأن الرمز تجدد أو أُغلقت المحاضرة!\n\nيرجى كتابة الكود الجديد الظاهر أمامك على الشاشة الآن.`);
                         }
 
-                        if (pinCheck.status === "VALID" && pinCheck.sessionDoc) {
-                            const res = await recordStudentAttendance(pinCheck.sessionDoc.id, "PIN_VERIFIED", studentIdVal, deviceId);
+                        if (pinCheck.status === "VALID" && pinCheck.sessionId) {
+                            const res = await recordStudentAttendance(
+                                pinCheck.sessionId,
+                                "PIN_VERIFIED",
+                                studentIdVal,
+                                deviceId,
+                                pinCheck.sessionData
+                            );
                             const typeName = res.sessionType === "lab" ? "Lab" : (res.sessionType === "section" ? "Section" : "Lecture");
                             const lecNum = res.lectureNumber || pinCheck.pinMeta?.lectureNumber || extractedLecNum;
 
@@ -1688,12 +1629,35 @@ const verifyPinOnServer = async () => {
                         }
 
                         if (!isOfflineModePin && pinCheck.status === "NOT_FOUND") {
-                            throw new Error(`❌ الكود الرقمي (${enteredPin}) غير صحيح أو لم يتم رفع المحاضرة على السيرفر بعد!\n\nInvalid or expired PIN code!`);
+                            throw new Error(`❌ الكود الرقمي (${enteredPin}) غير صحيح أو انتهت صلاحيته!\n\nInvalid or expired PIN code!`);
                         }
                     } catch (netErr) {
                         const msg = String(netErr?.message || "");
-                        if (!isOfflineModePin && (msg === "NETWORK_TIMEOUT" || msg.includes("Failed to fetch") || msg.includes("network-request-failed"))) {
-                            throw new Error("🌐 هذه المحاضرة أونلاين (مباشرة) وتتطلب اتصالاً فعلياً بالإنترنت لتسجيل الحضور!\n\nيرجى التأكد من اتصال الإنترنت والمحاولة مرة أخرى.");
+                        // إذا كان الإنترنت مفتوحاً لدى الطالب ولكن الشبكة بالمدرج مزدحمة جداً، نحفظ السجل ونرفعه في الخلفية تلقائياً بدلاً من إظهار خطأ كاذب!
+                        if (navigator.onLine && isValidPinChecksum(enteredPin) && (msg === "NETWORK_TIMEOUT" || msg.includes("Failed to fetch") || msg.includes("network-request-failed"))) {
+                            await queueOfflineAttendance({
+                                studentId: studentIdVal,
+                                studentName: stdName,
+                                sessionId: `pin_${enteredPin}`,
+                                courseId: extractedCourseId,
+                                courseName: extractedCourseName,
+                                lectureNumber: extractedLecNum,
+                                timeSlot: 0,
+                                hash: "",
+                                pin: enteredPin
+                            });
+                            syncPendingAttendance().then(() => refreshPendingBanner()).catch(() => {});
+                            refreshPendingBanner();
+                            showResult(true, "Attendance Recorded!", "Network in classroom is busy — your check-in is saved and syncing to the screen automatically.");
+                            document.getElementById("rcpt-name").innerText = stdName;
+                            document.getElementById("rcpt-id").innerText = studentIdVal;
+                            document.getElementById("rcpt-course").innerText = String(extractedCourseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : extractedCourseName;
+                            document.getElementById("rcpt-lecture").innerText = `Lecture #${extractedLecNum}`;
+                            document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
+                            document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
+                            document.getElementById("rcpt-status").innerText = "Present ✔ (Auto-Syncing)";
+                            document.getElementById("receipt-box").classList.remove("d-none");
+                            return;
                         }
                         if (!isOfflineModePin || (!msg.includes("NETWORK_TIMEOUT") && !msg.includes("Failed to fetch") && !msg.includes("network-request-failed"))) {
                             throw netErr;
@@ -1701,11 +1665,12 @@ const verifyPinOnServer = async () => {
                     }
                 }
 
-                // 2) وضع الأوفلاين (يُسمح به فقط إذا كان الكود فردياً خاصاً بمحاضرة أوفلاين وضمن نافذة الـ 15 ثانية الحالية!)
+                // 2) وضع الأوفلاين
                 if (!isOfflineModePin || !isValidPinChecksum(enteredPin)) {
                     throw new Error(`❌ الكود الرقمي (${enteredPin}) غير صحيح أو منتهي الصلاحية! يرجى نقل الكود الحالي الظاهر على شاشة المدرج.\n\nInvalid or expired PIN code!`);
                 }
-await queueOfflineAttendance({
+
+                await queueOfflineAttendance({
                     studentId: studentIdVal,
                     studentName: stdName,
                     sessionId: `pin_${enteredPin}`,
@@ -1721,7 +1686,7 @@ await queueOfflineAttendance({
                 showResult(true, "Saved Offline!", "PIN verified and saved on your phone. It will sync automatically once the lecture is uploaded.");
                 document.getElementById("rcpt-name").innerText = stdName;
                 document.getElementById("rcpt-id").innerText = studentIdVal;
-document.getElementById("rcpt-course").innerText = String(extractedCourseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : extractedCourseName;
+                document.getElementById("rcpt-course").innerText = String(extractedCourseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : extractedCourseName;
                 document.getElementById("rcpt-lecture").innerText = `Lecture #${extractedLecNum}`;
                 document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
                 document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");

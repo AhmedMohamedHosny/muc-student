@@ -7,7 +7,7 @@ import {
     signInAnonymously 
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { 
-    getFirestore, 
+    initializeFirestore,
     doc, 
     getDoc,
     setDoc,
@@ -22,7 +22,20 @@ import { CONFIG } from "./config.js";
 
 const app = initializeApp(CONFIG.firebase);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const db = initializeFirestore(app, {
+    experimentalAutoDetectLongPolling: true
+});
+
+let _anonAuthPromise = null;
+export async function ensureStudentAuth() {
+    if (auth.currentUser) return auth.currentUser;
+    if (!_anonAuthPromise) {
+        _anonAuthPromise = signInAnonymously(auth).finally(() => {
+            _anonAuthPromise = null;
+        });
+    }
+    return _anonAuthPromise;
+}
 
 function getLocalDeviceId() {
     try {
@@ -211,14 +224,78 @@ export function checkPinLectureMatch(pin, studentId) {
 
 const activeSubmissionLocks = new Set();
 
-function withTimeout(promise, ms = 4500) {
+function withTimeout(promise, ms = 10000) {
     return Promise.race([
         promise,
         new Promise((_, reject) => setTimeout(() => reject(new Error("NETWORK_TIMEOUT")), ms))
     ]);
 }
 
-export async function recordStudentAttendance(sessionId, clientToken, studentIdInput, deviceId) {
+// فحص كود الـ PIN على السيرفر بسرعة فائقة وعلى التوازي
+export async function verifyPinOnServerFast(enteredPin) {
+    await withTimeout(ensureStudentAuth(), 6000);
+    const pinNum = Number(enteredPin);
+
+    const checkOnce = async () => {
+        const [pinDocRes, queryRes] = await Promise.allSettled([
+            withTimeout(getDoc(doc(db, "attendance_pins", String(enteredPin))), 7000),
+            withTimeout(getDocs(query(collection(db, "attendance_sessions"), where("pinHistory", "array-contains", pinNum))), 7000)
+        ]);
+
+        if (pinDocRes.status === "fulfilled" && pinDocRes.value.exists()) {
+            const pData = pinDocRes.value.data() || {};
+            if (pData.sessionId) {
+                try {
+                    const sSnap = await withTimeout(getDoc(doc(db, "attendance_sessions", pData.sessionId)), 6000);
+                    if (sSnap.exists()) {
+                        const sData = sSnap.data() || {};
+                        if (sData.status === "deleted" || sData.finalized === true || sData.pinClosed === true) {
+                            return { status: "EXPIRED" };
+                        }
+                        if (!sData.qrOffline && sData.status !== "active") {
+                            return { status: "EXPIRED" };
+                        }
+                        const isCurrentOrPrevPin =
+                            !sData.activePinCode ||
+                            Number(sData.activePinCode) === pinNum ||
+                            Number(sData.prevPinCode) === pinNum;
+                        if (!isCurrentOrPrevPin) return { status: "EXPIRED" };
+                        return { status: "VALID", sessionId: sSnap.id, sessionData: sData, pinMeta: pData };
+                    }
+                } catch (e) {}
+            }
+        }
+
+        if (queryRes.status === "fulfilled" && !queryRes.value.empty) {
+            const qSnap = queryRes.value;
+            const activeDoc = qSnap.docs.find(d => d.data().status === "active" || d.data().qrOffline === true) || qSnap.docs[0];
+            const sData = activeDoc.data() || {};
+            if (sData.status === "deleted" || sData.finalized === true || sData.pinClosed === true) {
+                return { status: "EXPIRED" };
+            }
+            if (!sData.qrOffline && sData.status !== "active") {
+                return { status: "EXPIRED" };
+            }
+            const isCurrentOrPrevPin =
+                !sData.activePinCode ||
+                Number(sData.activePinCode) === pinNum ||
+                Number(sData.prevPinCode) === pinNum;
+            if (!isCurrentOrPrevPin) return { status: "EXPIRED" };
+            return { status: "VALID", sessionId: activeDoc.id, sessionData: sData, pinMeta: sData };
+        }
+
+        return { status: "NOT_FOUND" };
+    };
+
+    let resCheck = await checkOnce();
+    if (resCheck.status === "NOT_FOUND") {
+        await new Promise(r => setTimeout(r, 900));
+        resCheck = await checkOnce();
+    }
+    return resCheck;
+}
+
+export async function recordStudentAttendance(sessionId, clientToken, studentIdInput, deviceId, preloadedSessionData = null) {
     const cleanedStudentId = String(studentIdInput || "").trim();
     if (!cleanedStudentId) throw new Error("Please enter your Student ID.");
 
@@ -229,61 +306,69 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
     activeSubmissionLocks.add(lockKey);
 
     try {
-        if (!auth.currentUser) await withTimeout(signInAnonymously(auth), 4000);
+        await withTimeout(ensureStudentAuth(), 6000);
 
         const safeDeviceId = String(deviceId || getLocalDeviceId()).replace(/[^a-zA-Z0-9_-]/g, "");
         const sessionRef = doc(db, "attendance_sessions", sessionId);
         const recordId = `${sessionId}_${cleanedStudentId}`;
         const recordRef = doc(db, "attendance_records", recordId);
         const deviceRef = doc(db, "attendance_devices", `${sessionId}_${safeDeviceId}`);
-let sessionDoc = await withTimeout(getDoc(sessionRef), 4500);
-        if (!sessionDoc.exists()) {
-            // محاولة ثانية سريعة في حال كان اتصال الدكتور متأخراً ثانية واحدة
-            await new Promise(r => setTimeout(r, 1200));
-            sessionDoc = await withTimeout(getDoc(sessionRef), 4500);
-            if (!sessionDoc.exists()) {
+        const studentRef = doc(db, "students", cleanedStudentId);
+        const idLockRef = doc(db, "attendance_devices", `id_lock_${cleanedStudentId}`);
+
+        // ⚡ جلب كافة المستندات معاً في طلب متوازٍ واحد لتسريع التسجيل 5 أضعاف في المدرج
+        const [sessionSnap, existingRecord, studentDoc, deviceDoc, idLockSnap] = await withTimeout(
+            Promise.all([
+                preloadedSessionData ? Promise.resolve({ exists: () => true, data: () => preloadedSessionData }) : getDoc(sessionRef),
+                getDoc(recordRef),
+                getDoc(studentRef),
+                getDoc(deviceRef).catch(() => ({ exists: () => false })),
+                getDoc(idLockRef).catch(() => ({ exists: () => false }))
+            ]),
+            10000
+        );
+
+        let sessionData = sessionSnap.exists() ? sessionSnap.data() : null;
+        if (!sessionData) {
+            await new Promise(r => setTimeout(r, 900));
+            const retrySnap = await withTimeout(getDoc(sessionRef), 7000);
+            if (!retrySnap.exists()) {
                 throw new Error("جاري بدء وتثبيت الجلسة على السيرفر.. يرجى إعادة المحاولة خلال ثوانٍ.");
             }
+            sessionData = retrySnap.data();
         }
-        const sessionData = sessionDoc.data();
 
         const isAllowedOfflineSession = sessionData.qrOffline === true && !sessionData.finalized;
         if (sessionData.status !== "active" && !isAllowedOfflineSession) {
             throw new Error("Attendance session is currently closed by the instructor.");
         }
 
-const t = sessionData.currentToken || {};
+        const t = sessionData.currentToken || {};
         const isOfflineToken = String(clientToken || "").startsWith("OFF_");
         if (clientToken !== "PIN_VERIFIED" && !isOfflineToken && (!clientToken || (t.token !== clientToken && t.prevToken !== clientToken))) {
             throw new Error("QR Code expired! Please scan the updated code on the screen.");
         }
 
-const currentLecNum = Number(sessionData.lectureNumber || 1);
+        const currentLecNum = Number(sessionData.lectureNumber || 1);
         const isPraxis = String(sessionData.courseId || "").toLowerCase().includes("praxis") || String(sessionData.courseName || "").toLowerCase().includes("praxis");
 
-// 1. فحص السجل المباشر للجلسة الحالية على السيرفر (Ground Truth)
-        const existingRecord = await withTimeout(getDoc(recordRef), 4000);
-        if (existingRecord.exists()) {
+        // 1. فحص السجل المباشر للجلسة الحالية على السيرفر
+        if (existingRecord && existingRecord.exists()) {
             markLectureAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum, sessionId);
             throw new Error(`⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (Lecture #${currentLecNum})!`);
         }
 
-        // 2. فحص السحابة (يقتصر فقط على مادة البراكسيس لمنع حضور الفترتين L1 و L2 لنفس المحاضرة)
+        // 2. فحص السحابة لمادة البراكسيس لمنع حضور الفترتين L1 و L2 لنفس المحاضرة
         if (isPraxis) {
             try {
-                const qAlready = query(
-                    collection(db, "attendance_records"),
-                    where("studentId", "==", cleanedStudentId)
-                );
-                const prevSnap = await withTimeout(getDocs(qAlready), 3500);
+                const qAlready = query(collection(db, "attendance_records"), where("studentId", "==", cleanedStudentId));
+                const prevSnap = await withTimeout(getDocs(qAlready), 4500);
                 const alreadyAttended = prevSnap.docs.some(docSnap => {
                     const r = docSnap.data();
                     const rCourse = String(r.courseId || "").toLowerCase();
                     const rIsPraxis = rCourse.includes("praxis") || String(r.courseName || "").toLowerCase().includes("praxis");
-                    const matchLec = Number(r.lectureNumber || 0) === currentLecNum;
-                    return rIsPraxis && matchLec;
+                    return rIsPraxis && Number(r.lectureNumber || 0) === currentLecNum;
                 });
-
                 if (alreadyAttended) {
                     markLectureAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum, sessionId);
                     throw new Error(`⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (Lecture #${currentLecNum})!`);
@@ -293,10 +378,8 @@ const currentLecNum = Number(sessionData.lectureNumber || 1);
             }
         }
 
-        // إذا كان السجل محذوفاً من السيرفر (لأن الدكتورة أعادت المحاضرة)، ننظف كاش الهاتف فوراً
         clearLectureAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum);
 
-        const studentDoc = await withTimeout(getDoc(doc(db, "students", cleanedStudentId)), 4500);
         if (!studentDoc.exists()) {
             throw new Error(`⚠️ الرقم الجامعي (${cleanedStudentId}) غير مسجل بقاعدة بيانات الجامعة!`);
         }
@@ -304,7 +387,7 @@ const currentLecNum = Number(sessionData.lectureNumber || 1);
         const studentRealName = studentData.name || cleanedStudentId;
         localStorage.setItem(`muc_student_name_${cleanedStudentId}`, studentRealName);
 
-const enrolledList = studentData.enrolledCourses || [];
+        const enrolledList = studentData.enrolledCourses || [];
         const currentCourseId = String(sessionData.courseId || "").trim();
         const lowerCourseId = currentCourseId.toLowerCase();
         const lowerCourseCode = String(sessionData.courseCode || "").trim().toLowerCase();
@@ -330,75 +413,77 @@ const enrolledList = studentData.enrolledCourses || [];
             throw new Error(`NOT_ENROLLED:${studentRealName}:${sessionData.courseName || "هذا المقرر"}`);
         }
 
-        try {
-            const deviceDoc = await withTimeout(getDoc(deviceRef), 3500);
-            if (deviceDoc.exists()) {
-                const devData = deviceDoc.data();
-                if (devData.studentId && devData.studentId !== cleanedStudentId) {
-                    throw new Error("Security Alert: This phone was already used to check in for another student!");
-                }
+        if (deviceDoc && deviceDoc.exists()) {
+            const devData = deviceDoc.data();
+            if (devData.studentId && devData.studentId !== cleanedStudentId) {
+                throw new Error("Security Alert: This phone was already used to check in for another student!");
             }
-        } catch (e) {
-            if (e.message && e.message.includes("Security Alert")) throw e;
         }
 
-// قفل الرقم الجامعي بحد أقصى هاتفين (2 Devices) مع حفظ توقيت وموديل كل هاتف بصورة مستقلة
-        try {
-            const hwKey = localStorage.getItem("muc_hw_bound_key") || safeDeviceId;
-            const idLockRef = doc(db, "attendance_devices", `id_lock_${cleanedStudentId}`);
-            const idLockSnap = await withTimeout(getDoc(idLockRef), 3000);
-            const lockData = idLockSnap.exists() ? (idLockSnap.data() || {}) : {};
-            const nowISO = new Date().toISOString();
+        // فحص قفل الجهاز (حد أقصى هاتفين)
+        const hwKey = localStorage.getItem("muc_hw_bound_key") || safeDeviceId;
+        const lockData = (idLockSnap && idLockSnap.exists()) ? (idLockSnap.data() || {}) : {};
+        const nowISO = new Date().toISOString();
 
-            let boundDevicesList = Array.isArray(lockData.devices) ? [...lockData.devices] : [];
-            if (boundDevicesList.length === 0 && lockData.deviceId) {
-                const rawName = String(lockData.deviceName || "");
-                const namePart1 = rawName.includes(" + ") ? rawName.split(" + ")[0].trim() : (rawName.includes(" | ") ? rawName.split(" | ")[0].replace(/^[هاتف 1]\s*/, "").trim() : (rawName || "هاتف 1"));
-                boundDevicesList.push({
-                    deviceId: lockData.deviceId,
-                    legacyDeviceId: lockData.legacyDeviceId || lockData.deviceId,
-                    deviceName: namePart1,
-                    screenInfo: lockData.screenInfo || "",
-                    lockedAtISO: lockData.firstLockedAtISO || lockData.lockedAtISO || nowISO
-                });
-            }
+        let boundDevicesList = Array.isArray(lockData.devices) ? [...lockData.devices] : [];
+        if (boundDevicesList.length === 0 && lockData.deviceId) {
+            const rawName = String(lockData.deviceName || "");
+            const namePart1 = rawName.includes(" + ") ? rawName.split(" + ")[0].trim() : (rawName.includes(" | ") ? rawName.split(" | ")[0].replace(/^[هاتف 1]\s*/, "").trim() : (rawName || "هاتف 1"));
+            boundDevicesList.push({
+                deviceId: lockData.deviceId,
+                legacyDeviceId: lockData.legacyDeviceId || lockData.deviceId,
+                deviceName: namePart1,
+                screenInfo: lockData.screenInfo || "",
+                lockedAtISO: lockData.firstLockedAtISO || lockData.lockedAtISO || nowISO
+            });
+        }
 
-            const isMyDev = boundDevicesList.some(d => d.deviceId === hwKey || d.deviceId === safeDeviceId || d.legacyDeviceId === safeDeviceId);
+        const isMyDev = boundDevicesList.some(d => d.deviceId === hwKey || d.deviceId === safeDeviceId || d.legacyDeviceId === safeDeviceId);
+        if (idLockSnap && idLockSnap.exists() && !isMyDev && boundDevicesList.length >= 2) {
+            throw new Error("🚫 هذا الرقم الجامعي مسجل ومربوط بهاتفين بالفعل (الحد الأقصى هاتفان)! يرجى التحدث مع المشرف.");
+        }
 
-            if (idLockSnap.exists() && !isMyDev && boundDevicesList.length >= 2) {
-                throw new Error("🚫 هذا الرقم الجامعي مسجل ومربوط بهاتفين بالفعل (الحد الأقصى هاتفان)! يرجى التحدث مع المشرف.");
-            } else if (!idLockSnap.exists() || !isMyDev) {
-                const ua = navigator.userAgent || "";
-                const quickPhoneName = /iPhone/i.test(ua) ? "Apple iPhone" : (/Android/i.test(ua) ? ((ua.match(/Android\s+[\d.]+;\s*([^;)]+)/i) || ["", "Android Phone"])[1].replace(/Build\/.*/i, "").trim()) : "هاتف ذكي");
-                
-                const newDevObj = {
-                    deviceId: hwKey,
-                    legacyDeviceId: safeDeviceId,
-                    deviceName: quickPhoneName,
-                    screenInfo: `${screen.width}x${screen.height}`,
-                    lockedAtISO: nowISO
-                };
+        const startTime = (sessionData.startTime && sessionData.startTime.toDate) ? sessionData.startTime.toDate() : new Date();
+        const diffMinutes = (Date.now() - startTime.getTime()) / 60000;
+        const status = (!isAllowedOfflineSession && diffMinutes > (sessionData.lateThresholdMinutes || CONFIG.attendance.lateThresholdMinutes))
+            ? CONFIG.attendance.statuses.LATE
+            : CONFIG.attendance.statuses.PRESENT;
 
-                let updatedList = [];
-                let firstTime = lockData.firstLockedAtISO || (boundDevicesList[0]?.lockedAtISO) || nowISO;
-                let secondTime = lockData.secondLockedAtISO || "";
+        const cleanSavedCourseName = isPraxis ? "Praxis Programming" : String(sessionData.courseName || "Course").replace(/\s*[-–—]?\s*(Lecture|محاضرة|Lec)\s*[12]/gi, "").trim();
 
-                if (boundDevicesList.length === 0) {
-                    updatedList = [newDevObj];
-                    firstTime = nowISO;
-                } else {
-                    const otherDev = boundDevicesList.find(d => d.deviceId !== hwKey && d.deviceId !== safeDeviceId);
-                    if (otherDev) {
-                        updatedList = [otherDev, newDevObj];
-                        firstTime = otherDev.lockedAtISO || firstTime;
-                        secondTime = nowISO;
-                    } else {
-                        updatedList = [newDevObj];
-                        firstTime = newDevObj.lockedAtISO || nowISO;
-                    }
-                }
+        const writePromises = [
+            setDoc(recordRef, {
+                recordId: recordId,
+                sessionId: sessionId,
+                courseId: sessionData.courseId || "MUC_COURSE",
+                courseName: cleanSavedCourseName,
+                lectureNumber: currentLecNum,
+                studentId: cleanedStudentId,
+                studentName: studentRealName,
+                deviceId: safeDeviceId,
+                status: status,
+                recordedAt: serverTimestamp(),
+                method: clientToken === "PIN_VERIFIED" ? "PIN_CODE" : "QR_SCAN"
+            }, { merge: true })
+        ];
 
-                await withTimeout(setDoc(idLockRef, {
+        if (!idLockSnap || !idLockSnap.exists() || !isMyDev) {
+            const ua = navigator.userAgent || "";
+            const quickPhoneName = /iPhone/i.test(ua) ? "Apple iPhone" : (/Android/i.test(ua) ? ((ua.match(/Android\s+[\d.]+;\s*([^;)]+)/i) || ["", "Android Phone"])[1].replace(/Build\/.*/i, "").trim()) : "هاتف ذكي");
+            const newDevObj = {
+                deviceId: hwKey,
+                legacyDeviceId: safeDeviceId,
+                deviceName: quickPhoneName,
+                screenInfo: `${screen.width}x${screen.height}`,
+                lockedAtISO: nowISO
+            };
+            const otherDev = boundDevicesList.find(d => d.deviceId !== hwKey && d.deviceId !== safeDeviceId);
+            const updatedList = (boundDevicesList.length > 0 && otherDev) ? [otherDev, newDevObj] : [newDevObj];
+            const firstTime = (otherDev && otherDev.lockedAtISO) || lockData.firstLockedAtISO || nowISO;
+            const secondTime = otherDev ? nowISO : (lockData.secondLockedAtISO || "");
+
+            writePromises.push(
+                setDoc(idLockRef, {
                     studentId: cleanedStudentId,
                     studentName: studentRealName,
                     department: studentData.department || "هندسة الحاسب",
@@ -413,42 +498,17 @@ const enrolledList = studentData.enrolledCourses || [];
                     secondLockedAtISO: secondTime,
                     lockedAt: serverTimestamp(),
                     lockedAtISO: secondTime || firstTime
-                }, { merge: true }), 3000);
-                localStorage.setItem(`muc_lock_claimed_${cleanedStudentId}`, "1");
-            }
-        } catch (lockErr) {
-            if (String(lockErr.message || "").includes("مربوط بهاتفين")) throw lockErr;
+                }, { merge: true }).catch(() => {})
+            );
+            localStorage.setItem(`muc_lock_claimed_${cleanedStudentId}`, "1");
         }
-        const startTime = (sessionData.startTime && sessionData.startTime.toDate) ? sessionData.startTime.toDate() : new Date();
 
-        const diffMinutes = (Date.now() - startTime.getTime()) / 60000;
-        const status = (!isAllowedOfflineSession && diffMinutes > (sessionData.lateThresholdMinutes || CONFIG.attendance.lateThresholdMinutes))
-            ? CONFIG.attendance.statuses.LATE
-            : CONFIG.attendance.statuses.PRESENT;
-
-const cleanSavedCourseName = isPraxis ? "Praxis Programming" : String(sessionData.courseName || "Course").replace(/\s*[-–—]?\s*(Lecture|محاضرة|Lec)\s*[12]/gi, "").trim();
-
-await withTimeout(setDoc(recordRef, {
-            recordId: recordId,
-            sessionId: sessionId,
-            courseId: sessionData.courseId || "MUC_COURSE",
-            courseName: cleanSavedCourseName,
-            lectureNumber: currentLecNum,
-            studentId: cleanedStudentId,
-            studentName: studentRealName,
-            deviceId: safeDeviceId,
-            status: status,
-            recordedAt: serverTimestamp(),
-            method: clientToken === "PIN_VERIFIED" ? "PIN_CODE" : "QR_SCAN"
-        }, { merge: true }), 4500);
-
-markLectureAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum, sessionId);
-
-
+        await withTimeout(Promise.all(writePromises), 9000);
+        markLectureAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum, sessionId);
         removeFromQueue({ studentId: cleanedStudentId, sessionId: sessionId, courseId: sessionData.courseId, scannedAt: Date.now() });
 
-const now = new Date();
-return {
+        const now = new Date();
+        return {
             success: true,
             studentName: studentRealName,
             studentId: cleanedStudentId,
@@ -459,7 +519,6 @@ return {
             date: now.toLocaleDateString("en-US"),
             time: now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
         };
-
     } finally {
         activeSubmissionLocks.delete(lockKey);
     }
@@ -474,21 +533,22 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
     // فحص قيد الطالب محلياً: منع إضافة أي مقرر غير مسجل به الطالب إلى طابور الانتظار
     try {
         const enrolled = JSON.parse(localStorage.getItem("muc_student_courses") || "[]").map(c => String(c).toLowerCase().trim());
-        const cidLower = String(courseId || "").toLowerCase().trim();
-        const isPraxis = cidLower.includes("praxis") || String(courseName || "").toLowerCase().includes("praxis");
+        if (enrolled.length > 0) {
+            const cidLower = String(courseId || "").toLowerCase().trim();
+            const isPraxis = cidLower.includes("praxis") || String(courseName || "").toLowerCase().includes("praxis");
+            const pinIdx = pin ? decodePinMetadata(pin).courseIdx : (cidLower && cidLower !== "muc_course" ? getCoursePinIndex(cidLower) : -1);
 
-        const isEnrolled = (enrolled.length === 0) || 
-                           cidLower === "muc_course" || 
-                           enrolled.includes(cidLower) ||
-                           (isPraxis && enrolled.some(c => c.includes("praxis") || c.includes("cse212")));
+            const isEnrolled = (cidLower && cidLower !== "muc_course" && enrolled.includes(cidLower)) ||
+                               (pinIdx >= 0 && enrolled.some(c => getCoursePinIndex(c) === pinIdx)) ||
+                               (isPraxis && enrolled.some(c => c.includes("praxis") || c.includes("cse212")));
 
-        if (!isEnrolled) {
-            throw new Error(`⚠️ غير مسموح: الرقم الجامعي (${cleanedStudentId}) غير مقيد في مقرر (${courseName || courseId})!`);
+            if (!isEnrolled) {
+                throw new Error(`⚠️ غير مسموح: الرقم الجامعي (${cleanedStudentId}) غير مقيد في مقرر (${courseName || courseId})!`);
+            }
         }
     } catch (e) {
         if (e.message && e.message.includes("غير مقيد")) throw e;
     }
-
 
 
     const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
