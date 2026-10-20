@@ -515,10 +515,11 @@ const isPraxis = String(courseId || "").toLowerCase().includes("praxis") || Stri
         doctorId: doctorId || ""
     };
 
-    cleanedQueue.push(record);
+cleanedQueue.push(record);
     localStorage.setItem("muc_pending_records", JSON.stringify(cleanedQueue));
-markLectureAttendedLocally(cleanedStudentId, courseId, targetLec);
+    markLectureAttendedLocally(cleanedStudentId, courseId, targetLec);
     return record;
+}
 
 let isSyncing = false;
 
@@ -533,7 +534,6 @@ function removeFromQueue(item) {
         q.filter(x => {
             if (x.studentId !== item.studentId) return true;
             if (x.sessionId === key || x.sessionId === item.sessionId) return false;
-            // حذف محاولات الـ PIN لنفس النافذة الزمنية فقط دون المساس بأي مقرر آخر
             if (x.pin && Math.abs((x.scannedAt || 0) - (item.scannedAt || 0)) < 45 * 60 * 1000) return false;
             return true;
         })
