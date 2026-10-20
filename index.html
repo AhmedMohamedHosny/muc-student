@@ -1491,65 +1491,81 @@ document.getElementById("rcpt-course").innerText = String(res.courseName || "").
                         const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
                         const { doc, getDoc, collection, query, where, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
 
-                        const verifyPinOnServer = async () => {
+const verifyPinOnServer = async () => {
                             if (!auth.currentUser) await signInAnonymously(auth);
                             const pinNum = Number(enteredPin);
 
-                            try {
-                                const pinDoc = await getDoc(doc(db, "attendance_pins", String(enteredPin)));
-                                if (pinDoc.exists()) {
-                                    const pData = pinDoc.data() || {};
-                                    const sSnap = await getDoc(doc(db, "attendance_sessions", pData.sessionId));
-                                    if (!sSnap.exists()) return { status: "DELETED" };
-                                    const sData = sSnap.data() || {};
-                                    if (sData.status === "deleted" || sData.finalized === true || sData.pinClosed === true) {
-                                        return { status: "EXPIRED" };
-                                    }
-                                    if (!sData.qrOffline && sData.status !== "active") {
-                                        return { status: "EXPIRED" };
-                                    }
-                                    if (
-                                        (sData.activePinCode && Number(sData.activePinCode) !== pinNum) ||
-                                        (pData.expiresAtMs && Date.now() > Number(pData.expiresAtMs)) ||
-                                        (sData.pinExpiresAtMs && Date.now() > Number(sData.pinExpiresAtMs))
-                                    ) {
-                                        return { status: "EXPIRED" };
-                                    }
-                                    return { status: "VALID", sessionDoc: sSnap, pinMeta: pData };
-                                }
-                            } catch (e) {}
+                            const checkOnce = async () => {
+                                try {
+                                    const pinDoc = await getDoc(doc(db, "attendance_pins", String(enteredPin)));
+                                    if (pinDoc.exists()) {
+                                        const pData = pinDoc.data() || {};
+                                        const sSnap = await getDoc(doc(db, "attendance_sessions", pData.sessionId));
+                                        if (!sSnap.exists()) return { status: "NOT_ON_SERVER_YET" };
+                                        const sData = sSnap.data() || {};
+                                        if (sData.status === "deleted" || sData.finalized === true || sData.pinClosed === true) {
+                                            return { status: "EXPIRED" };
+                                        }
+                                        if (!sData.qrOffline && sData.status !== "active") {
+                                            return { status: "EXPIRED" };
+                                        }
+                                        const isCurrentOrPrevPin =
+                                            !sData.activePinCode ||
+                                            Number(sData.activePinCode) === pinNum ||
+                                            Number(sData.prevPinCode) === pinNum;
 
-                            try {
-                                const qSnap = await getDocs(query(
-                                    collection(db, "attendance_sessions"),
-                                    where("pinHistory", "array-contains", pinNum)
-                                ));
-                                if (!qSnap.empty) {
-                                    const activeDoc = qSnap.docs.find(d => d.data().status === "active" || d.data().qrOffline === true) || qSnap.docs[0];
-                                    const sData = activeDoc.data() || {};
-                                    if (sData.status === "deleted" || sData.finalized === true || sData.pinClosed === true) {
-                                        return { status: "EXPIRED" };
+                                        if (!isCurrentOrPrevPin) {
+                                            return { status: "EXPIRED" };
+                                        }
+                                        return { status: "VALID", sessionDoc: sSnap, pinMeta: pData };
                                     }
-                                    if (!sData.qrOffline && sData.status !== "active") {
-                                        return { status: "EXPIRED" };
-                                    }
-                                    if (
-                                        (sData.activePinCode && Number(sData.activePinCode) !== pinNum) ||
-                                        (sData.pinExpiresAtMs && Date.now() > Number(sData.pinExpiresAtMs))
-                                    ) {
-                                        return { status: "EXPIRED" };
-                                    }
-                                    return { status: "VALID", sessionDoc: activeDoc, pinMeta: sData };
-                                }
-                            } catch (e) {}
+                                } catch (e) {}
 
-                            return { status: "NOT_FOUND" };
+                                try {
+                                    const qSnap = await getDocs(query(
+                                        collection(db, "attendance_sessions"),
+                                        where("pinHistory", "array-contains", pinNum)
+                                    ));
+                                    if (!qSnap.empty) {
+                                        const activeDoc = qSnap.docs.find(d => d.data().status === "active" || d.data().qrOffline === true) || qSnap.docs[0];
+                                        const sData = activeDoc.data() || {};
+                                        if (sData.status === "deleted" || sData.finalized === true || sData.pinClosed === true) {
+                                            return { status: "EXPIRED" };
+                                        }
+                                        if (!sData.qrOffline && sData.status !== "active") {
+                                            return { status: "EXPIRED" };
+                                        }
+                                        const isCurrentOrPrevPin =
+                                            !sData.activePinCode ||
+                                            Number(sData.activePinCode) === pinNum ||
+                                            Number(sData.prevPinCode) === pinNum;
+
+                                        if (!isCurrentOrPrevPin) {
+                                            return { status: "EXPIRED" };
+                                        }
+                                        return { status: "VALID", sessionDoc: activeDoc, pinMeta: sData };
+                                    }
+                                } catch (e) {}
+
+                                return { status: "NOT_FOUND" };
+                            };
+
+                            let resCheck = await checkOnce();
+                            if (resCheck.status === "NOT_FOUND" || resCheck.status === "NOT_ON_SERVER_YET") {
+                                await new Promise(r => setTimeout(r, 1200));
+                                resCheck = await checkOnce();
+                            }
+                            return resCheck;
                         };
 
                         const pinCheck = await Promise.race([
                             verifyPinOnServer(),
-                            new Promise((_, rej) => setTimeout(() => rej(new Error("NETWORK_TIMEOUT")), 4500))
+                            new Promise((_, rej) => setTimeout(() => rej(new Error("NETWORK_TIMEOUT")), 6000))
                         ]);
+
+                        if (pinCheck.status === "NOT_ON_SERVER_YET") {
+                            throw new Error("⏳ جاري تثبيت الجلسة على السيرفر.. يرجى الضغط على Try Again بعد ثوانٍ.");
+                        }
 
                         if (pinCheck.status === "EXPIRED" || pinCheck.status === "DELETED") {
                             throw new Error(`⏰ انتهت صلاحية الكود الرقمي (${enteredPin}) لأن الرمز تجدد أو أُغلقت المحاضرة!\n\nيرجى كتابة الكود الجديد الظاهر أمامك على الشاشة الآن.`);
@@ -1573,16 +1589,15 @@ document.getElementById("rcpt-course").innerText = String(res.courseName || "").
                             return;
                         }
 
-                        // إذا كان الطالب متصلاً بالإنترنت والكود زوجي (أونلاين) ولم يجده في السيرفر -> إذن الكود غلط أو منتهي!
                         if (!isOfflineModePin && pinCheck.status === "NOT_FOUND") {
-                            throw new Error(`❌ الكود الرقمي (${enteredPin}) غير صحيح أو منتهي الصلاحية! يرجى نقل الكود الحالي الظاهر على شاشة المدرج.\n\nInvalid or expired PIN code!`);
+                            throw new Error(`❌ الكود الرقمي (${enteredPin}) غير صحيح أو لم يتم رفع المحاضرة على السيرفر بعد!\n\nInvalid or expired PIN code!`);
                         }
                     } catch (netErr) {
                         const msg = String(netErr?.message || "");
                         if (!isOfflineModePin && (msg === "NETWORK_TIMEOUT" || msg.includes("Failed to fetch") || msg.includes("network-request-failed"))) {
                             throw new Error("🌐 هذه المحاضرة أونلاين (مباشرة) وتتطلب اتصالاً فعلياً بالإنترنت لتسجيل الحضور!\n\nيرجى التأكد من اتصال الإنترنت والمحاولة مرة أخرى.");
                         }
-                        if (msg !== "NETWORK_TIMEOUT" && !msg.includes("Failed to fetch") && !msg.includes("network-request-failed") && !msg.includes("SESSION_NOT_ON_SERVER_YET")) {
+                        if (!isOfflineModePin || (!msg.includes("NETWORK_TIMEOUT") && !msg.includes("Failed to fetch") && !msg.includes("network-request-failed"))) {
                             throw netErr;
                         }
                     }

@@ -87,7 +87,7 @@ export function getCoursePinIndex(courseId) {
 export function cleanCourseDisplayName(name) {
     const s = String(name || "");
     if (s.toLowerCase().includes("praxis")) return "Praxis Programming";
-    return s.replace(/\s*[-–—]?\s*(محاضرة|Lecture|Lec)\s*[12]/gi, "").trim() || "Praxis Programming";
+    return s.replace(/\s*[-–—]?\s*(محاضرة|Lecture|Lec)\s*[12]/gi, "").trim() || "المقرر الدراسي";
 }
 
 const KNOWN_MUC_COURSES = {
@@ -95,6 +95,9 @@ const KNOWN_MUC_COURSES = {
     "praxis_programming_lec2": "Praxis Programming",
     "cse216": "Web Design and Database (CSE216)",
     "cse_web_design": "Web Design and Database (CSE216)",
+    "cse_uc": "User Centered Design",
+    "CSE_UC": "User Centered Design",
+    "user_centered_design": "User Centered Design",
     "cse_modern_workshop": "Modern Workshop",
     "cse122": "Logic Design (CSE122)"
 };
@@ -247,7 +250,7 @@ let sessionDoc = await withTimeout(getDoc(sessionRef), 4500);
 
 const t = sessionData.currentToken || {};
         const isOfflineToken = String(clientToken || "").startsWith("OFF_");
-        if (clientToken !== "PIN_VERIFIED" && !isOfflineToken && (!clientToken || t.token !== clientToken)) {
+        if (clientToken !== "PIN_VERIFIED" && !isOfflineToken && (!clientToken || (t.token !== clientToken && t.prevToken !== clientToken))) {
             throw new Error("QR Code expired! Please scan the updated code on the screen.");
         }
 
@@ -300,16 +303,27 @@ const rCourse = String(r.courseId || "").toLowerCase();
         const studentRealName = studentData.name || cleanedStudentId;
         localStorage.setItem(`muc_student_name_${cleanedStudentId}`, studentRealName);
 
-        const enrolledList = studentData.enrolledCourses || [];
-        const currentCourseId = sessionData.courseId || "";
-        const isPraxisCourse = String(currentCourseId).toLowerCase().includes("praxis");
+const enrolledList = studentData.enrolledCourses || [];
+        const currentCourseId = String(sessionData.courseId || "").trim();
+        const lowerCourseId = currentCourseId.toLowerCase();
+        const lowerCourseCode = String(sessionData.courseCode || "").trim().toLowerCase();
+
+        const isPraxisCourse = lowerCourseId.includes("praxis");
         const isEnrolledInAnyPraxis = isPraxisCourse && (
             enrolledList.some(id => String(id).toLowerCase().includes("praxis") || String(id).toLowerCase().includes("cse212")) ||
             (studentData.sections && Object.keys(studentData.sections).some(k => k.toLowerCase().includes("praxis") || k.toLowerCase().includes("cse212")))
         );
 
-        const isEnrolled = !currentCourseId || currentCourseId === "MUC_COURSE" || enrolledList.includes(currentCourseId) || isEnrolledInAnyPraxis ||
-                           (studentData.sections && (studentData.sections[currentCourseId] || Object.keys(studentData.sections).some(k => k.toLowerCase() === currentCourseId.toLowerCase())));
+        const isEnrolled = !currentCourseId || currentCourseId === "MUC_COURSE" ||
+            enrolledList.some(id => {
+                const lid = String(id).trim().toLowerCase();
+                return lid === lowerCourseId || (lowerCourseCode && lid === lowerCourseCode);
+            }) ||
+            isEnrolledInAnyPraxis ||
+            (studentData.sections && Object.keys(studentData.sections).some(k => {
+                const lk = String(k).trim().toLowerCase();
+                return lk === lowerCourseId || (lowerCourseCode && lk === lowerCourseCode);
+            }));
 
         if (!isEnrolled) {
             throw new Error(`NOT_ENROLLED:${studentRealName}:${sessionData.courseName || "هذا المقرر"}`);
