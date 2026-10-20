@@ -229,10 +229,14 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
         const recordId = `${sessionId}_${cleanedStudentId}`;
         const recordRef = doc(db, "attendance_records", recordId);
         const deviceRef = doc(db, "attendance_devices", `${sessionId}_${safeDeviceId}`);
-
-        const sessionDoc = await withTimeout(getDoc(sessionRef), 4500);
+let sessionDoc = await withTimeout(getDoc(sessionRef), 4500);
         if (!sessionDoc.exists()) {
-            throw new Error("SESSION_NOT_ON_SERVER_YET");
+            // محاولة ثانية سريعة في حال كان اتصال الدكتور متأخراً ثانية واحدة
+            await new Promise(r => setTimeout(r, 1200));
+            sessionDoc = await withTimeout(getDoc(sessionRef), 4500);
+            if (!sessionDoc.exists()) {
+                throw new Error("جاري بدء وتثبيت الجلسة على السيرفر.. يرجى إعادة المحاولة خلال ثوانٍ.");
+            }
         }
         const sessionData = sessionDoc.data();
 
