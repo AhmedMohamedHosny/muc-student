@@ -471,6 +471,24 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
         throw new Error("⚠️ رمز الحضور غير صالح، يرجى مسح الباركود مرة أخرى.");
     }
 
+    // فحص قيد الطالب محلياً: منع إضافة أي مقرر غير مسجل به الطالب إلى طابور الانتظار
+    try {
+        const enrolled = JSON.parse(localStorage.getItem("muc_student_courses") || "[]").map(c => String(c).toLowerCase().trim());
+        const cidLower = String(courseId || "").toLowerCase().trim();
+        const isPraxis = cidLower.includes("praxis") || String(courseName || "").toLowerCase().includes("praxis");
+
+        const isEnrolled = (enrolled.length === 0) || 
+                           cidLower === "muc_course" || 
+                           enrolled.includes(cidLower) ||
+                           (isPraxis && enrolled.some(c => c.includes("praxis") || c.includes("cse212")));
+
+        if (!isEnrolled) {
+            throw new Error(`⚠️ غير مسموح: الرقم الجامعي (${cleanedStudentId}) غير مقيد في مقرر (${courseName || courseId})!`);
+        }
+    } catch (e) {
+        if (e.message && e.message.includes("غير مقيد")) throw e;
+    }
+
 
 
     const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");

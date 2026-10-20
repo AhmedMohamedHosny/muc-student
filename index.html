@@ -1143,7 +1143,7 @@ let html5QrScanner = null;
             } catch (e) {}
         }
 
-        // دالة تنفيذ تسجيل الحضور الذكي بمجرد لقط الـ QR (أونلاين وأوفلاين)
+// دالة تنفيذ تسجيل الحضور الذكي بمجرد لقط الـ QR (أونلاين وأوفلاين)
         async function processInstantQrCheckIn() {
             const sid = getSavedStudentId() || inputId.value.trim();
             const studentRealName = getSavedStudentName(sid) || "طالب";
@@ -1151,6 +1151,20 @@ let html5QrScanner = null;
             try {
                 // أ. لو الباركود لمحاضرة أوفلاين
                 if (offlinePayload) {
+                    // 🛑 التحقق من قيد الطالب قبل قبول باركود الأوفلاين
+                    const enrolledLocal = JSON.parse(localStorage.getItem("muc_student_courses") || "[]").map(c => String(c).toLowerCase().trim());
+                    const targetCidLower = String(offlinePayload.c || "").toLowerCase().trim();
+                    const isPraxisTarget = targetCidLower.includes("praxis") || String(offlinePayload.cn || "").toLowerCase().includes("praxis");
+
+                    const isLocallyEnrolled = (enrolledLocal.length === 0) || 
+                                              targetCidLower === "muc_course" ||
+                                              enrolledLocal.includes(targetCidLower) ||
+                                              (isPraxisTarget && enrolledLocal.some(c => c.includes("praxis") || c.includes("cse212")));
+
+                    if (!isLocallyEnrolled) {
+                        throw new Error(`NOT_ENROLLED:${studentRealName}:${offlinePayload.cn || "هذا المقرر"}`);
+                    }
+
                     const realLectureNum = Number(offlinePayload.l ?? offlinePayload.ln ?? offlinePayload.lectureNumber ?? 1);
                     await queueOfflineAttendance({
                         studentId: sid,
@@ -1518,7 +1532,7 @@ document.getElementById("rcpt-course").innerText = String(res.courseName || "").
                 return;
             }
 
-            const enteredPin = await showCustomPrompt("Lecture PIN Code", "أدخل كود المحاضرة المكون من 6 أرقام الظاهر على الشاشة:", "");
+const enteredPin = await showCustomPrompt("Lecture PIN Code", "أدخل كود المحاضرة المكون من 6 أرقام الظاهر على الشاشة:", "");
             const modalInput = document.getElementById("modal-app-input");
             if (modalInput) modalInput.value = "";
             if (!enteredPin) return;
@@ -1531,12 +1545,33 @@ document.getElementById("rcpt-course").innerText = String(res.courseName || "").
             const btnPin = document.getElementById("btn-enter-pin");
             const stdName = getSavedStudentName(studentIdVal) || "طالب";
 
-// فك شفرة الكود لاستخراج (نوع المحاضرة + رقم المحاضرة + اسم الكورس الأصلي)
+            // فك شفرة الكود لاستخراج (نوع المحاضرة + رقم المحاضرة + اسم الكورس الأصلي)
             const decodedPin = decodePinMetadata(enteredPin);
             const isOfflineModePin = decodedPin.isOfflineModePin;
             const extractedLecNum = decodedPin.lectureNumber;
             const extractedCourseId = decodedPin.courseId;
             const extractedCourseName = decodedPin.courseName;
+
+            // 🛑 فحص أمان صارم: التأكد من قيد الطالب في هذا المقرر قبل قبول الـ PIN
+            try {
+                const enrolledLocal = JSON.parse(localStorage.getItem("muc_student_courses") || "[]").map(c => String(c).toLowerCase().trim());
+                const targetCidLower = String(extractedCourseId || "").toLowerCase().trim();
+                const isPraxisTarget = targetCidLower.includes("praxis") || String(extractedCourseName).toLowerCase().includes("praxis");
+
+                const isLocallyEnrolled = (enrolledLocal.length === 0) || 
+                                          targetCidLower === "muc_course" ||
+                                          enrolledLocal.includes(targetCidLower) ||
+                                          (isPraxisTarget && enrolledLocal.some(c => c.includes("praxis") || c.includes("cse212")));
+
+                if (!isLocallyEnrolled) {
+                    await showCustomAlert(
+                        "غير مسجل بالمقرر",
+                        `🚫 عفواً يا ${stdName}، أنت غير مقيد في مقرر (${extractedCourseName})!\n\nلا يمكنك تسجيل حضور هذه المحاضرة.`,
+                        true
+                    );
+                    return;
+                }
+            } catch (checkErr) {}
 
             try {
                 btnPin.disabled = true;
