@@ -159,13 +159,14 @@ export function decodePinMetadata(pin) {
     };
 }
 
-// دوال تتبع المحاضرات المسجلة لمنع تكرار تسجيل نفس المحاضرة
-export function markLectureAttendedLocally(sid, courseId, lecNum) {
+// دوال تتبع المحاضرات مربوطة برقم الجلسة الفريد (لتسمح للطالب بالتسجيل لو الدكتور أعاد فتح المحاضرة)
+export function markLectureAttendedLocally(sid, courseId, lecNum, sessionId = "") {
     try {
         const key = `muc_attended_history_${sid}`;
         const hist = JSON.parse(localStorage.getItem(key) || "{}");
         const cKey = String(courseId).toLowerCase().includes("praxis") ? "praxis" : String(courseId).toLowerCase();
         hist[`${cKey}_L${lecNum}`] = {
+            sessionId: String(sessionId || "").trim(),
             date: new Date().toLocaleDateString("en-CA"),
             timestamp: Date.now()
         };
@@ -173,15 +174,31 @@ export function markLectureAttendedLocally(sid, courseId, lecNum) {
     } catch(e) {}
 }
 
-export function isLectureAlreadyAttendedLocally(sid, courseId, lecNum) {
+export function isLectureAlreadyAttendedLocally(sid, courseId, lecNum, sessionId = "") {
     try {
         const key = `muc_attended_history_${sid}`;
         const hist = JSON.parse(localStorage.getItem(key) || "{}");
         const cKey = String(courseId).toLowerCase().includes("praxis") ? "praxis" : String(courseId).toLowerCase();
-        return Boolean(hist[`${cKey}_L${lecNum}`]);
+        const record = hist[`${cKey}_L${lecNum}`];
+        if (!record) return false;
+        // إذا تغيرت الجلسة (لأن الدكتور مسح القديمة وبدأ واحدة جديدة)، لا نمنع الطالب ونسمح له بالتسجيل
+        if (sessionId && record.sessionId) {
+            return record.sessionId === String(sessionId).trim();
+        }
+        return false;
     } catch(e) {
         return false;
     }
+}
+
+export function clearLectureAttendedLocally(sid, courseId, lecNum) {
+    try {
+        const key = `muc_attended_history_${sid}`;
+        const hist = JSON.parse(localStorage.getItem(key) || "{}");
+        const cKey = String(courseId).toLowerCase().includes("praxis") ? "praxis" : String(courseId).toLowerCase();
+        delete hist[`${cKey}_L${lecNum}`];
+        localStorage.setItem(key, JSON.stringify(hist));
+    } catch(e) {}
 }
 
 export function isValidPinChecksum(pin) {
@@ -257,43 +274,40 @@ const t = sessionData.currentToken || {};
 const currentLecNum = Number(sessionData.lectureNumber || 1);
         const isPraxis = String(sessionData.courseId || "").toLowerCase().includes("praxis") || String(sessionData.courseName || "").toLowerCase().includes("praxis");
 
-        // 1. فحص الكاش المحلي بجهاز الطالب
-        if (isLectureAlreadyAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum)) {
-            throw new Error(`⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (Lecture #${currentLecNum})!`);
-        }
-
-        // 2. فحص السجل المباشر للجلسة
+// 1. فحص السجل المباشر للجلسة الحالية على السيرفر (Ground Truth)
         const existingRecord = await withTimeout(getDoc(recordRef), 4000);
         if (existingRecord.exists()) {
-            markLectureAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum);
+            markLectureAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum, sessionId);
             throw new Error(`⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (Lecture #${currentLecNum})!`);
         }
 
-        // 3. فحص قاعدة البيانات السحابية بالكامل للتأكد أن الطالب لم يسجل في الفترة الأولى لنفس المحاضرة
-        try {
-            const qAlready = query(
-                collection(db, "attendance_records"),
-                where("studentId", "==", cleanedStudentId)
-            );
-            const prevSnap = await withTimeout(getDocs(qAlready), 3500);
-            const alreadyAttended = prevSnap.docs.some(docSnap => {
-                const r = docSnap.data();
-const rCourse = String(r.courseId || "").toLowerCase();
-                const sCourse = String(sessionData.courseId || "").toLowerCase();
-                const rIsPraxis = rCourse.includes("praxis") || String(r.courseName || "").toLowerCase().includes("praxis");
-                const matchCourse = (rCourse === sCourse) || (isPraxis && rIsPraxis);
-                const matchLec = Number(r.lectureNumber || 0) === currentLecNum;
-                const matchSession = r.sessionId === sessionId;
-                return matchCourse && (matchLec || matchSession);
-            });
+        // 2. فحص السحابة (يقتصر فقط على مادة البراكسيس لمنع حضور الفترتين L1 و L2 لنفس المحاضرة)
+        if (isPraxis) {
+            try {
+                const qAlready = query(
+                    collection(db, "attendance_records"),
+                    where("studentId", "==", cleanedStudentId)
+                );
+                const prevSnap = await withTimeout(getDocs(qAlready), 3500);
+                const alreadyAttended = prevSnap.docs.some(docSnap => {
+                    const r = docSnap.data();
+                    const rCourse = String(r.courseId || "").toLowerCase();
+                    const rIsPraxis = rCourse.includes("praxis") || String(r.courseName || "").toLowerCase().includes("praxis");
+                    const matchLec = Number(r.lectureNumber || 0) === currentLecNum;
+                    return rIsPraxis && matchLec;
+                });
 
-            if (alreadyAttended) {
-                markLectureAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum);
-                throw new Error(`⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (Lecture #${currentLecNum})!`);
+                if (alreadyAttended) {
+                    markLectureAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum, sessionId);
+                    throw new Error(`⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (Lecture #${currentLecNum})!`);
+                }
+            } catch (checkErr) {
+                if (String(checkErr.message || "").includes("لقد قمت بتسجيل حضورك")) throw checkErr;
             }
-        } catch (checkErr) {
-            if (String(checkErr.message || "").includes("لقد قمت بتسجيل حضورك")) throw checkErr;
         }
+
+        // إذا كان السجل محذوفاً من السيرفر (لأن الدكتورة أعادت المحاضرة)، ننظف كاش الهاتف فوراً
+        clearLectureAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum);
 
         const studentDoc = await withTimeout(getDoc(doc(db, "students", cleanedStudentId)), 4500);
         if (!studentDoc.exists()) {
@@ -441,8 +455,7 @@ await withTimeout(setDoc(recordRef, {
             method: clientToken === "PIN_VERIFIED" ? "PIN_CODE" : "QR_SCAN"
         }, { merge: true }), 4500);
 
-        markLectureAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum);
-
+markLectureAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum, sessionId);
 
 
         removeFromQueue({ studentId: cleanedStudentId, sessionId: sessionId, courseId: sessionData.courseId, scannedAt: Date.now() });
@@ -481,23 +494,14 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
 const isPraxis = String(courseId || "").toLowerCase().includes("praxis") || String(courseName || "").toLowerCase().includes("praxis");
     const targetLec = Number(lectureNumber || 1);
 
-    // فحص هل المحاضرة مسجلة في الهاتف مسبقاً
-    if (isLectureAlreadyAttendedLocally(cleanedStudentId, courseId, targetLec)) {
+// فحص هل المحاضرة مسجلة لنفس كود الجلسة (sessionId) تحديداً على هذا الهاتف
+    if (isLectureAlreadyAttendedLocally(cleanedStudentId, courseId, targetLec, sessionId)) {
         throw new Error(`⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (Lecture #${targetLec})!\n\nYou have already checked in for Lecture #${targetLec}!`);
     }
 
-    const exactOrQrExists = queue.some(q => {
-        if (q.studentId !== cleanedStudentId) return false;
-        if (q.sessionId === sessionId) return true;
-        if (pin && q.pin && String(q.pin) === String(pin)) return true;
-        const qIsPraxis = String(q.courseId || "").toLowerCase().includes("praxis") || String(q.courseName || "").toLowerCase().includes("praxis");
-        const matchCourse = (q.courseId === courseId) || (isPraxis && qIsPraxis);
-        if (matchCourse && Number(q.lectureNumber || 1) === targetLec) return true;
-        return false;
-    });
-
-    if (exactOrQrExists) {
-        throw new Error(`⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (Lecture #${targetLec}) ومحفوظ على هاتفك!\n\nYou have already checked in for Lecture #${targetLec}!`);
+    const exactSessionExists = queue.some(q => q.studentId === cleanedStudentId && q.sessionId === sessionId);
+    if (exactSessionExists) {
+        throw new Error(`⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل ومحفوظ على هاتفك!\n\nYou have already checked in for this session!`);
     }
     const deviceExists = queue.some(q => q.studentId !== cleanedStudentId && (
         q.sessionId === sessionId || (nowMs - (q.scannedAt || 0) < SAME_LEC_WINDOW_MS)
@@ -506,11 +510,11 @@ const isPraxis = String(courseId || "").toLowerCase().includes("praxis") || Stri
         throw new Error("⚠️ حماية أمنية: تم استخدام هذا الهاتف لتسجيل طالب آخر في هذه المحاضرة!");
     }
 
-    // استبدال أي محاولة PIN سابقة لنفس المحاضرة خلال 45 دقيقة لمنع تراكم العداد
+// استبدال أي محاولة سابقة لنفس رقم المحاضرة عند إعادة فتحها من قِبل الدكتور
     const cleanedQueue = queue.filter(q => {
         if (q.studentId !== cleanedStudentId) return true;
-        const isRecentPinAttempt = Boolean(q.pin) && (nowMs - (q.scannedAt || 0) < SAME_LEC_WINDOW_MS);
-        return !isRecentPinAttempt;
+        const isSameLectureAttempt = (String(q.courseId).toLowerCase() === String(courseId).toLowerCase()) && Number(q.lectureNumber || 1) === targetLec;
+        return !isSameLectureAttempt;
     });
 
     const record = {
@@ -535,7 +539,7 @@ const isPraxis = String(courseId || "").toLowerCase().includes("praxis") || Stri
 
 cleanedQueue.push(record);
     localStorage.setItem("muc_pending_records", JSON.stringify(cleanedQueue));
-    markLectureAttendedLocally(cleanedStudentId, courseId, targetLec);
+markLectureAttendedLocally(cleanedStudentId, courseId, targetLec, sessionId);
     return record;
 }
 
