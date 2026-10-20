@@ -271,9 +271,10 @@ const currentLecNum = Number(sessionData.lectureNumber || 1);
             const prevSnap = await withTimeout(getDocs(qAlready), 3500);
             const alreadyAttended = prevSnap.docs.some(docSnap => {
                 const r = docSnap.data();
-                const rCourse = String(r.courseId || "").toLowerCase();
+const rCourse = String(r.courseId || "").toLowerCase();
                 const sCourse = String(sessionData.courseId || "").toLowerCase();
-                const matchCourse = (rCourse === sCourse) || (rCourse.includes("praxis") && sCourse.includes("praxis")) || isPraxis;
+                const rIsPraxis = rCourse.includes("praxis") || String(r.courseName || "").toLowerCase().includes("praxis");
+                const matchCourse = (rCourse === sCourse) || (isPraxis && rIsPraxis);
                 const matchLec = Number(r.lectureNumber || 0) === currentLecNum;
                 const matchSession = r.sessionId === sessionId;
                 return matchCourse && (matchLec || matchSession);
@@ -406,8 +407,7 @@ const currentLecNum = Number(sessionData.lectureNumber || 1);
             ? CONFIG.attendance.statuses.LATE
             : CONFIG.attendance.statuses.PRESENT;
 
-const isPraxis = String(sessionData.courseId || "").toLowerCase().includes("praxis") || String(sessionData.courseName || "").toLowerCase().includes("praxis");
-        const cleanSavedCourseName = isPraxis ? "Praxis Programming" : String(sessionData.courseName || "Course").replace(/\s*[-–—]?\s*(Lecture|محاضرة|Lec)\s*[12]/gi, "").trim();
+const cleanSavedCourseName = isPraxis ? "Praxis Programming" : String(sessionData.courseName || "Course").replace(/\s*[-–—]?\s*(Lecture|محاضرة|Lec)\s*[12]/gi, "").trim();
 
 await withTimeout(setDoc(recordRef, {
             recordId: recordId,
@@ -517,9 +517,8 @@ const isPraxis = String(courseId || "").toLowerCase().includes("praxis") || Stri
 
     cleanedQueue.push(record);
     localStorage.setItem("muc_pending_records", JSON.stringify(cleanedQueue));
+markLectureAttendedLocally(cleanedStudentId, courseId, targetLec);
     return record;
-    markLectureAttendedLocally(cleanedStudentId, courseId, targetLec);
-}
 
 let isSyncing = false;
 
@@ -675,11 +674,12 @@ const enrolled = sData.enrolledCourses || [];
 const isPraxisSync = String(item.courseId || "").toLowerCase().includes("praxis") || String(item.courseName || "").toLowerCase().includes("praxis");
                 const cleanSyncCourseName = isPraxisSync ? "Praxis Programming" : String(item.courseName || "المقرر الدراسي").replace(/\s*[-–—]?\s*(Lecture|محاضرة|Lec)\s*[12]/gi, "").trim();
 
-                const recordData = {
+const recordData = {
                     recordId,
                     sessionId: item.sessionId,
                     courseId: item.courseId || "MUC_COURSE",
                     courseName: cleanSyncCourseName,
+                    lectureNumber: Number(item.lectureNumber || 1),
                     studentId: item.studentId,
                     studentName: realStudentName,
                     deviceId: item.deviceId || getLocalDeviceId(),
