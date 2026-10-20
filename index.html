@@ -473,10 +473,11 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance,
                 el.style.textAlign = isAr ? "right" : "left";
             });
         });
-        // 🚀 تسجيل الـ Service Worker عشان الموبايل يفتح أوفلاين
+// 🚀 تسجيل وتحديث الـ Service Worker فوراً لسحب أحدث نسخة
         if ("serviceWorker" in navigator) {
-            navigator.serviceWorker.register("./sw.js").then(() => {
-                console.log("Service Worker Active ✅");
+            navigator.serviceWorker.register("./sw.js?v=24").then((reg) => {
+                reg.update().catch(() => {});
+                console.log("Service Worker Active & Updated ✅");
             });
         }
 

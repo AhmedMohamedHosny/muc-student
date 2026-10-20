@@ -175,20 +175,7 @@ export function markLectureAttendedLocally(sid, courseId, lecNum, sessionId = ""
 }
 
 export function isLectureAlreadyAttendedLocally(sid, courseId, lecNum, sessionId = "") {
-    try {
-        const key = `muc_attended_history_${sid}`;
-        const hist = JSON.parse(localStorage.getItem(key) || "{}");
-        const cKey = String(courseId).toLowerCase().includes("praxis") ? "praxis" : String(courseId).toLowerCase();
-        const record = hist[`${cKey}_L${lecNum}`];
-        if (!record) return false;
-        // إذا تغيرت الجلسة (لأن الدكتور مسح القديمة وبدأ واحدة جديدة)، لا نمنع الطالب ونسمح له بالتسجيل
-        if (sessionId && record.sessionId) {
-            return record.sessionId === String(sessionId).trim();
-        }
-        return false;
-    } catch(e) {
-        return false;
-    }
+    return false;
 }
 
 export function clearLectureAttendedLocally(sid, courseId, lecNum) {
@@ -494,15 +481,7 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
 const isPraxis = String(courseId || "").toLowerCase().includes("praxis") || String(courseName || "").toLowerCase().includes("praxis");
     const targetLec = Number(lectureNumber || 1);
 
-// فحص هل المحاضرة مسجلة لنفس كود الجلسة (sessionId) تحديداً على هذا الهاتف
-    if (isLectureAlreadyAttendedLocally(cleanedStudentId, courseId, targetLec, sessionId)) {
-        throw new Error(`⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل (Lecture #${targetLec})!\n\nYou have already checked in for Lecture #${targetLec}!`);
-    }
-
-    const exactSessionExists = queue.some(q => q.studentId === cleanedStudentId && q.sessionId === sessionId);
-    if (exactSessionExists) {
-        throw new Error(`⚠️ لقد قمت بتسجيل حضورك لهذه المحاضرة بالفعل ومحفوظ على هاتفك!\n\nYou have already checked in for this session!`);
-    }
+// حماية أمنية: منع تسجيل طالب آخر من نفس الهاتف خلال نفس المحاضرة
     const deviceExists = queue.some(q => q.studentId !== cleanedStudentId && (
         q.sessionId === sessionId || (nowMs - (q.scannedAt || 0) < SAME_LEC_WINDOW_MS)
     ));
@@ -510,9 +489,10 @@ const isPraxis = String(courseId || "").toLowerCase().includes("praxis") || Stri
         throw new Error("⚠️ حماية أمنية: تم استخدام هذا الهاتف لتسجيل طالب آخر في هذه المحاضرة!");
     }
 
-// استبدال أي محاولة سابقة لنفس رقم المحاضرة عند إعادة فتحها من قِبل الدكتور
+    // استبدال أي سجل أوفلاين قديم لنفس الطالب في نفس المحاضرة بالسجل الجديد (لدعم إعادة المحاضرة بدون خطأ)
     const cleanedQueue = queue.filter(q => {
         if (q.studentId !== cleanedStudentId) return true;
+        if (q.sessionId === sessionId) return false;
         const isSameLectureAttempt = (String(q.courseId).toLowerCase() === String(courseId).toLowerCase()) && Number(q.lectureNumber || 1) === targetLec;
         return !isSameLectureAttempt;
     });
@@ -768,10 +748,13 @@ for (const item of queue) {
 }
 
 export function getPendingCount() {
-    if (!localStorage.getItem("muc_purge_old_sync_v3")) {
+    if (!localStorage.getItem("muc_purge_old_sync_v5")) {
         localStorage.removeItem("muc_pending_records");
         localStorage.removeItem("muc_sync_error");
-        localStorage.setItem("muc_purge_old_sync_v3", "done");
+        Object.keys(localStorage).forEach(k => {
+            if (k.startsWith("muc_attended_history_")) localStorage.removeItem(k);
+        });
+        localStorage.setItem("muc_purge_old_sync_v5", "done");
         return 0;
     }
 
