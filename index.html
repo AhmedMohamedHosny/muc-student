@@ -772,11 +772,9 @@ const lockExists = res.lockSnap.exists();
 
                     const isMyDeviceBound = boundDevices.includes(myHardwareKey) || boundDevices.includes(deviceId) || legacyDevices.includes(deviceId);
 
-                    // 1. إذا كان المشرف قد فك ربط هذا الهاتف من لوحة التحكم -> نطرد الهاتف
-                    if (!isFirstTimeSetup) {
-                        const wasClaimedLocally = localStorage.getItem(`muc_lock_claimed_${cleanId}`) === "1";
-                        const kickedByAdmin = (!lockExists && wasClaimedLocally) || (lockExists && boundDevices.length > 0 && !isMyDeviceBound && wasClaimedLocally);
-                        if (kickedByAdmin) {
+// 1. إذا كان الرقم مسجلاً على السيرفر وهذا الهاتف ليس من ضمن الأجهزة المعتمدة -> اطرد فوراً
+                    if (!isFirstTimeSetup && lockExists) {
+                        if (!isMyDeviceBound) {
                             clearStudentLocalBinding(cleanId);
                             inputId.value = "";
                             welcomeBar.classList.add("d-none");
@@ -784,7 +782,8 @@ const lockExists = res.lockSnap.exists();
                             inputStep.classList.remove("d-none");
                             await showCustomAlert(
                                 "تم إلغاء ربط هذا الهاتف",
-                                `🚫 قام مشرف المنظومة بإلغاء ربط هذا الهاتف بالرقم الجامعي (${cleanId}).\n\nيرجى إدخال رقمك الجامعي الصحيح فقط.`
+                                `🚫 تم فك ربط هذا الجهاز بالرقم الجامعي (${cleanId}) من لوحة الإدارة.\n\nيرجى إدخال رقمك الجامعي الصحيح لإعادة الربط.`,
+                                true
                             );
                             return false;
                         }
