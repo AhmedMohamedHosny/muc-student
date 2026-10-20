@@ -759,14 +759,23 @@ const stdData = res.stdSnap.data() || {};
                         });
                     } catch (e) {}
 
-                    const lockExists = res.lockSnap.exists();
+const lockExists = res.lockSnap.exists();
                     const lockData = lockExists ? (res.lockSnap.data() || {}) : {};
-                    const existingLockDevice = lockData.deviceId || stdData.boundDeviceId || "";
+                    
+                    // استخراج قائمة الأجهزة المربوطة بهذا الرقم الجامعي (بحد أقصى جهازين)
+                    const boundDevices = Array.isArray(lockData.deviceIds) 
+                        ? [...lockData.deviceIds] 
+                        : (lockData.deviceId ? [lockData.deviceId] : []);
+                    const legacyDevices = Array.isArray(lockData.legacyDeviceIds)
+                        ? [...lockData.legacyDeviceIds]
+                        : (lockData.legacyDeviceId ? [lockData.legacyDeviceId] : []);
 
-                    // 1. إذا كان المشرف قد فك ربط هذا الهاتف من لوحة التحكم -> نطرد الهاتف ونعيده لشاشة إدخال الـ ID
+                    const isMyDeviceBound = boundDevices.includes(myHardwareKey) || boundDevices.includes(deviceId) || legacyDevices.includes(deviceId);
+
+                    // 1. إذا كان المشرف قد فك ربط هذا الهاتف من لوحة التحكم -> نطرد الهاتف
                     if (!isFirstTimeSetup) {
                         const wasClaimedLocally = localStorage.getItem(`muc_lock_claimed_${cleanId}`) === "1";
-                        const kickedByAdmin = (!lockExists && wasClaimedLocally) || (existingLockDevice && existingLockDevice !== myHardwareKey && existingLockDevice !== deviceId);
+                        const kickedByAdmin = (!lockExists && wasClaimedLocally) || (lockExists && boundDevices.length > 0 && !isMyDeviceBound && wasClaimedLocally);
                         if (kickedByAdmin) {
                             clearStudentLocalBinding(cleanId);
                             inputId.value = "";
@@ -781,15 +790,15 @@ const stdData = res.stdSnap.data() || {};
                         }
                     }
 
-                    // 2. فحص حاسم: هل هذا الـ ID مربوط بالفعل بهاتف طالب آخر؟
-                    if (existingLockDevice && existingLockDevice !== myHardwareKey && existingLockDevice !== deviceId) {
+                    // 2. فحص الحد الأقصى للأجهزة: مسموح بجهازين (2) فقط لكل طالب
+                    if (!isMyDeviceBound && boundDevices.length >= 2) {
                         clearStudentLocalBinding(cleanId);
                         welcomeBar.classList.add("d-none");
                         scannerStep.classList.add("d-none");
                         inputStep.classList.remove("d-none");
                         await showCustomAlert(
                             "الرقم الجامعي مستخدم بالفعل!",
-                            `🚫 عفواً، هناك شخص قام بالفعل باستخدام الرقم الجامعي (${cleanId}) وتسجيله على هاتف آخر!\n\nلا يمكن فتح نفس الـ ID على أكثر من هاتف. يرجى التحدث مع المشرف.\n\nThis Student ID is already claimed by another device. Please contact your supervisor.`
+                            `🚫 عفواً، الرقم الجامعي (${cleanId}) مربوط بالفعل بهاتفين (الحد الأقصى المسموح به هو هاتفان فقط)!\n\nيرجى التحدث مع المشرف لفك القفل.\n\nThis Student ID is already bound to 2 devices.`
                         );
                         return false;
                     }
@@ -805,22 +814,67 @@ const stdData = res.stdSnap.data() || {};
                         }
                     }
 
-                    // 4. توثيق قفل الهاتف باسم الطالب ونوع تليفونه في السيرفر
-                    if (isFirstTimeSetup || !lockExists) {
+// 4. توثيق قفل الهاتف (الأول أو الثاني) في السيرفر مع حفظ توقيت وموديل كل هاتف بدقة تامة
+                    if (isFirstTimeSetup || !lockExists || !isMyDeviceBound) {
                         try {
+                            const nowISO = new Date().toISOString();
+                            let existingDevices = Array.isArray(lockData.devices) ? [...lockData.devices] : [];
+
+                            if (existingDevices.length === 0 && lockData.deviceId) {
+                                const rawName = String(lockData.deviceName || "");
+                                const namePart1 = rawName.includes(" + ") ? rawName.split(" + ")[0].trim() : (rawName.includes(" | ") ? rawName.split(" | ")[0].replace(/^[هاتف 1]\s*/, "").trim() : (rawName || "هاتف 1"));
+                                existingDevices.push({
+                                    deviceId: lockData.deviceId,
+                                    legacyDeviceId: lockData.legacyDeviceId || lockData.deviceId,
+                                    deviceName: namePart1,
+                                    screenInfo: lockData.screenInfo || "",
+                                    lockedAtISO: lockData.firstLockedAtISO || lockData.lockedAtISO || nowISO
+                                });
+                            }
+
+                            const currentDeviceObj = {
+                                deviceId: myHardwareKey,
+                                legacyDeviceId: deviceId,
+                                deviceName: phoneName,
+                                screenInfo: `${screen.width}x${screen.height}`,
+                                lockedAtISO: nowISO
+                            };
+
+                            let updatedDevicesList = [];
+                            let firstTime = lockData.firstLockedAtISO || (existingDevices[0]?.lockedAtISO) || nowISO;
+                            let secondTime = lockData.secondLockedAtISO || "";
+
+                            if (existingDevices.length === 0) {
+                                updatedDevicesList = [currentDeviceObj];
+                                firstTime = nowISO;
+                            } else {
+                                const otherDev = existingDevices.find(d => d.deviceId !== myHardwareKey && d.deviceId !== deviceId);
+                                if (otherDev) {
+                                    updatedDevicesList = [otherDev, currentDeviceObj];
+                                    firstTime = otherDev.lockedAtISO || firstTime;
+                                    secondTime = nowISO;
+                                } else {
+                                    updatedDevicesList = [currentDeviceObj];
+                                    firstTime = currentDeviceObj.lockedAtISO || nowISO;
+                                }
+                            }
+
                             await Promise.race([
                                 setDoc(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), {
                                     studentId: cleanId,
                                     studentName: stdName,
                                     department: stdData.department || "هندسة الحاسب",
                                     academicYear: String(stdData.academicYear || "2"),
-                                    deviceId: myHardwareKey,
-                                    legacyDeviceId: deviceId,
-                                    deviceName: phoneName,
-                                    userAgent: navigator.userAgent || "",
-                                    screenInfo: `${screen.width}x${screen.height}`,
+                                    devices: updatedDevicesList,
+                                    deviceIds: updatedDevicesList.map(d => d.deviceId),
+                                    deviceId: updatedDevicesList[0]?.deviceId || myHardwareKey,
+                                    secondDeviceId: updatedDevicesList[1]?.deviceId || "",
+                                    deviceName: updatedDevicesList.map((d, i) => `[هاتف ${i+1}] ${d.deviceName}`).join(" | "),
+                                    screenInfo: updatedDevicesList[0]?.screenInfo || `${screen.width}x${screen.height}`,
+                                    firstLockedAtISO: firstTime,
+                                    secondLockedAtISO: secondTime,
                                     lockedAt: res.serverTimestamp(),
-                                    lockedAtISO: new Date().toISOString()
+                                    lockedAtISO: secondTime || firstTime
                                 }, { merge: true }),
                                 new Promise((r) => setTimeout(r, 3000))
                             ]);
@@ -1044,7 +1098,7 @@ let html5QrScanner = null;
 
                     document.getElementById("rcpt-name").innerText = getSavedStudentName(sid) || studentRealName;
                     document.getElementById("rcpt-id").innerText = sid;
-                    document.getElementById("rcpt-course").innerText = offlinePayload.cn || "Course";
+document.getElementById("rcpt-course").innerText = String(offlinePayload.cn || "").toLowerCase().includes("praxis") ? "Praxis Programming" : (offlinePayload.cn || "Course");
                     document.getElementById("rcpt-lecture").innerText = `Lecture #${realLectureNum}`;
                     document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
                     document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
@@ -1068,7 +1122,7 @@ let html5QrScanner = null;
                 showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been recorded on the live classroom screen.");
                 document.getElementById("rcpt-name").innerText = res.studentName;
                 document.getElementById("rcpt-id").innerText = res.studentId;
-                document.getElementById("rcpt-course").innerText = res.courseName;
+document.getElementById("rcpt-course").innerText = String(res.courseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : res.courseName;
                 document.getElementById("rcpt-lecture").innerText = `${typeName} #${lecNum}`;
                 document.getElementById("rcpt-date").innerText = res.date;
                 document.getElementById("rcpt-time").innerText = res.time;
@@ -1525,7 +1579,7 @@ await queueOfflineAttendance({
                 showResult(true, "Saved Offline!", "PIN verified and saved on your phone. It will sync automatically once the lecture is uploaded.");
                 document.getElementById("rcpt-name").innerText = stdName;
                 document.getElementById("rcpt-id").innerText = studentIdVal;
-                document.getElementById("rcpt-course").innerText = extractedCourseName;
+document.getElementById("rcpt-course").innerText = String(extractedCourseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : extractedCourseName;
                 document.getElementById("rcpt-lecture").innerText = `Lecture #${extractedLecNum}`;
                 document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
                 document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
@@ -1655,4 +1709,4 @@ await queueOfflineAttendance({
     })();
 </script>
 </body>
-                                                                                         </html>
+</html>
