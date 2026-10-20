@@ -957,16 +957,78 @@ const lockExists = res.lockSnap.exists();
             return true;
         }
 
-        // عند فتح الموقع: لو الطالب أكد رقمه سابقاً، يدخل فوراً في 0 ثانية على شاشة المسح ولا تظهر له خانة الـ ID نهائياً
-        const initialSavedId = getSavedStudentId();
-        if (initialSavedId && initialSavedId.length >= 7) {
-            activateStudentProfile(initialSavedId, false);
-        } else {
-            localStorage.removeItem("muc_saved_student_id");
-            welcomeBar.classList.add("d-none");
-            inputStep.classList.remove("d-none");
-            scannerStep.classList.add("d-none");
+// 🕵️‍♂️ 1. دالة كشف وحظر المتصفح الخفي (Incognito Detector)
+        async function isIncognitoMode() {
+            try {
+                // فحص متصفحات Chromium (Chrome, Edge, Samsung Browser, Opera)
+                if ('storage' in navigator && 'estimate' in navigator.storage) {
+                    const { quota } = await navigator.storage.estimate();
+                    // في الوضع الخفي يحدد كروم مساحة تخزين ضئيلة جداً (أقل من 120 ميجابايت)
+                    if (quota && quota < 120000000) return true;
+                }
+                // فحص متصفح Safari على أجهزة iPhone و iPad
+                if (navigator.vendor && navigator.vendor.includes('Apple')) {
+                    try {
+                        window.openDatabase(null, null, null, null);
+                    } catch (_) {
+                        return true;
+                    }
+                }
+                // فحص متصفح Firefox
+                if ('MozAppearance' in document.documentElement.style) {
+                    return new Promise((resolve) => {
+                        const db = indexedDB.open("muc_incognito_test");
+                        db.onerror = () => resolve(true);
+                        db.onsuccess = () => resolve(false);
+                    });
+                }
+            } catch (e) {
+                return false;
+            }
+            return false;
         }
+
+        // 🛑 2. منع الدخول من المتصفح الخفي وتجميد الشاشة
+        function blockIncognitoUser() {
+            document.body.innerHTML = `
+                <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem; background: linear-gradient(135deg, #1e0508, #4a040a); font-family: 'Cairo', sans-serif;" dir="rtl">
+                    <div style="background: #ffffff; color: #0F172A; max-width: 420px; width: 100%; border-radius: 20px; padding: 2rem 1.5rem; text-align: center; box-shadow: 0 25px 50px rgba(0,0,0,0.6); border-top: 6px solid #DC2626;">
+                        <div style="width: 75px; height: 75px; border-radius: 50%; background: #FEE2E2; color: #DC2626; display: flex; align-items: center; justify-content: center; margin: 0 auto 1rem; font-size: 2.2rem;">
+                            <i class="fa-solid fa-user-secret"></i>
+                        </div>
+                        <h3 style="color: #7A0C16; font-size: 1.3rem; font-weight: 800; margin-bottom: 0.6rem;">
+                            ممنوع استخدام المتصفح الخفي!
+                        </h3>
+                        <p style="color: #475569; font-size: 0.95rem; font-weight: 700; line-height: 1.6; margin-bottom: 1.25rem;">
+                            عفواً يا بشمهندس، تم رصد فتح المنظومة في وضع <strong>(Incognito / Private Browsing)</strong>.<br>
+                            حرصاً على أمان بصمة جهازك وتوثيق حضورك، يُرجى إغلاق علامة التبويب هذه وفتح الرابط من <strong>المتصفح العادي</strong>.
+                        </p>
+                        <div style="background: #F8FAFC; border: 1px dashed #CBD5E1; border-radius: 12px; padding: 10px; font-size: 0.82rem; color: #64748B; font-weight: 700;">
+                            جامعة مايو بالقاهرة — منظومة الحضور الذكي
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 🚀 3. تشغيل الفحص عند الإقلاع
+        (async function initAppStartup() {
+            const isPrivate = await isIncognitoMode();
+            if (isPrivate) {
+                blockIncognitoUser();
+                return;
+            }
+
+            const initialSavedId = getSavedStudentId();
+            if (initialSavedId && initialSavedId.length >= 7) {
+                activateStudentProfile(initialSavedId, false);
+            } else {
+                localStorage.removeItem("muc_saved_student_id");
+                welcomeBar.classList.add("d-none");
+                inputStep.classList.remove("d-none");
+                scannerStep.classList.add("d-none");
+            }
+        })();
 
         // حفظ الرقم الجامعي عند الضغط على زر الدخول في البداية
         document.getElementById("attendance-form").addEventListener("submit", async (e) => {
