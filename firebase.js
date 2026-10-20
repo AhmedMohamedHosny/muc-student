@@ -95,8 +95,8 @@ const KNOWN_MUC_COURSES = {
     "praxis_programming_lec2": "Praxis Programming",
     "cse216": "Web Design and Database (CSE216)",
     "cse_web_design": "Web Design and Database (CSE216)",
-    "cse_uc": "User Centered Design",
     "CSE_UC": "User Centered Design",
+    "cse_uc": "User Centered Design",
     "user_centered_design": "User Centered Design",
     "cse_modern_workshop": "Modern Workshop",
     "cse122": "Logic Design (CSE122)"
@@ -577,12 +577,13 @@ export async function syncPendingAttendance() {
             await withTimeout(signInAnonymously(auth), 4500);
         }
 
-        for (const item of queue) {
+for (const item of queue) {
             try {
-// أ) لو السجل عبارة عن PIN أوفلاين، نبحث في attendance_pins ثم احتياطياً في attendance_sessions (pinHistory)
+                // أ) لو السجل عبارة عن PIN أوفلاين، نبحث في attendance_pins ثم في pinHistory ثم بمطابقة رقم المحاضرة والمقرر
                 if (item.pin) {
                     item.origSessionId = item.origSessionId || item.sessionId;
                     let matchedSessionData = null;
+                    const decodedMeta = decodePinMetadata(item.pin);
 
                     try {
                         const pinSnap = await withTimeout(getDoc(doc(db, "attendance_pins", String(item.pin))), 4000);
@@ -591,7 +592,7 @@ export async function syncPendingAttendance() {
                         }
                     } catch (e) {}
 
-if (!matchedSessionData) {
+                    if (!matchedSessionData) {
                         try {
                             const qSnap = await withTimeout(getDocs(query(
                                 collection(db, "attendance_sessions"),
@@ -604,10 +605,37 @@ if (!matchedSessionData) {
                                     return tB - tA;
                                 });
                                 const docMatch = sortedDocs.find(d =>
-                                    (!item.courseId || item.courseId === "MUC_COURSE" || d.data().courseId === item.courseId) &&
+                                    (!item.courseId || item.courseId === "MUC_COURSE" || String(d.data().courseId || "").toLowerCase() === String(item.courseId).toLowerCase()) &&
                                     (!item.lectureNumber || Number(d.data().lectureNumber) === Number(item.lectureNumber))
                                 ) || sortedDocs[0];
                                 matchedSessionData = { sessionId: docMatch.id, ...docMatch.data() };
+                            }
+                        } catch (e) {}
+                    }
+
+                    // بحث بديل ذكي: لو الدكتور كان أوفلاين وقت توليد الـ PIN ورفع المحاضرة لاحقاً بدون pinHistory
+                    if (!matchedSessionData) {
+                        try {
+                            const targetLecNum = Number(item.lectureNumber || decodedMeta.lectureNumber || 1);
+                            const qLecSnap = await withTimeout(getDocs(query(
+                                collection(db, "attendance_sessions"),
+                                where("lectureNumber", "==", targetLecNum)
+                            )), 4500);
+                            if (!qLecSnap.empty) {
+                                const candidates = qLecSnap.docs
+                                    .map(d => ({ sessionId: d.id, ...d.data() }))
+                                    .filter(s => s.status !== "deleted" && !s.finalized)
+                                    .filter(s => {
+                                        const sCid = String(s.courseId || s.courseCode || "").trim().toLowerCase();
+                                        const iCid = String(item.courseId || "").trim().toLowerCase();
+                                        return (iCid && iCid !== "muc_course" && sCid === iCid) ||
+                                               getCoursePinIndex(s.courseId || s.courseCode || "") === decodedMeta.courseIdx;
+                                    })
+                                    .sort((a, b) => ((b.startTime && b.startTime.seconds) || 0) - ((a.startTime && a.startTime.seconds) || 0));
+
+                                if (candidates.length > 0) {
+                                    matchedSessionData = candidates[0];
+                                }
                             }
                         } catch (e) {}
                     }
@@ -622,7 +650,7 @@ if (!matchedSessionData) {
                     item.courseName = matchedSessionData.courseName || item.courseName || "المقرر الدراسي";
                 }
 
-                // ب) فحص الجلسة على السيرفر
+                // ب) فحص الجلسة على السيرفر وتوحيد حالة أحرف courseId مع السيرفر
                 let sessionDeletedOrFinalized = false;
                 let sessionExistsOnServer = false;
                 try {
@@ -633,8 +661,8 @@ if (!matchedSessionData) {
                         if (sData.status === "deleted" || sData.finalized === true) {
                             sessionDeletedOrFinalized = true;
                         }
-                        if (!item.courseId || item.courseId === "MUC_COURSE") item.courseId = sData.courseId || item.courseId;
-                        if (!item.courseName || item.courseName === "المقرر الدراسي") item.courseName = sData.courseName || item.courseName;
+                        if (sData.courseId) item.courseId = sData.courseId;
+                        if (sData.courseName) item.courseName = sData.courseName;
                     }
                 } catch (err) {}
 
@@ -643,13 +671,9 @@ if (!matchedSessionData) {
                     continue;
                 }
 
-                // إذا لم يكن الدكتور قد رفع الجلسة للسيرفر بعد، ننتظر حتى يرفعها الدكتور (إلا لو كانت قواعد السيرفر تقبل الرفع المباشر)
                 if (!sessionExistsOnServer) {
-                    const isGenuineProjectorOfflineQr = !item.pin && String(item.sessionId).startsWith("off_") && item.courseId && item.courseId !== "MUC_COURSE";
-                    if (!isGenuineProjectorOfflineQr) {
-                        if (Date.now() - (item.scannedAt || 0) > 12 * 3600 * 1000) removeFromQueue(item);
-                        continue;
-                    }
+                    if (Date.now() - (item.scannedAt || 0) > 12 * 3600 * 1000) removeFromQueue(item);
+                    continue;
                 }
 
                 const mismatch = checkLectureMatch(item.courseId, item.courseName, item.studentId);
@@ -667,10 +691,15 @@ if (!matchedSessionData) {
                     const sData = stdSnap.data();
                     realStudentName = sData.name || realStudentName;
                     localStorage.setItem(`muc_student_name_${item.studentId}`, realStudentName);
-const enrolled = sData.enrolledCourses || [];
-                    const isPraxisSync = String(item.courseId || "").toLowerCase().includes("praxis") && enrolled.some(id => String(id).toLowerCase().includes("praxis"));
-                    if (item.courseId && item.courseId !== "MUC_COURSE" && !enrolled.includes(item.courseId) && !isPraxisSync) {
 
+                    const enrolled = sData.enrolledCourses || [];
+                    const lowerCourseId = String(item.courseId || "").trim().toLowerCase();
+                    const isPraxisSync = lowerCourseId.includes("praxis") && enrolled.some(id => String(id).toLowerCase().includes("praxis") || String(id).toLowerCase().includes("cse212"));
+                    const isEnrolledSync = !lowerCourseId || lowerCourseId === "muc_course" || isPraxisSync ||
+                        enrolled.some(id => String(id).trim().toLowerCase() === lowerCourseId) ||
+                        (sData.sections && Object.keys(sData.sections).some(k => String(k).trim().toLowerCase() === lowerCourseId));
+
+                    if (!isEnrolledSync) {
                         localStorage.setItem("muc_sync_error", `⚠️ الرقم (${item.studentId}) غير مقيد في مقرر (${item.courseName || item.courseId})!`);
                         removeFromQueue(item);
                         continue;
@@ -689,10 +718,10 @@ const enrolled = sData.enrolledCourses || [];
                     continue;
                 }
 
-const isPraxisSync = String(item.courseId || "").toLowerCase().includes("praxis") || String(item.courseName || "").toLowerCase().includes("praxis");
+                const isPraxisSync = String(item.courseId || "").toLowerCase().includes("praxis") || String(item.courseName || "").toLowerCase().includes("praxis");
                 const cleanSyncCourseName = isPraxisSync ? "Praxis Programming" : String(item.courseName || "المقرر الدراسي").replace(/\s*[-–—]?\s*(Lecture|محاضرة|Lec)\s*[12]/gi, "").trim();
 
-const recordData = {
+                const recordData = {
                     recordId,
                     sessionId: item.sessionId,
                     courseId: item.courseId || "MUC_COURSE",
@@ -723,7 +752,6 @@ const recordData = {
                 removeFromQueue(item);
                 uploaded++;
             } catch (err) {
-                // لا نحذف السجل أبداً عند حدوث خطأ في الرفع (يبقى محفوظاً للمحاولة التالية عند رفع الدكتور للمحاضرة)
                 console.warn("Retaining offline record until session is available:", err.message);
             }
         }
