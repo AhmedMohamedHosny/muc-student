@@ -762,34 +762,35 @@ const stdData = res.stdSnap.data() || {};
 const lockExists = res.lockSnap.exists();
                     const lockData = lockExists ? (res.lockSnap.data() || {}) : {};
                     
-                    // استخراج قائمة الأجهزة المربوطة بهذا الرقم الجامعي (بحد أقصى جهازين)
+                    // فحص صارم للأجهزة المربوطة حالياً فقط (بدون الاعتماد على legacyDeviceIds القديم)
+                    const activeDevicesArr = Array.isArray(lockData.devices) ? lockData.devices : [];
                     const boundDevices = Array.isArray(lockData.deviceIds) 
                         ? [...lockData.deviceIds] 
                         : (lockData.deviceId ? [lockData.deviceId] : []);
-                    const legacyDevices = Array.isArray(lockData.legacyDeviceIds)
-                        ? [...lockData.legacyDeviceIds]
-                        : (lockData.legacyDeviceId ? [lockData.legacyDeviceId] : []);
 
-                    const isMyDeviceBound = boundDevices.includes(myHardwareKey) || boundDevices.includes(deviceId) || legacyDevices.includes(deviceId);
+                    const isMyDeviceBound = lockExists && (
+                        boundDevices.includes(myHardwareKey) ||
+                        boundDevices.includes(deviceId) ||
+                        activeDevicesArr.some(d => d.deviceId === myHardwareKey || d.deviceId === deviceId || d.legacyDeviceId === deviceId)
+                    );
 
-// 1. إذا كان الرقم مسجلاً على السيرفر وهذا الهاتف ليس من ضمن الأجهزة المعتمدة -> اطرد فوراً
-                    if (!isFirstTimeSetup && lockExists) {
-                        if (!isMyDeviceBound) {
-                            clearStudentLocalBinding(cleanId);
-                            inputId.value = "";
-                            welcomeBar.classList.add("d-none");
-                            scannerStep.classList.add("d-none");
-                            inputStep.classList.remove("d-none");
-                            await showCustomAlert(
-                                "تم إلغاء ربط هذا الهاتف",
-                                `🚫 تم فك ربط هذا الجهاز بالرقم الجامعي (${cleanId}) من لوحة الإدارة.\n\nيرجى إدخال رقمك الجامعي الصحيح لإعادة الربط.`,
-                                true
-                            );
-                            return false;
-                        }
+                    // 1. عند فتح الموقع أو عمل ريستارت (!isFirstTimeSetup): إذا كان القفل محذوفاً أو الهاتف غير موجود فيه -> اطرد فوراً ولا تسجله!
+                    if (!isFirstTimeSetup && (!lockExists || !isMyDeviceBound)) {
+                        clearStudentLocalBinding(cleanId);
+                        inputId.value = "";
+                        welcomeBar.classList.add("d-none");
+                        scannerStep.classList.add("d-none");
+                        resultStep.classList.add("d-none");
+                        inputStep.classList.remove("d-none");
+                        await showCustomAlert(
+                            "تم إلغاء ربط هذا الهاتف",
+                            `🚫 قام مشرف المنظومة بإلغاء ربط هذا الهاتف بالرقم الجامعي (${cleanId}).\n\nيرجى إدخال رقمك الجامعي الصحيح والموافقة على الربط من جديد.`,
+                            true
+                        );
+                        return false;
                     }
 
-                    // 2. فحص الحد الأقصى للأجهزة: مسموح بجهازين (2) فقط لكل طالب
+                    // 2. فحص الحد الأقصى للأجهزة عند التسجيل اليدوي: مسموح بجهازين (2) فقط لكل طالب
                     if (!isMyDeviceBound && boundDevices.length >= 2) {
                         clearStudentLocalBinding(cleanId);
                         welcomeBar.classList.add("d-none");
@@ -797,31 +798,28 @@ const lockExists = res.lockSnap.exists();
                         inputStep.classList.remove("d-none");
                         await showCustomAlert(
                             "الرقم الجامعي مستخدم بالفعل!",
-                            `🚫 عفواً، الرقم الجامعي (${cleanId}) مربوط بالفعل بهاتفين (الحد الأقصى المسموح به هو هاتفان فقط)!\n\nيرجى التحدث مع المشرف لفك القفل.\n\nThis Student ID is already bound to 2 devices.`
+                            `🚫 عفواً، الرقم الجامعي (${cleanId}) مربوط بالفعل بهاتفين (الحد الأقصى المسموح به هو هاتفان فقط)!\n\nيرجى التحدث مع المشرف لفك القفل.\n\nThis Student ID is already bound to 2 devices.`,
+                            true
                         );
                         return false;
                     }
 
-                    const phoneName = await getReadablePhoneName();
-
-                    // 3. إذا كانت أول مرة يسجل فيها الطالب رقمه، نظهر له شاشة التأكيد بالأنيميشن (Yes / No)
+                    // 3. التسجيل والربط يتم حصرياً إذا كان الطالب يكتب رقمه بيده لأول مرة (isFirstTimeSetup === true)
                     if (isFirstTimeSetup) {
+                        const phoneName = await getReadablePhoneName();
                         const isConfirmed = await askAnimatedIdConfirmation(cleanId, stdName);
                         if (!isConfirmed) {
                             inputId.focus();
                             return false;
                         }
-                    }
 
-// 4. توثيق قفل الهاتف (الأول أو الثاني) في السيرفر مع حفظ توقيت وموديل كل هاتف بدقة تامة
-                    if (isFirstTimeSetup || !lockExists || !isMyDeviceBound) {
                         try {
                             const nowISO = new Date().toISOString();
                             let existingDevices = Array.isArray(lockData.devices) ? [...lockData.devices] : [];
 
                             if (existingDevices.length === 0 && lockData.deviceId) {
                                 const rawName = String(lockData.deviceName || "");
-                                const namePart1 = rawName.includes(" + ") ? rawName.split(" + ")[0].trim() : (rawName.includes(" | ") ? rawName.split(" | ")[0].replace(/^[هاتف 1]\s*/, "").trim() : (rawName || "هاتف 1"));
+                                const namePart1 = rawName.includes(" + ") ? rawName.split(" + ")[0].trim() : (rawName.includes(" | ") ? rawName.split(" | ")[0].replace(/^[?هاتف 1]?\s*/, "").trim() : (rawName || "هاتف 1"));
                                 existingDevices.push({
                                     deviceId: lockData.deviceId,
                                     legacyDeviceId: lockData.legacyDeviceId || lockData.deviceId,
@@ -866,6 +864,8 @@ const lockExists = res.lockSnap.exists();
                                     academicYear: String(stdData.academicYear || "2"),
                                     devices: updatedDevicesList,
                                     deviceIds: updatedDevicesList.map(d => d.deviceId),
+                                    legacyDeviceIds: updatedDevicesList.map(d => d.legacyDeviceId || d.deviceId),
+                                    legacyDeviceId: updatedDevicesList[0]?.legacyDeviceId || deviceId,
                                     deviceId: updatedDevicesList[0]?.deviceId || myHardwareKey,
                                     secondDeviceId: updatedDevicesList[1]?.deviceId || "",
                                     deviceName: updatedDevicesList.map((d, i) => `[هاتف ${i+1}] ${d.deviceName}`).join(" | "),
@@ -881,9 +881,39 @@ const lockExists = res.lockSnap.exists();
                         } catch (lockErr) {
                             console.warn("Lock write notice:", lockErr);
                         }
-                    } else {
-                        localStorage.setItem(`muc_lock_claimed_${cleanId}`, "1");
                     }
+
+                    // 4. مراقب لحظي (Live Kick Listener): يطرد الهاتف في نفس الثانية التي يضغط فيها المشرف على "طرد" حتى لو الطالب فاتح الشاشة!
+                    try {
+                        const { onSnapshot } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+                        if (window._liveKickUnsub) window._liveKickUnsub();
+                        let initialSkip = true;
+                        window._liveKickUnsub = onSnapshot(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), async (snap) => {
+                            if (initialSkip) { initialSkip = false; return; }
+                            const d = snap.exists() ? (snap.data() || {}) : {};
+                            const ids = Array.isArray(d.deviceIds) ? d.deviceIds : (d.deviceId ? [d.deviceId] : []);
+                            const devs = Array.isArray(d.devices) ? d.devices : [];
+                            const stillBound = snap.exists() && (
+                                ids.includes(myHardwareKey) ||
+                                ids.includes(deviceId) ||
+                                devs.some(x => x.deviceId === myHardwareKey || x.deviceId === deviceId || x.legacyDeviceId === deviceId)
+                            );
+                            if (!stillBound) {
+                                if (window._liveKickUnsub) { window._liveKickUnsub(); window._liveKickUnsub = null; }
+                                clearStudentLocalBinding(cleanId);
+                                inputId.value = "";
+                                welcomeBar.classList.add("d-none");
+                                scannerStep.classList.add("d-none");
+                                resultStep.classList.add("d-none");
+                                inputStep.classList.remove("d-none");
+                                await showCustomAlert(
+                                    "تم إلغاء ربط هذا الهاتف",
+                                    `🚫 قام مشرف المنظومة للتو بإلغاء ربط هذا الهاتف بالرقم الجامعي (${cleanId}).`,
+                                    true
+                                );
+                            }
+                        });
+                    } catch (e) {}
                 } catch (e) {
                     if (isFirstTimeSetup) {
                         const isConfirmed = await askAnimatedIdConfirmation(cleanId, stdName || "طالب جامعة مايو");
