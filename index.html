@@ -533,12 +533,35 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
         const btnTriggerCam = document.getElementById("btn-trigger-cam");
         const qrBox = document.getElementById("qr-reader");
 
-// دالة عرض التنبيهات الأنيقة بدون اسم الموقع
+// دالة ضبط اتجاه النصوص العربية والإنجليزية والأقواس تلقائياً لكل سطر
+        function setSmartBiDiText(el, text) {
+            if (!el) return;
+            const raw = String(text || "");
+            el.innerHTML = "";
+            raw.split("\n").forEach((line) => {
+                if (!line.trim()) {
+                    const sp = document.createElement("div");
+                    sp.style.height = "6px";
+                    el.appendChild(sp);
+                    return;
+                }
+                const div = document.createElement("div");
+                const isAr = /[\u0600-\u06FF]/.test(line);
+                div.dir = isAr ? "rtl" : "ltr";
+                div.style.textAlign = "center";
+                div.textContent = line;
+                el.appendChild(div);
+            });
+        }
+
+        // دالة عرض التنبيهات الأنيقة بدون اسم الموقع
         function showCustomAlert(title, message, isDanger = true) {
             return new Promise((resolve) => {
                 const modal = document.getElementById("custom-app-modal");
-                document.getElementById("modal-app-title").innerText = title;
-                document.getElementById("modal-app-message").innerText = message;
+                const titleEl = document.getElementById("modal-app-title");
+                titleEl.dir = /[\u0600-\u06FF]/.test(String(title)) ? "rtl" : "ltr";
+                titleEl.innerText = title;
+                setSmartBiDiText(document.getElementById("modal-app-message"), message);
                 document.getElementById("modal-app-input-container").classList.add("d-none");
                 document.getElementById("btn-modal-app-cancel").classList.add("d-none");
 
@@ -593,8 +616,8 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
                         جاري الاتصال بالسيرفر والتحقق من التحديثات...
                     </p>
 
-                    <button type="button" id="btn-muc-update-done" class="btn d-none" style="background:#10B981; color:#fff; font-weight:800; padding:0.75rem; border-radius:12px; margin-top:8px;">
-                        <i class="fa-solid fa-circle-check"></i> <span>حسناً، متابعة (Done)</span>
+<button type="button" id="btn-muc-update-done" class="btn d-none" style="background:#10B981; color:#fff; font-weight:800; padding:0.75rem; border-radius:12px; margin-top:8px;">
+                        <i class="fa-solid fa-circle-check"></i> <span>Done</span>
                     </button>
                 </div>
             `;
@@ -762,11 +785,13 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
         // تحويل أكواد الأخطاء لرسائل مفهومة للطالب
 function friendlyError(err) {
     const m = String(err?.message || err || "");
-    if (m.startsWith("WRONG_LEC_2")) {
-        return "هذه المحاضرة الأولى وأنت مسجل في المحاضرة الثانية. من فضلك تواصل مع الدكتور.\n\nThis is Lecture 1, but you are registered in Lecture 2. Please contact your doctor.";
-    }
-    if (m.startsWith("WRONG_LEC_1")) {
-        return "هذه المحاضرة الثانية وأنت مسجل في المحاضرة الأولى. من فضلك تواصل مع الدكتور.\n\nThis is Lecture 2, but you are registered in Lecture 1. Please contact your doctor.";
+    if (m.startsWith("WRONG_SECTION:")) {
+        const parts = m.split(":");
+        const stdName = parts[1] || "الطالب";
+        const stdSec = parts[2] || "سكشن آخر";
+        const targetSec = parts[3] || "هذا السكشن";
+        const taName = parts[4] ? ` (${parts[4]})` : "";
+        return `🚫 غير مسموح بتسجيل الحضور!\nالطالب (${stdName}) مقيد في [${stdSec}] ولا يمكنه التسجيل في [${targetSec}]${taName}.\n\nYou are registered in [${stdSec}] and cannot check into [${targetSec}].`;
     }
     if (m.startsWith("NOT_ENROLLED:")) {
         const parts = m.split(":");
@@ -955,6 +980,8 @@ const stdData = res.stdSnap.data() || {};
                     try {
                         const myCourses = stdData.enrolledCourses || [];
                         localStorage.setItem("muc_student_courses", JSON.stringify(myCourses));
+                        localStorage.setItem("muc_student_sections", JSON.stringify(stdData.sections || {}));
+                        localStorage.setItem("muc_student_group", stdData.section || stdData.group || "");
                         const { collection, query, where, limit, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
                         const mapCache = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}");
                         myCourses.forEach(cid => {
@@ -1665,8 +1692,10 @@ let html5QrScanner = null;
 
             playFeedbackSound(isSuccess);
 
-            document.getElementById("status-title").innerText = title;
-            document.getElementById("status-msg").innerText = msg;
+const stTitleEl = document.getElementById("status-title");
+            stTitleEl.dir = /[\u0600-\u06FF]/.test(String(title)) ? "rtl" : "ltr";
+            stTitleEl.innerText = title;
+            setSmartBiDiText(document.getElementById("status-msg"), msg);
         }
 
         document.getElementById("btn-retry").addEventListener("click", async () => {

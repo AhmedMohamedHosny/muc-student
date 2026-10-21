@@ -222,7 +222,98 @@ export function isValidPinChecksum(pin) {
 }
 
 export function checkPinLectureMatch(pin, studentId) {
-    return null; // التحقق يتم فعلياً من قيد الطالب في المقرر والسكشن على السيرفر
+    return null;
+}
+
+// مطابقة ذكية لأرقام وأسماء السكاشن (مثال: Section 01 = سكشن 1 = جروب 1، ويرفض Section 03)
+export function doSectionGroupsMatch(stdGrpRaw, sessGrpRaw) {
+    const toEnDigits = (s) => String(s || "").replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).trim().toLowerCase();
+    const a = toEnDigits(stdGrpRaw);
+    const b = toEnDigits(sessGrpRaw);
+    if (!a || !b) return true;
+    if (a === b) return true;
+
+    const getDeptTag = (str) => {
+        if (/comp|حاسب|cse/.test(str)) return "comp";
+        if (/eee|elec|كهرب/.test(str)) return "eee";
+        if (/robo|روبوت|mecha/.test(str)) return "robo";
+        if (/arch|معمار/.test(str)) return "arch";
+        return "";
+    };
+    const deptA = getDeptTag(a);
+    const deptB = getDeptTag(b);
+    if (deptA && deptB && deptA !== deptB) return false;
+
+    const numA = a.match(/\d+/);
+    const numB = b.match(/\d+/);
+    if (numA && numB) {
+        return parseInt(numA[0], 10) === parseInt(numB[0], 10);
+    }
+    return a === b;
+}
+
+// استخراج سكشن ومعيد الطالب في المقرر الحالي ومقارنته بجلسة السكشن/المعمل المفتوحة
+export function verifyStudentSectionAndTA(studentData, sessionData) {
+    if (!studentData || !sessionData) return;
+
+    const sessType = String(sessionData.sessionType || "").toLowerCase();
+    const hostRole = String(sessionData.hostRole || "").toLowerCase();
+    const rawSessGroup = String(sessionData.group || "").trim();
+    const isLectureGroupLabel = /^(محاضره|محاضرة|lecture|lec)\s*\d*$/i.test(rawSessGroup);
+
+    // الفحص يطبق على السكاشن والمعامل وجلسات المعيدين فقط (وليس محاضرات الدكتور العامة)
+    const isSectionOrLab = sessType === "section" || sessType === "lab" || hostRole === "ta" || (rawSessGroup && !isLectureGroupLabel);
+    if (!isSectionOrLab) return;
+
+    const cid = String(sessionData.courseId || "").trim().toLowerCase();
+    const ccode = String(sessionData.courseCode || "").trim().toLowerCase();
+    const isPraxis = cid.includes("praxis") || ccode.includes("praxis") || cid.includes("cse212");
+    const sections = studentData.sections || {};
+
+    let stdGroup = "";
+    let stdTaId = "";
+
+    // 1. البحث في سكشن المقرر الحالي للطالب
+    for (const [k, v] of Object.entries(sections)) {
+        const lk = String(k).trim().toLowerCase();
+        if (lk === cid || (ccode && lk === ccode) || (isPraxis && (lk.includes("praxis") || lk.includes("cse212")))) {
+            if (typeof v === "string") {
+                stdGroup = v.trim();
+            } else if (v && typeof v === "object") {
+                stdGroup = String(v.group || v.groupName || v.section || "").trim();
+                stdTaId = String(v.taId || "").trim();
+            }
+            break;
+        }
+    }
+
+    // 2. احتياطي من السكشن العام للطالب إذا لم يكن مسجلاً تحت اسم المادة مباشرة
+    if (!stdGroup) {
+        stdGroup = String(studentData.section || studentData.group || "").trim();
+    }
+    if (!stdGroup) {
+        const firstSec = Object.values(sections)[0];
+        if (typeof firstSec === "string") stdGroup = firstSec.trim();
+        else if (firstSec && typeof firstSec === "object") {
+            stdGroup = String(firstSec.group || firstSec.groupName || firstSec.section || "").trim();
+        }
+    }
+
+    const studentRealName = studentData.name || studentData.studentId || "الطالب";
+
+    // أ) إذا كان السكشن المفتوح محدداً برقم سكشن/مجموعة (مثل سكشن 3) والطالب في سكشن آخر (مثل سكشن 1) -> رفض فوري!
+    if (rawSessGroup && !isLectureGroupLabel && stdGroup) {
+        if (!doSectionGroupsMatch(stdGroup, rawSessGroup)) {
+            throw new Error(`WRONG_SECTION:${studentRealName}:${stdGroup}:${rawSessGroup}:${sessionData.doctorName || ""}`);
+        }
+    }
+
+    // ب) إذا كان الطالب مربوطاً بمعيد محدد في هذه المادة والسكشن مفتوح من معيد آخر لمجموعة أخرى -> رفض فوري!
+    if (hostRole === "ta" && stdTaId && sessionData.doctorId && stdTaId !== sessionData.doctorId) {
+        if (!rawSessGroup || !stdGroup || !doSectionGroupsMatch(stdGroup, rawSessGroup)) {
+            throw new Error(`WRONG_SECTION:${studentRealName}:${stdGroup || "مجموعة أخرى"}:${rawSessGroup || "سكشن المعيد الحالي"}:${sessionData.doctorName || ""}`);
+        }
+    }
 }
 
 const activeSubmissionLocks = new Set();
@@ -412,9 +503,12 @@ export async function recordStudentAttendance(sessionId, clientToken, studentIdI
                 return lk === lowerCourseId || (lowerCourseCode && lk === lowerCourseCode);
             }));
 
-        if (!isEnrolled) {
+if (!isEnrolled) {
             throw new Error(`NOT_ENROLLED:${studentRealName}:${sessionData.courseName || "هذا المقرر"}`);
         }
+
+        // فحص صارم للسكشن والمعيد: منع طالب سكشن 1 من التسجيل في سكشن 3
+        verifyStudentSectionAndTA(studentData, sessionData);
 
         if (deviceDoc && deviceDoc.exists()) {
             const devData = deviceDoc.data();
