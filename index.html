@@ -285,22 +285,24 @@ background: #FDF2F3;
 </head>
 
 <body style="padding-bottom: 50px;">
-<!-- شريط الترحيب وزر التحديث الفوري لآخر إصدار -->
-<div id="student-welcome-bar" class="d-none" style="position: fixed; top: 10px; left: 50%; transform: translateX(-50%); width: calc(100% - 2rem); max-width: 460px; z-index: 9999; background: rgba(25, 2, 5, 0.85); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(197, 155, 39, 0.65); border-radius: 14px; padding: 8px 12px; box-shadow: 0 8px 25px rgba(0,0,0,0.45);" dir="rtl">
-    <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-        <div style="text-align: right; line-height: 1.35; min-width: 0; flex: 1;">
-            <div style="font-size: 0.82rem; font-weight: 800; color: #ffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                👋 مرحباً، <span id="welcome-student-name" dir="auto" style="color: #FDE68A; font-weight: 800;">طالب الجامعة</span>
-            </div>
-            <div style="font-size: 0.73rem; color: #E2E8F0; font-weight: 600;">
-                الرقم الجامعي: <span id="welcome-student-id" style="color: #C59B27; font-family: monospace; font-weight: 800; font-size: 0.82rem;">--</span>
-            </div>
+<!-- شريط الترحيب بنظام السطرين: الاسم كامل بالعرض والزراير بالأسفل -->
+<div id="student-welcome-bar" class="d-none" style="position: fixed; top: 10px; left: 50%; transform: translateX(-50%); width: calc(100% - 1.5rem); max-width: 460px; z-index: 9999; background: rgba(22, 2, 5, 0.90); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1.5px solid rgba(197, 155, 39, 0.7); border-radius: 14px; padding: 8px 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" dir="rtl">
+    <!-- السطر الأول: الاسم واخد العرض الكامل وخط مرن يصغر تلقائياً بدون تقطيع -->
+    <div style="width: 100%; text-align: right; margin-bottom: 5px; white-space: nowrap; overflow: hidden; display: flex; align-items: center;">
+        <span style="font-size: clamp(0.72rem, 3.2vw, 0.88rem); font-weight: 800; color: #ffffff; flex-shrink: 0;">👋 مرحباً،&nbsp;</span>
+        <span id="welcome-student-name" dir="auto" style="font-size: clamp(0.72rem, 3.2vw, 0.88rem); color: #FDE68A; font-weight: 900; letter-spacing: 0.2px; text-overflow: ellipsis; overflow: hidden;">طالب الجامعة</span>
+    </div>
+
+    <!-- السطر الثاني: الرقم الجامعي يمين وزراير التحديث والتوثيق يسار -->
+    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 5px;">
+        <div style="font-size: 0.76rem; color: #E2E8F0; font-weight: 700;">
+            الرقم الجامعي: <span id="welcome-student-id" style="color: #C59B27; font-family: monospace; font-weight: 900; font-size: 0.84rem; letter-spacing: 0.5px;">--</span>
         </div>
-        <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
-            <button type="button" id="btn-force-update-app" style="background: rgba(197, 155, 39, 0.25); border: 1px solid #C59B27; color: #FDE68A; padding: 4px 9px; border-radius: 8px; font-size: 0.7rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="تحديث النسخة والكاش فوراً">
+        <div style="display: flex; align-items: center; gap: 6px;">
+            <button type="button" id="btn-force-update-app" style="background: rgba(197, 155, 39, 0.22); border: 1px solid #C59B27; color: #FDE68A; padding: 3px 8px; border-radius: 6px; font-size: 0.68rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="تحديث النسخة والكاش فوراً">
                 <i class="fa-solid fa-arrows-rotate"></i> <span>تحديث</span>
             </button>
-            <span style="background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(16, 185, 129, 0.45); color: #6EE7B7; padding: 4px 8px; border-radius: 8px; font-size: 0.68rem; font-weight: 800; white-space: nowrap;">
+            <span style="background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(16, 185, 129, 0.45); color: #6EE7B7; padding: 3px 7px; border-radius: 6px; font-size: 0.66rem; font-weight: 800; display: inline-flex; align-items: center; gap: 3px;">
                 <i class="fa-solid fa-shield-halved"></i> موثق
             </span>
         </div>
