@@ -285,19 +285,26 @@ background: #FDF2F3;
 </head>
 
 <body style="padding-bottom: 50px;">
-<!-- شريط الترحيب ثابت فوق خالص في الشاشة الحمراء (بدون زر تعديل نهائياً) -->
-<div id="student-welcome-bar" class="d-none" style="position: fixed; top: 12px; left: 50%; transform: translateX(-50%); width: calc(100% - 2rem); max-width: 460px; z-index: 9999; background: rgba(25, 2, 5, 0.72); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(197, 155, 39, 0.55); border-radius: 14px; padding: 9px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.3);" dir="rtl">
-    <div style="text-align: right; line-height: 1.4;">
-        <div style="font-size: 0.8rem; font-weight: 800; color: #ffffff;">
-            👋 مرحباً، <span id="welcome-student-name" dir="auto" style="color: #FDE68A; font-weight: 800;">طالب الجامعة</span>
+<!-- شريط الترحيب وزر التحديث الفوري لآخر إصدار -->
+<div id="student-welcome-bar" class="d-none" style="position: fixed; top: 10px; left: 50%; transform: translateX(-50%); width: calc(100% - 2rem); max-width: 460px; z-index: 9999; background: rgba(25, 2, 5, 0.85); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(197, 155, 39, 0.65); border-radius: 14px; padding: 8px 12px; box-shadow: 0 8px 25px rgba(0,0,0,0.45);" dir="rtl">
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+        <div style="text-align: right; line-height: 1.35; min-width: 0; flex: 1;">
+            <div style="font-size: 0.82rem; font-weight: 800; color: #ffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                👋 مرحباً، <span id="welcome-student-name" dir="auto" style="color: #FDE68A; font-weight: 800;">طالب الجامعة</span>
+            </div>
+            <div style="font-size: 0.73rem; color: #E2E8F0; font-weight: 600;">
+                الرقم الجامعي: <span id="welcome-student-id" style="color: #C59B27; font-family: monospace; font-weight: 800; font-size: 0.82rem;">--</span>
+            </div>
         </div>
-        <div style="font-size: 0.73rem; color: #E2E8F0; font-weight: 600;">
-            الرقم الجامعي: <span id="welcome-student-id" style="color: #C59B27; font-family: monospace; font-weight: 800; font-size: 0.8rem;">--</span>
+        <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+            <button type="button" id="btn-force-update-app" style="background: rgba(197, 155, 39, 0.25); border: 1px solid #C59B27; color: #FDE68A; padding: 4px 9px; border-radius: 8px; font-size: 0.7rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="تحديث النسخة والكاش فوراً">
+                <i class="fa-solid fa-arrows-rotate"></i> <span>تحديث</span>
+            </button>
+            <span style="background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(16, 185, 129, 0.45); color: #6EE7B7; padding: 4px 8px; border-radius: 8px; font-size: 0.68rem; font-weight: 800; white-space: nowrap;">
+                <i class="fa-solid fa-shield-halved"></i> موثق
+            </span>
         </div>
     </div>
-    <span style="background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(16, 185, 129, 0.45); color: #6EE7B7; padding: 4px 10px; border-radius: 8px; font-size: 0.68rem; font-weight: 800; white-space: nowrap; flex-shrink: 0;">
-        <i class="fa-solid fa-shield-halved"></i> موثق بالهاتف
-    </span>
 </div>
 
 <!-- شاشة الأنيميشن الفخمة لتأكيد ربط الـ ID بالهاتف نهائياً (Yes / No) -->
@@ -526,7 +533,57 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
                 };
             });
         }
+// 🔄 محرك التحديث الجبري وتطهير الكاش للموبايل مع الحفاظ على بصمة الطالب وهاتفه
+        async function runForceAppUpdate(btn) {
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = `<i class="fa-solid fa-arrows-rotate fa-spin"></i> <span>جاري التحديث...</span>`;
+            }
 
+            try {
+                // 1. مسح كاشات التخزين للمتصفح بالكامل (Cache Storage)
+                if ("caches" in window) {
+                    const cacheKeys = await caches.keys();
+                    await Promise.all(cacheKeys.map(k => caches.delete(k)));
+                }
+
+                // 2. إلغاء تسجيل الـ Service Worker القديم المعلق في خلفية الهاتف
+                if ("serviceWorker" in navigator) {
+                    const registrations = await navigator.serviceWorker.getRegistrations();
+                    for (const reg of registrations) {
+                        await reg.unregister();
+                    }
+                }
+
+                // 3. تأمين بقاء بيانات الطالب وهاتفه المربوط وتنظيف أي كاشات مقررات معلقة
+                const sid = localStorage.getItem("muc_saved_student_id");
+                const sname = localStorage.getItem("muc_saved_student_name");
+                const hwKey = localStorage.getItem("muc_hw_bound_key");
+                const devFp = localStorage.getItem("muc_device_fingerprint");
+                const claimed = sid ? localStorage.getItem(`muc_lock_claimed_${sid}`) : null;
+
+                localStorage.removeItem("muc_course_names_map");
+                localStorage.removeItem("muc_student_courses");
+                localStorage.removeItem("muc_sync_error");
+
+                if (sid) localStorage.setItem("muc_saved_student_id", sid);
+                if (sname) localStorage.setItem("muc_saved_student_name", sname);
+                if (hwKey) localStorage.setItem("muc_hw_bound_key", hwKey);
+                if (devFp) localStorage.setItem("muc_device_fingerprint", devFp);
+                if (claimed && sid) localStorage.setItem(`muc_lock_claimed_${sid}`, claimed);
+
+            } catch (err) {
+                console.warn("Update cache notice:", err);
+            }
+
+            // 4. إعادة تحميل الصفحة مباشرة من السيرفر وتخطي كاش الـ HTTP تماماً
+            const cleanUrl = window.location.origin + window.location.pathname;
+            window.location.replace(`${cleanUrl}?v=${Date.now()}`);
+        }
+
+        document.getElementById("btn-force-update-app")?.addEventListener("click", function() {
+            runForceAppUpdate(this);
+        });
         // دالة إدخال البيانات الأنيقة بدون prompt
         function showCustomPrompt(title, message, defaultValue = "") {
             return new Promise((resolve) => {

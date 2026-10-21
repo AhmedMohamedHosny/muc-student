@@ -98,21 +98,19 @@ export function getCoursePinIndex(courseId) {
 }
 
 export function cleanCourseDisplayName(name) {
-    const s = String(name || "");
+    const s = String(name || "").trim();
+    if (!s) return "";
     if (s.toLowerCase().includes("praxis")) return "Praxis Programming";
-    return s.replace(/\s*[-–—]?\s*(محاضرة|Lecture|Lec)\s*[12]/gi, "").trim() || "المقرر الدراسي";
+    return s.replace(/\s*[-–—]?\s*(محاضرة|Lecture|Lec)\s*[12]/gi, "").trim();
 }
 
 const KNOWN_MUC_COURSES = {
-    "praxis_programming_lec1": "Praxis Programming",
-    "praxis_programming_lec2": "Praxis Programming",
     "cse216": "Web Design and Database (CSE216)",
-    "cse_web_design": "Web Design and Database (CSE216)",
-    "CSE_UC": "User Centered Design",
-    "cse_uc": "User Centered Design",
-    "user_centered_design": "User Centered Design",
+    "user_centered": "User Centered Design",
     "cse_modern_workshop": "Modern Workshop",
-    "cse122": "Logic Design (CSE122)"
+    "cse122": "Logic Design (CSE122)",
+    "praxis_programming_lec1": "Praxis Programming (Lec 1)",
+    "praxis_programming_lec2": "Praxis Programming (Lec 2)"
 };
 
 function formatReadableCourseId(cid) {
@@ -136,6 +134,7 @@ export function decodePinMetadata(pin) {
         const cachedMap = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}");
         const enrolled = JSON.parse(localStorage.getItem("muc_student_courses") || "[]");
 
+        // 1. فحص مقررات الطالب المقيد بها أولاً بدقة
         for (const cid of enrolled) {
             if (getCoursePinIndex(cid) === courseIdx) {
                 courseId = cid;
@@ -143,6 +142,7 @@ export function decodePinMetadata(pin) {
                 break;
             }
         }
+        // 2. فحص كاش المقررات المحفوظ في الهاتف
         if (!courseName) {
             for (const [cid, cname] of Object.entries(cachedMap)) {
                 if (getCoursePinIndex(cid) === courseIdx) {
@@ -152,6 +152,7 @@ export function decodePinMetadata(pin) {
                 }
             }
         }
+        // 3. فحص القائمة المعرفة رسمياً
         if (!courseName) {
             for (const [cid, cname] of Object.entries(KNOWN_MUC_COURSES)) {
                 if (getCoursePinIndex(cid) === courseIdx) {
@@ -163,12 +164,14 @@ export function decodePinMetadata(pin) {
         }
     } catch (e) {}
 
+    const resolvedName = cleanCourseDisplayName(courseName) || formatReadableCourseId(courseId) || "المقرر الدراسي";
+
     return {
         isOfflineModePin,
         lectureNumber: extractedLecNum,
         courseIdx,
         courseId: courseId || "MUC_COURSE",
-        courseName: cleanCourseDisplayName(courseName || "Praxis Programming")
+        courseName: resolvedName
     };
 }
 
