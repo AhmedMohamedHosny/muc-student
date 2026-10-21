@@ -468,7 +468,7 @@ background: #FDF2F3;
     </div>
     <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
     <script type="module">
-import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum, decodePinMetadata, verifyPinOnServerFast, getCoursePinIndex } from "./firebase.js?v=24";
+import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum, decodePinMetadata, verifyPinOnServerFast, getCoursePinIndex } from "./firebase.js";
         // 🌐 Language Switcher Logic
         let currentLang = "en";
         document.getElementById("btn-lang-toggle")?.addEventListener("click", () => {
@@ -482,14 +482,17 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance,
                 el.style.textAlign = isAr ? "right" : "left";
             });
         });
-// 🚀 تسجيل وتحديث الـ Service Worker فوراً لسحب أحدث نسخة
-if ("serviceWorker" in navigator) {
-            navigator.serviceWorker.register("./sw.js").then((reg) => {
-                // فحص وجود تحديث جديد بالسيرفر فوراً
+// 🚀 تسجيل وتحديث الـ Service Worker إجبارياً في الخلفية بدون تدخل الطالب
+        if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" }).then((reg) => {
                 reg.update();
+                // فحص التحديث تلقائياً كلما فتح الطالب شاشة الموبايل أو عاد الإنترنت
+                document.addEventListener("visibilitychange", () => {
+                    if (document.visibilityState === "visible" && navigator.onLine) reg.update();
+                });
+                window.addEventListener("online", () => reg.update());
             });
 
-            // أول ما الكاش القديم يمسح نفسه بالسيرفيس ووركر الجديد، ريفريش لحظي
             let refreshing = false;
             navigator.serviceWorker.addEventListener("controllerchange", () => {
                 if (!refreshing) {
