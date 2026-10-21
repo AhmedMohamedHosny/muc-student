@@ -360,7 +360,7 @@ background: #FDF2F3;
 
 <div class="card" style="margin-top: 55px;">
 
-        <img src="logo.png" alt="MUC Logo" class="logo">
+<img src="logo.png" onerror="this.onerror=null;this.src='logo.jpg';" alt="MUC Logo" class="logo">
         <div id="course-badge" class="session-badge">Smart Live Attendance</div>
 
         <div id="pending-banner" class="d-none" style="background:#FEF3C7; border:1px solid #F59E0B; color:#92400E; border-radius:10px; padding:10px 12px; margin-bottom:12px; text-align:left;">
@@ -555,52 +555,181 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
                 };
             });
         }
-// 🔄 محرك التحديث الجبري وتطهير الكاش للموبايل مع الحفاظ على بصمة الطالب وهاتفه
+// 🔮 نافذة العداد الدائري المودرن للتحديثات
+        function createUpdateProgressModal() {
+            let modal = document.getElementById("muc-update-modal");
+            if (modal) modal.remove();
+
+            modal = document.createElement("div");
+            modal.id = "muc-update-modal";
+            modal.style.cssText = "position:fixed; inset:0; background:rgba(15,2,5,0.88); z-index:100000; display:flex; align-items:center; justify-content:center; padding:1.2rem; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);";
+            modal.dir = "rtl";
+            modal.innerHTML = `
+                <div style="background:#ffffff; color:#0F172A; border-radius:24px; width:100%; max-width:380px; padding:2rem 1.5rem; text-align:center; box-shadow:0 30px 60px rgba(0,0,0,0.6); border-top:6px solid #C59B27; animation:mucCircleScale 0.4s ease-out forwards;">
+                    <!-- الدائرة الفخمة مع العداد -->
+                    <div style="position:relative; width:130px; height:130px; margin:0 auto 1.25rem;">
+                        <svg style="width:130px; height:130px; transform:rotate(-90deg);" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="42" fill="none" stroke="#F1F5F9" stroke-width="8"></circle>
+                            <circle id="muc-update-circle-bar" cx="50" cy="50" r="42" fill="none" stroke="url(#mucUpdateGrad)" stroke-width="8" stroke-linecap="round" stroke-dasharray="264" stroke-dashoffset="264" style="transition: stroke-dashoffset 0.15s ease;"></circle>
+                            <defs>
+                                <linearGradient id="mucUpdateGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" stop-color="#C59B27"/>
+                                    <stop offset="100%" stop-color="#10B981"/>
+                                </linearGradient>
+                            </defs>
+                        </svg>
+                        <div style="position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                            <span id="muc-update-percent-val" style="font-size:1.6rem; font-weight:900; color:#7A0C16; font-family:monospace; line-height:1;">0%</span>
+                            <div id="muc-update-center-icon-wrap" style="margin-top:4px;">
+                                <i id="muc-update-center-icon" class="fa-solid fa-arrows-rotate fa-spin" style="color:#C59B27; font-size:1.05rem;"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h3 id="muc-update-title" style="font-size:1.15rem; font-weight:800; color:#7A0C16; margin-bottom:6px;">
+                        جاري فحص وتحديث المنظومة...
+                    </h3>
+                    <p id="muc-update-status" style="font-size:0.86rem; color:#64748B; font-weight:700; line-height:1.5; min-height:42px; margin-bottom:12px;">
+                        جاري الاتصال بالسيرفر والتحقق من التحديثات...
+                    </p>
+
+                    <button type="button" id="btn-muc-update-done" class="btn d-none" style="background:#10B981; color:#fff; font-weight:800; padding:0.75rem; border-radius:12px; margin-top:8px;">
+                        <i class="fa-solid fa-circle-check"></i> <span>حسناً، متابعة (Done)</span>
+                    </button>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            return modal;
+        }
+
+        // 🔄 محرك التحديث الذكي: حماية الأوفلاين + عداد دائري + كشف التحديثات
         async function runForceAppUpdate(btn) {
-            if (btn) {
-                btn.disabled = true;
-                btn.innerHTML = `<i class="fa-solid fa-arrows-rotate fa-spin"></i> <span>جاري التحديث...</span>`;
+            // 1. فحص الاتصال بالإنترنت أولاً (حماية الأوفلاين)
+            if (!navigator.onLine) {
+                await showCustomAlert(
+                    "لا يتوفر اتصال بالإنترنت",
+                    "شغّل الإنترنت يا بشمهندس وافتح Wi-Fi أو بيانات الهاتف وحاول تاني علشان ينزلك كل التحديثات الجديدة!\n\n(الموقع شغال معاك أوفلاين حالياً طبيعي جداً بدون أي مشاكل)",
+                    false
+                );
+                return;
             }
 
+            // فحص جودة الاتصال الفعلي بالسيرفر
+            let isServerReachable = false;
             try {
-                // 1. مسح كاشات التخزين للمتصفح بالكامل (Cache Storage)
-                if ("caches" in window) {
-                    const cacheKeys = await caches.keys();
-                    await Promise.all(cacheKeys.map(k => caches.delete(k)));
+                const ping = await Promise.race([
+                    fetch("./sw.js?ping=" + Date.now(), { method: "HEAD", cache: "no-store" }),
+                    new Promise((_, rej) => setTimeout(() => rej(new Error("TIMEOUT")), 3000))
+                ]);
+                if (ping && (ping.ok || ping.status === 200 || ping.type === "opaque")) {
+                    isServerReachable = true;
                 }
+            } catch (_) {
+                isServerReachable = false;
+            }
 
-                // 2. إلغاء تسجيل الـ Service Worker القديم المعلق في خلفية الهاتف
+            if (!isServerReachable) {
+                await showCustomAlert(
+                    "إشارة الإنترنت غير مستقرة",
+                    "شغّل الإنترنت يا بشمهندس وحاول تاني علشان ينزلك كل التحديثات!\n\n(الموقع شغال معاك أوفلاين حالياً بدون أي مشاكل)",
+                    false
+                );
+                return;
+            }
+
+            // 2. تشغيل نافذة الدائرة والعداد الخرافي
+            const modal = createUpdateProgressModal();
+            const circleBar = document.getElementById("muc-update-circle-bar");
+            const percentVal = document.getElementById("muc-update-percent-val");
+            const titleEl = document.getElementById("muc-update-title");
+            const statusEl = document.getElementById("muc-update-status");
+            const doneBtn = document.getElementById("btn-muc-update-done");
+            const iconWrap = document.getElementById("muc-update-center-icon-wrap");
+
+            const circumference = 264; // محيط الدائرة (2 * PI * 42)
+            let currentPct = 0;
+
+            const setProgress = (pct, titleText, statusText) => {
+                currentPct = Math.min(100, Math.max(0, pct));
+                if (percentVal) percentVal.innerText = `${Math.round(currentPct)}%`;
+                if (circleBar) {
+                    const offset = circumference - (currentPct / 100) * circumference;
+                    circleBar.style.strokeDashoffset = offset;
+                }
+                if (titleText && titleEl) titleEl.innerText = titleText;
+                if (statusText && statusEl) statusEl.innerText = statusText;
+            };
+
+            // تشغيل انسيابي للعداد
+            setProgress(15, "جاري فحص التحديثات السحابية...", "الاتصال بسيرفر الجامعة والتحقق من الإصدار...");
+
+            let hasNewUpdate = false;
+
+            try {
+                // فحص Service Worker
                 if ("serviceWorker" in navigator) {
-                    const registrations = await navigator.serviceWorker.getRegistrations();
-                    for (const reg of registrations) {
-                        await reg.unregister();
+                    const reg = await navigator.serviceWorker.getRegistration();
+                    if (reg) {
+                        await reg.update();
+                        if (reg.installing || reg.waiting) {
+                            hasNewUpdate = true;
+                        }
                     }
                 }
 
-                // 3. تأمين بقاء بيانات الطالب وهاتفه المربوط وتنظيف أي كاشات مقررات معلقة
-                const sid = localStorage.getItem("muc_saved_student_id");
-                const sname = localStorage.getItem("muc_saved_student_name");
-                const hwKey = localStorage.getItem("muc_hw_bound_key");
-                const devFp = localStorage.getItem("muc_device_fingerprint");
-                const claimed = sid ? localStorage.getItem(`muc_lock_claimed_${sid}`) : null;
+                await new Promise(r => setTimeout(r, 400));
+                setProgress(45, "جاري فحص وتأمين ملفات المنظومة...", "تنزيل الأصول البرمجية وتحديث الشاشات...");
 
-                localStorage.removeItem("muc_course_names_map");
-                localStorage.removeItem("muc_student_courses");
-                localStorage.removeItem("muc_sync_error");
+                // تحديث وتأمين الكاش بأمان دون تدمير التطبيق أوفلاين
+                if ("caches" in window) {
+                    const cache = await caches.open("muc-student-offline-v26");
+                    const assets = [
+                        "./index.html",
+                        "./firebase.js",
+                        "./config.js",
+                        "./logo.png",
+                        "./logo.jpg",
+                        "./may.jpg",
+                        "./manifest.json"
+                    ];
+                    for (const u of assets) {
+                        try {
+                            const fresh = await fetch(new Request(u, { cache: "reload" }));
+                            if (fresh && fresh.status === 200) {
+                                await cache.put(u, fresh);
+                            }
+                        } catch (_) {}
+                    }
+                }
 
-                if (sid) localStorage.setItem("muc_saved_student_id", sid);
-                if (sname) localStorage.setItem("muc_saved_student_name", sname);
-                if (hwKey) localStorage.setItem("muc_hw_bound_key", hwKey);
-                if (devFp) localStorage.setItem("muc_device_fingerprint", devFp);
-                if (claimed && sid) localStorage.setItem(`muc_lock_claimed_${sid}`, claimed);
+                await new Promise(r => setTimeout(r, 400));
+                setProgress(80, "جاري حفظ نسخة الأوفلاين...", "تأمين عمل المنظومة بدون إنترنت في قاعات ومدرجات الكلية...");
+                await new Promise(r => setTimeout(r, 500));
+                setProgress(100, "اكتمل الفحص والتحديث!", "تمت العملية بنجاح.");
 
             } catch (err) {
-                console.warn("Update cache notice:", err);
+                console.warn("Update process notice:", err);
             }
 
-            // 4. إعادة تحميل الصفحة مباشرة من السيرفر وتخطي كاش الـ HTTP تماماً
-            const cleanUrl = window.location.origin + window.location.pathname;
-            window.location.replace(`${cleanUrl}?v=${Date.now()}`);
+            // 3. النتيجة النهائية
+            if (hasNewUpdate) {
+                // لو فيه تحديث نزل فعلاً
+                if (iconWrap) iconWrap.innerHTML = `<i class="fa-solid fa-cloud-arrow-down" style="color:#10B981; font-size:1.3rem;"></i>`;
+                if (titleEl) titleEl.innerText = "تم تنزيل تحديث جديد! 🎉";
+                if (statusEl) statusEl.innerText = "تم حفظ وتأمين أحدث نسخة للمنظومة على هاتفك للعمل أوفلاين وأونلاين!\nجاري فتح النسخة الجديدة...";
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1600);
+            } else {
+                // لو الطالب بالفعل منزل أحدث حاجة
+                if (iconWrap) iconWrap.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10B981; font-size:1.3rem;"></i>`;
+                if (titleEl) titleEl.innerText = "المنظومة محدثة بالكامل! ✨";
+                if (statusEl) statusEl.innerText = "أنت بالفعل على أحدث نسخة معتمدة ولا توجد تحديثات جديدة!\n\nهاتفك جاهز ومؤمن 100% لتسجيل الحضور في أي محاضرة أوفلاين أو أونلاين.";
+                if (doneBtn) {
+                    doneBtn.classList.remove("d-none");
+                    doneBtn.onclick = () => modal.remove();
+                }
+            }
         }
 
         document.getElementById("btn-force-update-app")?.addEventListener("click", function() {
