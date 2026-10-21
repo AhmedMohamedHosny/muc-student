@@ -484,17 +484,25 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance,
                 el.style.textAlign = isAr ? "right" : "left";
             });
         });
-// 🚀 تسجيل وتحديث الـ Service Worker إجبارياً في الخلفية بدون تدخل الطالب
+// 🚀 فحص التحديثات تلقائياً كل دقيقة إجبارياً في الخلفية
         if ("serviceWorker" in navigator) {
             navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" }).then((reg) => {
+                // فحص فوري عند فتح الصفحة
                 reg.update();
-                // فحص التحديث تلقائياً كلما فتح الطالب شاشة الموبايل أو عاد الإنترنت
+
+                // فحص دوري كل دقيقة في الخلفية حتى لو الطالب مبيلمسش الموبايل
+                setInterval(() => {
+                    if (navigator.onLine) reg.update();
+                }, 60000);
+
+                // فحص أول ما الطالب يرجع للتبويب أو يعود النت
                 document.addEventListener("visibilitychange", () => {
                     if (document.visibilityState === "visible" && navigator.onLine) reg.update();
                 });
                 window.addEventListener("online", () => reg.update());
             });
 
+            // أول ما السيرفيس ووركر الجديد ينزل ويمسح الكاش، المتصفح يرستر فوراً لوحده
             let refreshing = false;
             navigator.serviceWorker.addEventListener("controllerchange", () => {
                 if (!refreshing) {
