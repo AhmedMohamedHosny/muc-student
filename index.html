@@ -483,10 +483,19 @@ import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance,
             });
         });
 // 🚀 تسجيل وتحديث الـ Service Worker فوراً لسحب أحدث نسخة
-        if ("serviceWorker" in navigator) {
-            navigator.serviceWorker.register("./sw.js?v=24").then((reg) => {
-                reg.update().catch(() => {});
-                console.log("Service Worker Active & Updated ✅");
+if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.register("./sw.js").then((reg) => {
+                // فحص وجود تحديث جديد بالسيرفر فوراً
+                reg.update();
+            });
+
+            // أول ما الكاش القديم يمسح نفسه بالسيرفيس ووركر الجديد، ريفريش لحظي
+            let refreshing = false;
+            navigator.serviceWorker.addEventListener("controllerchange", () => {
+                if (!refreshing) {
+                    refreshing = true;
+                    window.location.reload();
+                }
             });
         }
 
