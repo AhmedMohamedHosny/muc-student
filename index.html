@@ -364,9 +364,11 @@ background: #FDF2F3;
                     <i class="fa-solid fa-cloud-arrow-up"></i>
                     <span id="btn-sync-text">Sync Attendance Now</span>
                 </button>
-                <button type="button" id="btn-clear-pending" class="btn" style="background:#FEE2E2; color:#DC2626; border:1px solid #FECACA; padding:0.7rem 0.9rem; font-size:0.9rem; width:auto; border-radius:10px;" title="مسح السجل المعلق">
-                    <i class="fa-solid fa-trash-can"></i>
-                </button>
+<!--
+<button type="button" id="btn-clear-pending" class="btn" style="background:#FEE2E2; color:#DC2626; border:1px solid #FECACA; padding:0.7rem 0.9rem; font-size:0.9rem; width:auto; border-radius:10px;" title="مسح السجل المعلق">
+    <i class="fa-solid fa-trash-can"></i>
+</button>
+-->
             </div>
             <p id="sync-feedback" style="font-size:0.78rem; margin-top:6px; font-weight:700;"></p>
         </div>
@@ -1519,11 +1521,13 @@ let html5QrScanner = null;
         }
 
         document.getElementById("btn-sync-now").addEventListener("click", () => runSync(true));
-        document.getElementById("btn-clear-pending")?.addEventListener("click", () => {
-            localStorage.removeItem("muc_pending_records");
-            refreshPendingBanner();
-            document.getElementById("sync-feedback").innerText = "";
-        });
+/*
+document.getElementById("btn-clear-pending")?.addEventListener("click", () => {
+    localStorage.removeItem("muc_pending_records");
+    refreshPendingBanner();
+    document.getElementById("sync-feedback").innerText = "";
+});
+*/
         window.addEventListener("online", () => runSync(false));
         document.addEventListener("visibilitychange", () => {
             if (document.visibilityState === "visible") runSync(false);
