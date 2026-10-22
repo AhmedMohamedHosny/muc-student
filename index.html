@@ -817,9 +817,6 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
             runForceAppUpdate(this);
         });
 
-        document.getElementById("btn-force-update-app")?.addEventListener("click", function() {
-            runForceAppUpdate(this);
-        });
         // دالة إدخال البيانات الأنيقة بدون prompt
         function showCustomPrompt(title, message, defaultValue = "") {
             return new Promise((resolve) => {
@@ -1880,6 +1877,8 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
             const extractedCourseId = decodedPin.courseId;
             const extractedCourseName = decodedPin.courseName;
 
+let pinCheck = null;
+
             try {
                 btnPin.disabled = true;
                 btnPin.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Verifying Code...`;
@@ -1888,19 +1887,19 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                     throw new Error("🌐 هذه المحاضرة أونلاين (مباشرة) وتتطلب اتصالاً بالإنترنت لتسجيل حضورك فوراً على شاشة المدرج!\n\nيرجى فتح بيانات الهاتف (Mobile Data) أو الـ Wi-Fi والمحاولة مرة أخرى.");
                 }
 
-                // 2. فحص السيرفر أولاً إذا كان الطالب متصلاً بالإنترنت
+                // 1. فحص السيرفر أولاً إذا كان الطالب متصلاً بالإنترنت
                 if (navigator.onLine) {
                     try {
-                        const pinCheck = await verifyPinOnServerFast(enteredPin);
+                        pinCheck = await verifyPinOnServerFast(enteredPin);
 
                         if (pinCheck.status === "EXPIRED" || pinCheck.status === "DELETED") {
                             throw new Error(`⏰ انتهت صلاحية الكود الرقمي (${enteredPin}) لأن الرمز تجدد أو أُغلقت المحاضرة!\n\nيرجى كتابة الكود الجديد الظاهر أمامك على الشاشة الآن.`);
                         }
 
                         if (pinCheck.status === "VALID" && pinCheck.sessionId) {
-                            // فحص القيد في المادة الحقيقية للجلسة
-                            const actualCourseId = String(pinCheck.sessionData?.courseId || "").toLowerCase();
-                            const actualCourseName = pinCheck.sessionData?.courseName || "هذا المقرر";
+                            const sData = pinCheck.sessionData || {};
+                            const actualCourseId = String(sData.courseId || "").toLowerCase();
+                            const actualCourseName = sData.courseName || "هذا المقرر";
                             const enrolledLocal = JSON.parse(localStorage.getItem("muc_student_courses") || "[]").map(c => String(c).toLowerCase().trim());
 
                             if (enrolledLocal.length > 0 && actualCourseId && actualCourseId !== "muc_course") {
@@ -1912,12 +1911,19 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                                 }
                             }
 
+                            // فحص السكشن والمعيد (منع طالب سكشن 1 من التسجيل في سكشن 4)
+                            const studentSections = JSON.parse(localStorage.getItem("muc_student_sections") || "{}");
+                            const studentGeneralGroup = localStorage.getItem("muc_student_group") || "";
+                            if (typeof verifyStudentSectionAndTA === "function") {
+                                verifyStudentSectionAndTA({ name: stdName, studentId: studentIdVal, sections: studentSections, group: studentGeneralGroup }, sData);
+                            }
+
                             const res = await recordStudentAttendance(
                                 pinCheck.sessionId,
                                 "PIN_VERIFIED",
                                 studentIdVal,
                                 deviceId,
-                                pinCheck.sessionData
+                                sData
                             );
                             const typeName = res.sessionType === "lab" ? "Lab" : (res.sessionType === "section" ? "Section" : "Lecture");
                             const lecNum = res.lectureNumber || pinCheck.pinMeta?.lectureNumber || extractedLecNum;
@@ -1940,7 +1946,7 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                         }
                     } catch (netErr) {
                         const msg = String(netErr?.message || "");
-                        if (msg.startsWith("NOT_ENROLLED:")) throw netErr;
+                        if (msg.startsWith("NOT_ENROLLED:") || msg.startsWith("WRONG_SECTION:")) throw netErr;
                         if (!isOfflineModePin && (msg === "NETWORK_TIMEOUT" || msg.includes("Failed to fetch") || msg.includes("network-request-failed"))) {
                             throw new Error("🌐 هذه المحاضرة أونلاين (مباشرة) وتتطلب اتصالاً فعلياً بالإنترنت لتسجيل الحضور!\n\nيرجى التأكد من اتصال الإنترنت والمحاولة مرة أخرى.");
                         }
@@ -1948,7 +1954,7 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                     }
                 }
 
-                // 3. وضع الأوفلاين (يصل هنا فقط إذا كان الكود من النوع الأوفلاين)
+                // 2. وضع الأوفلاين (يصل هنا فقط إذا كان الكود مخصصاً للأوفلاين)
                 if (!isOfflineModePin) {
                     throw new Error(`❌ الكود الرقمي (${enteredPin}) غير صحيح أو انتهت صلاحيته!`);
                 }
@@ -1967,13 +1973,43 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                     }
                 }
 
+                // استخراج نوع الجلسة ورقم السكشن بمرونة وأمان
+                let sType = (pinCheck && pinCheck.sessionData && pinCheck.sessionData.sessionType) ? pinCheck.sessionData.sessionType : "";
+                let sGroup = (pinCheck && pinCheck.sessionData && pinCheck.sessionData.group) ? pinCheck.sessionData.group : "";
+
+                // فحص سكشن الطالب محلياً
+                const studentSections = JSON.parse(localStorage.getItem("muc_student_sections") || "{}");
+                const studentGeneralGroup = localStorage.getItem("muc_student_group") || "";
+                let myCourseGroup = "";
+                const targetCidLower = String(extractedCourseId || "").toLowerCase().trim();
+                for (const [k, v] of Object.entries(studentSections)) {
+                    if (String(k).toLowerCase().trim() === targetCidLower || targetCidLower.includes(String(k).toLowerCase().trim())) {
+                        myCourseGroup = typeof v === "string" ? v : (v?.group || v?.groupName || v?.section || "");
+                        break;
+                    }
+                }
+                if (!myCourseGroup) myCourseGroup = studentGeneralGroup;
+
+                // مطابقة السكشن: إذا كان السكشن المفتوح سكشن محدد والطالب من سكشن آخر -> رفض فوري
+                if (sGroup && myCourseGroup && typeof doSectionGroupsMatch === "function") {
+                    if (!doSectionGroupsMatch(myCourseGroup, sGroup)) {
+                        throw new Error(`WRONG_SECTION:${stdName}:${myCourseGroup}:${sGroup}:${pinCheck?.sessionData?.doctorName || ""}`);
+                    }
+                }
+
+                if (!sType) {
+                    sType = (sGroup || myCourseGroup) ? "section" : "lecture";
+                }
+
                 await queueOfflineAttendance({
                     studentId: studentIdVal,
                     studentName: stdName,
-                    sessionId: `pin_${enteredPin}`,
+                    sessionId: (pinCheck && pinCheck.sessionId) ? pinCheck.sessionId : `pin_${enteredPin}`,
                     courseId: extractedCourseId,
                     courseName: extractedCourseName,
                     lectureNumber: extractedLecNum,
+                    sessionType: sType,
+                    group: sGroup || myCourseGroup,
                     timeSlot: 0,
                     hash: "",
                     pin: enteredPin
@@ -1984,9 +2020,12 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                 document.getElementById("rcpt-name").innerText = stdName;
                 document.getElementById("rcpt-id").innerText = studentIdVal;
                 document.getElementById("rcpt-course").innerText = String(extractedCourseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : extractedCourseName;
-const offPinType = (pinCheck && pinCheck.sessionData && pinCheck.sessionData.sessionType === "section") ? "Section" : ((pinCheck && pinCheck.sessionData && pinCheck.sessionData.sessionType === "lab") ? "Lab" : "Lecture");
-                document.getElementById("rcpt-lecture").innerText = `${offPinType} #${extractedLecNum}`;
-                                document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
+
+                // إظهار مسمى السكشن الصحيح (Section #4) بدلاً من كلمة Lecture الثابتة
+                const offDisplayType = sType === "lab" ? "Lab" : (sType === "section" ? "Section" : "Lecture");
+                const offDisplayGrp = (sGroup || myCourseGroup) ? ` (${sGroup || myCourseGroup})` : "";
+                document.getElementById("rcpt-lecture").innerText = `${offDisplayType} #${extractedLecNum}${offDisplayGrp}`;
+                document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
                 document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
                 document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
                 document.getElementById("receipt-box").classList.remove("d-none");
