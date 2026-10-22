@@ -627,11 +627,15 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
         throw new Error("⚠️ رمز الحضور غير صالح، يرجى مسح الباركود مرة أخرى.");
     }
 
-    // فحص قيد الطالب محلياً: منع إضافة أي مقرر غير مسجل به الطالب إلى طابور الانتظار
+// فحص قيد الطالب وسكشنه محلياً في وضع الأوفلاين
     try {
         const enrolled = JSON.parse(localStorage.getItem("muc_student_courses") || "[]").map(c => String(c).toLowerCase().trim());
+        const studentSections = JSON.parse(localStorage.getItem("muc_student_sections") || "{}");
+        const studentGeneralGroup = localStorage.getItem("muc_student_group") || "";
+        const cidLower = String(courseId || "").toLowerCase().trim();
+
+        // 1. فحص القيد في المقرر
         if (enrolled.length > 0) {
-            const cidLower = String(courseId || "").toLowerCase().trim();
             const isPraxis = cidLower.includes("praxis") || String(courseName || "").toLowerCase().includes("praxis");
             const pinIdx = pin ? decodePinMetadata(pin).courseIdx : (cidLower && cidLower !== "muc_course" ? getCoursePinIndex(cidLower) : -1);
 
@@ -640,11 +644,32 @@ export async function queueOfflineAttendance({ studentId, studentName, sessionId
                                (isPraxis && enrolled.some(c => c.includes("praxis") || c.includes("cse212")));
 
             if (!isEnrolled) {
-                throw new Error(`⚠️ غير مسموح: الرقم الجامعي (${cleanedStudentId}) غير مقيد في مقرر (${courseName || courseId})!`);
+                throw new Error(`NOT_ENROLLED:${studentName || cleanedStudentId}:${courseName || courseId}`);
+            }
+        }
+
+        // 2. فحص السكشن الأوفلاين: منع طالب سكشن 1 من التسجيل في سكشن 4
+        const sessGroup = String(group || "").trim();
+        const isSessSection = sessionType === "section" || sessionType === "lab" || (sessGroup && !/^(محاضره|محاضرة|lecture|lec)\s*\d*$/i.test(sessGroup));
+
+        if (isSessSection && sessGroup) {
+            let myCourseGroup = "";
+            for (const [k, v] of Object.entries(studentSections)) {
+                if (String(k).toLowerCase().trim() === cidLower || cidLower.includes(String(k).toLowerCase().trim())) {
+                    myCourseGroup = typeof v === "string" ? v : (v?.group || v?.groupName || v?.section || "");
+                    break;
+                }
+            }
+            if (!myCourseGroup) myCourseGroup = studentGeneralGroup;
+
+            if (myCourseGroup && typeof doSectionGroupsMatch === "function") {
+                if (!doSectionGroupsMatch(myCourseGroup, sessGroup)) {
+                    throw new Error(`WRONG_SECTION:${studentName || cleanedStudentId}:${myCourseGroup}:${sessGroup}:${doctorId || ""}`);
+                }
             }
         }
     } catch (e) {
-        if (e.message && e.message.includes("غير مقيد")) throw e;
+        if (e.message && (e.message.startsWith("NOT_ENROLLED:") || e.message.startsWith("WRONG_SECTION:"))) throw e;
     }
 
 

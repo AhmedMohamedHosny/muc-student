@@ -649,7 +649,7 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
             return modal;
         }
 
-        // 🔄 محرك التحديث الانسيابي (عد تنازلي مستمر 60fps من 1 إلى 100)
+// 🔄 محرك التحديث الذكي: فحص فوري بدون عداد لو محدث + عداد انسيابي 1 إلى 100 لو فيه جديد
         async function runForceAppUpdate(btn) {
             // 1. فحص الاتصال بالإنترنت أولاً لحماية الأوفلاين
             if (!navigator.onLine) {
@@ -661,25 +661,65 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
                 return;
             }
 
-            // التأكد من وصول السيرفر
+            const origBtnContent = btn ? btn.innerHTML : "";
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = `<i class="fa-solid fa-arrows-rotate fa-spin"></i> <span>فحص...</span>`;
+            }
+
+            let remoteCacheName = "";
+            let hasNewUpdate = false;
+
             try {
-                const ping = await Promise.race([
-                    fetch("./sw.js?ping=" + Date.now(), { method: "HEAD", cache: "no-store" }),
-                    new Promise((_, rej) => setTimeout(() => rej(new Error("TIMEOUT")), 3000))
+                // فحص ملف sw.js السحابي مباشرة لمعرفة إصدار السيرفر
+                const swRes = await Promise.race([
+                    fetch("./sw.js?check=" + Date.now(), { cache: "no-store" }),
+                    new Promise((_, rej) => setTimeout(() => rej(new Error("TIMEOUT")), 3500))
                 ]);
-                if (!ping || (!ping.ok && ping.status !== 200 && ping.type !== "opaque")) {
-                    throw new Error("UNSTABLE");
+
+                if (swRes && swRes.ok) {
+                    const swText = await swRes.text();
+                    const match = swText.match(/CACHE_NAME\s*=\s*["']([^"']+)["']/);
+                    if (match && match[1]) {
+                        remoteCacheName = match[1];
+                    }
                 }
-            } catch (_) {
+
+                // مقارنة إصدار السيرفر بالكاشات الموجودة على تليفون الطالب
+                if (remoteCacheName && "caches" in window) {
+                    const currentCaches = await caches.keys();
+                    hasNewUpdate = !currentCaches.includes(remoteCacheName);
+                }
+
+                // فحص إضافي من خلال تسجيل الـ Service Worker
+                if ("serviceWorker" in navigator) {
+                    const reg = await navigator.serviceWorker.getRegistration();
+                    if (reg) {
+                        await reg.update();
+                        if (reg.installing || reg.waiting) {
+                            hasNewUpdate = true;
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn("Check update notice:", err);
+            }
+
+            // 2. إذا كان الطالب على أحدث نسخة بالفعل -> لا داعي للعداد، تنبيه مباشر وفوري!
+            if (!hasNewUpdate) {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = origBtnContent;
+                }
                 await showCustomAlert(
-                    "إشارة الإنترنت غير مستقرة",
-                    "شغّل الإنترنت يا بشمهندس وحاول تاني علشان ينزلك كل التحديثات!\n\n(الموقع شغال معاك أوفلاين حالياً بدون أي مشاكل)",
+                    "أنت على أحدث نسخة يا بشمهندس! ✨",
+                    "مفيش أي تحديثات جديدة نازلة على السيرفر حالياً..\n\nتطبيقك متحدث بالكامل ومؤمن 100% لأي محاضرة أو سكشن سواء أونلاين أو أوفلاين، كل حاجة معاك تمام ومظبوطة! 👍",
                     false
                 );
                 return;
             }
 
-            // 2. إطلاق النافذة وتشغيل العداد الانسيابي
+            // 3. في حال وجود تحديث جديد فقط -> تشغيل العداد الدائري الانسيابي من 1 إلى 100
             const modal = createUpdateProgressModal();
             const circleBar = document.getElementById("muc-update-circle-bar");
             const percentVal = document.getElementById("muc-update-percent-val");
@@ -688,10 +728,9 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
             const doneBtn = document.getElementById("btn-muc-update-done");
             const iconWrap = document.getElementById("muc-update-center-icon-wrap");
 
-            const circumference = 264; // محيط الدائرة
+            const circumference = 264;
             let currentDisplayNumber = 1;
 
-            // دالة العد الانسيابي المستمر بالمللي ثانية (تتحرك خطوة بخطوة 1, 2, 3...)
             function smoothCountTo(targetNumber, durationMs) {
                 return new Promise((resolve) => {
                     const startNum = currentDisplayNumber;
@@ -701,8 +740,6 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
                     function updateTick(now) {
                         const elapsed = now - startTime;
                         const progressRatio = Math.min(elapsed / durationMs, 1);
-                        
-                        // Ease-Out انسيابي
                         const easeOut = 1 - Math.pow(1 - progressRatio, 2);
                         const calculatedVal = Math.round(startNum + change * easeOut);
 
@@ -710,8 +747,7 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
                             currentDisplayNumber = calculatedVal;
                             if (percentVal) percentVal.innerText = `${currentDisplayNumber}%`;
                             if (circleBar) {
-                                const offset = circumference - (currentDisplayNumber / 100) * circumference;
-                                circleBar.style.strokeDashoffset = offset;
+                                circleBar.style.strokeDashoffset = circumference - (currentDisplayNumber / 100) * circumference;
                             }
                         }
 
@@ -730,79 +766,50 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
                 });
             }
 
-            let hasNewUpdate = false;
-
             try {
-                // المرحلة الأولى: من 1% إلى 30% (فحص السيرفر)
-                titleEl.innerText = "جاري فحص التحديثات السحابية...";
-                statusEl.innerText = "الاتصال بسيرفر الجامعة والتحقق من رقم الإصدار...";
+                // المرحلة الأولى (1% إلى 35%): جلب وتجهيز التحديث الجديد
+                titleEl.innerText = "جاري تنزيل التحديث الجديد...";
+                statusEl.innerText = "تم رصد إصدار حديث على السيرفر.. جاري استلام الملفات البرمجية...";
+                await smoothCountTo(35, 700);
+
+                // المرحلة الثانية (35% إلى 80%): تثبيت وتأمين الملفات للأوفلاين
+                titleEl.innerText = "تثبيت وتأمين المنظومة...";
+                statusEl.innerText = "تحديث شاشات الحضور والأصول وتأمين عملها في وضع الأوفلاين...";
+
+                if ("caches" in window && remoteCacheName) {
+                    const cache = await caches.open(remoteCacheName);
+                    const assets = ["./index.html", "./firebase.js", "./config.js", "./logo.png", "./logo.jpg", "./may.jpg", "./manifest.json"];
+                    for (const u of assets) {
+                        try {
+                            const fresh = await fetch(new Request(u, { cache: "reload" }));
+                            if (fresh && fresh.status === 200) await cache.put(u, fresh);
+                        } catch (_) {}
+                    }
+                }
+                await smoothCountTo(82, 800);
+
+                // المرحلة الثالثة (82% إلى 100%): إنهاء التثبيت
+                titleEl.innerText = "اكتمال التحديث...";
+                statusEl.innerText = "تطبيق التعديلات وحفظ النسخة المعتمدة على جهازك...";
+                await smoothCountTo(100, 500);
+
+                // إظهار رسالة النجاح المنطقية والريستارت
+                if (iconWrap) iconWrap.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10B981; font-size:1.5rem; animation: mucCircleScale 0.3s ease-out;"></i>`;
+                titleEl.innerText = "تم تثبيت التحديث بنجاح! 🎉";
+                statusEl.innerText = "تم تنزيل النسخة الجديدة وحفظها كاملة على تليفونك للعمل أوفلاين وأونلاين.. جاري فتح النسخة المحدثة فوراً!";
                 
-                const checkPromise = (async () => {
-                    if ("serviceWorker" in navigator) {
-                        const reg = await navigator.serviceWorker.getRegistration();
-                        if (reg) {
-                            await reg.update();
-                            if (reg.installing || reg.waiting) hasNewUpdate = true;
-                        }
-                    }
-                })();
-
-                await Promise.all([
-                    smoothCountTo(32, 700),
-                    checkPromise
-                ]);
-
-                // المرحلة الثانية: من 32% إلى 75% (سحب وتأمين الأصول والكاش)
-                titleEl.innerText = "تحديث وتأمين ملفات المنظومة...";
-                statusEl.innerText = "تنزيل الأصول البرمجية وتحديث الشاشات والكاميرا...";
-
-                const cachePromise = (async () => {
-                    if ("caches" in window) {
-                        const cache = await caches.open("muc-student-offline-v26");
-                        const assets = ["./index.html", "./firebase.js", "./config.js", "./logo.png", "./logo.jpg", "./may.jpg", "./manifest.json"];
-                        for (const u of assets) {
-                            try {
-                                const fresh = await fetch(new Request(u, { cache: "reload" }));
-                                if (fresh && fresh.status === 200) await cache.put(u, fresh);
-                            } catch (_) {}
-                        }
-                    }
-                })();
-
-                await Promise.all([
-                    smoothCountTo(78, 900),
-                    cachePromise
-                ]);
-
-                // المرحلة الثالثة: من 78% إلى 99% (تأمين وضع الأوفلاين)
-                titleEl.innerText = "تأمين وضع الأوفلاين...";
-                statusEl.innerText = "تأمين عمل المنظومة بدون إنترنت في قاعات ومدرجات الكلية...";
-                await smoothCountTo(99, 600);
-
-                // المرحلة الأخيرة: الوصول للـ 100% بنعومة
-                await smoothCountTo(100, 250);
-
-            } catch (err) {
-                console.warn("Update notice:", err);
-                await smoothCountTo(100, 200);
-            }
-
-            // 3. النتيجة وعرض زرار Done
-            if (hasNewUpdate) {
-                if (iconWrap) iconWrap.innerHTML = `<i class="fa-solid fa-cloud-arrow-down" style="color:#10B981; font-size:1.4rem;"></i>`;
-                titleEl.innerText = "تم تنزيل تحديث جديد! 🎉";
-                statusEl.innerText = "تم حفظ وتأمين أحدث نسخة للمنظومة على هاتفك للعمل أوفلاين وأونلاين!\nجاري فتح النسخة الجديدة...";
                 setTimeout(() => {
                     window.location.reload();
                 }, 1400);
-            } else {
-                if (iconWrap) iconWrap.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10B981; font-size:1.4rem; animation: mucCircleScale 0.3s ease-out;"></i>`;
-                titleEl.innerText = "المنظومة محدثة بالكامل! ✨";
-                statusEl.innerText = "أنت بالفعل على أحدث نسخة معتمدة ولا توجد تحديثات جديدة!\n\nهاتفك جاهز ومؤمن 100% لتسجيل الحضور في أي محاضرة أوفلاين أو أونلاين.";
-                if (doneBtn) {
-                    doneBtn.classList.remove("d-none");
-                    doneBtn.onclick = () => modal.remove();
+
+            } catch (err) {
+                console.warn("Update notice:", err);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = origBtnContent;
                 }
+                modal.remove();
+                await showCustomAlert("تنبيه", "حدث بطء أثناء تنزيل التحديث. يرجى المحاولة مرة أخرى.");
             }
         }
 
@@ -1498,8 +1505,10 @@ let html5QrScanner = null;
                     document.getElementById("rcpt-name").innerText = getSavedStudentName(sid) || studentRealName;
                     document.getElementById("rcpt-id").innerText = sid;
                     document.getElementById("rcpt-course").innerText = String(offlinePayload.cn || "").toLowerCase().includes("praxis") ? "Praxis Programming" : (offlinePayload.cn || "Course");
-                    document.getElementById("rcpt-lecture").innerText = `Lecture #${realLectureNum}`;
-                    document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
+const offType = offlinePayload.st === "lab" ? "Lab" : (offlinePayload.st === "section" ? "Section" : "Lecture");
+                    const offGrpLabel = offlinePayload.g ? ` (${offlinePayload.g})` : "";
+                    document.getElementById("rcpt-lecture").innerText = `${offType} #${realLectureNum}${offGrpLabel}`;
+                                        document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
                     document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
                     document.getElementById("receipt-box").classList.remove("d-none");
                     return;
@@ -1588,20 +1597,25 @@ let html5QrScanner = null;
                                 const tParam = parsed.searchParams.get("token") || "";
                                 const isOffline = parsed.searchParams.get("offline") === "1" || tParam.startsWith("OFF_") || sParam.startsWith("off_");
 
-                                if (isOffline) {
+if (isOffline) {
                                     activeSessionId = sParam;
                                     activeToken = tParam;
                                     const cName = parsed.searchParams.get("cname") || parsed.searchParams.get("course") || "جلسة أوفلاين";
+                                    const sType = parsed.searchParams.get("type") || "lecture";
+                                    const sGroup = decodeURIComponent(parsed.searchParams.get("group") || "");
                                     offlinePayload = {
                                         s: activeSessionId,
                                         c: parsed.searchParams.get("course") || "MUC_COURSE",
                                         cn: decodeURIComponent(cName),
                                         l: Number(parsed.searchParams.get("lec") || 1),
+                                        st: sType,
+                                        g: sGroup,
                                         t: Math.floor(Date.now() / 10000),
                                         h: activeToken,
                                         ts: Number(parsed.searchParams.get("ts") || Date.now())
                                     };
-                                    courseBadge.innerText = "حضور أوفلاين (Offline Mode)";
+                                    const badgeType = sType === "lab" ? "معمل أوفلاين" : (sType === "section" ? `سكشن أوفلاين (${sGroup || ''})` : "محاضرة أوفلاين");
+                                    courseBadge.innerText = `${badgeType} (Offline Mode)`;
                                 } else {
                                     activeSessionId = sParam;
                                     activeToken = tParam;
@@ -1970,8 +1984,9 @@ document.getElementById("btn-enter-pin")?.addEventListener("click", async () => 
                 document.getElementById("rcpt-name").innerText = stdName;
                 document.getElementById("rcpt-id").innerText = studentIdVal;
                 document.getElementById("rcpt-course").innerText = String(extractedCourseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : extractedCourseName;
-                document.getElementById("rcpt-lecture").innerText = `Lecture #${extractedLecNum}`;
-                document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
+const offPinType = (pinCheck && pinCheck.sessionData && pinCheck.sessionData.sessionType === "section") ? "Section" : ((pinCheck && pinCheck.sessionData && pinCheck.sessionData.sessionType === "lab") ? "Lab" : "Lecture");
+                document.getElementById("rcpt-lecture").innerText = `${offPinType} #${extractedLecNum}`;
+                                document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
                 document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
                 document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
                 document.getElementById("receipt-box").classList.remove("d-none");
