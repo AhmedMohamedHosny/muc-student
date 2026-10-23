@@ -1568,8 +1568,7 @@ let html5QrScanner = null;
                     document.getElementById("rcpt-id").innerText = sid;
                     document.getElementById("rcpt-course").innerText = String(offlinePayload.cn || "").toLowerCase().includes("praxis") ? "Praxis Programming" : (offlinePayload.cn || "Course");
 const offType = offlinePayload.st === "lab" ? "Lab" : (offlinePayload.st === "section" ? "Section" : "Lecture");
-                    const offGrpLabel = offlinePayload.g ? ` (${offlinePayload.g})` : "";
-                    document.getElementById("rcpt-lecture").innerText = `${offType} #${realLectureNum}${offGrpLabel}`;
+document.getElementById("rcpt-lecture").innerText = `${offType} #${realLectureNum}`;
                                         document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
                     document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
                     document.getElementById("receipt-box").classList.remove("d-none");
@@ -2038,34 +2037,33 @@ let pinCheck = null;
                     }
                 }
 
-                // استخراج نوع الجلسة ورقم السكشن بمرونة وأمان
-                let sType = (pinCheck && pinCheck.sessionData && pinCheck.sessionData.sessionType) ? pinCheck.sessionData.sessionType : "";
-                let sGroup = (pinCheck && pinCheck.sessionData && pinCheck.sessionData.group) ? pinCheck.sessionData.group : "";
+// 1. استخراج نوع الجلسة الفعلي (الافتراضي دائماً Lecture ما لم تحدد الجلسة غير ذلك)
+                const sessData = (pinCheck && pinCheck.sessionData) ? pinCheck.sessionData : {};
+                const sType = sessData.sessionType === "section" ? "section" : (sessData.sessionType === "lab" ? "lab" : "lecture");
+                const sGroup = sessData.group || "";
 
-                // فحص سكشن الطالب محلياً
-                const studentSections = JSON.parse(localStorage.getItem("muc_student_sections") || "{}");
-                const studentGeneralGroup = localStorage.getItem("muc_student_group") || "";
-                let myCourseGroup = "";
-                const targetCidLower = String(extractedCourseId || "").toLowerCase().trim();
-                for (const [k, v] of Object.entries(studentSections)) {
-                    if (String(k).toLowerCase().trim() === targetCidLower || targetCidLower.includes(String(k).toLowerCase().trim())) {
-                        myCourseGroup = typeof v === "string" ? v : (v?.group || v?.groupName || v?.section || "");
-                        break;
+                // 2. فحص السكشن فقط لو كانت الجلسة فعلياً سكشن أو معمل لمعيد وبها مجموعة محددة
+                if (sType === "section" || sType === "lab") {
+                    const studentSections = JSON.parse(localStorage.getItem("muc_student_sections") || "{}");
+                    const studentGeneralGroup = localStorage.getItem("muc_student_group") || "";
+                    let myCourseGroup = "";
+                    const targetCidLower = String(extractedCourseId || "").toLowerCase().trim();
+                    for (const [k, v] of Object.entries(studentSections)) {
+                        if (String(k).toLowerCase().trim() === targetCidLower || targetCidLower.includes(String(k).toLowerCase().trim())) {
+                            myCourseGroup = typeof v === "string" ? v : (v?.group || v?.groupName || v?.section || "");
+                            break;
+                        }
+                    }
+                    if (!myCourseGroup) myCourseGroup = studentGeneralGroup;
+
+                    if (sGroup && myCourseGroup && typeof doSectionGroupsMatch === "function") {
+                        if (!doSectionGroupsMatch(myCourseGroup, sGroup)) {
+                            throw new Error(`WRONG_SECTION:${stdName}:${myCourseGroup}:${sGroup}:${sessData.doctorName || ""}`);
+                        }
                     }
                 }
-                if (!myCourseGroup) myCourseGroup = studentGeneralGroup;
 
-                // مطابقة السكشن: إذا كان السكشن المفتوح سكشن محدد والطالب من سكشن آخر -> رفض فوري
-                if (sGroup && myCourseGroup && typeof doSectionGroupsMatch === "function") {
-                    if (!doSectionGroupsMatch(myCourseGroup, sGroup)) {
-                        throw new Error(`WRONG_SECTION:${stdName}:${myCourseGroup}:${sGroup}:${pinCheck?.sessionData?.doctorName || ""}`);
-                    }
-                }
-
-                if (!sType) {
-                    sType = (sGroup || myCourseGroup) ? "section" : "lecture";
-                }
-
+                // 3. حفظ السجل الأوفلاين بنوع الجلسة الدقيق
                 await queueOfflineAttendance({
                     studentId: studentIdVal,
                     studentName: stdName,
@@ -2074,7 +2072,7 @@ let pinCheck = null;
                     courseName: extractedCourseName,
                     lectureNumber: extractedLecNum,
                     sessionType: sType,
-                    group: sGroup || myCourseGroup,
+                    group: sGroup,
                     timeSlot: 0,
                     hash: "",
                     pin: enteredPin
@@ -2086,10 +2084,9 @@ let pinCheck = null;
                 document.getElementById("rcpt-id").innerText = studentIdVal;
                 document.getElementById("rcpt-course").innerText = String(extractedCourseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : extractedCourseName;
 
-                // إظهار مسمى السكشن الصحيح (Section #4) بدلاً من كلمة Lecture الثابتة
+                // 4. عرض اسم الجلسة ورقمها فقط بدون أي أقواس أو زوائد (مثل: Lecture #6 أو Section #4)
                 const offDisplayType = sType === "lab" ? "Lab" : (sType === "section" ? "Section" : "Lecture");
-                const offDisplayGrp = (sGroup || myCourseGroup) ? ` (${sGroup || myCourseGroup})` : "";
-                document.getElementById("rcpt-lecture").innerText = `${offDisplayType} #${extractedLecNum}${offDisplayGrp}`;
+                document.getElementById("rcpt-lecture").innerText = `${offDisplayType} #${extractedLecNum}`;
                 document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
                 document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
                 document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
