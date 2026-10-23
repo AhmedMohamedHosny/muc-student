@@ -298,10 +298,13 @@ background: #FDF2F3;
         <div style="font-size: 0.76rem; color: #E2E8F0; font-weight: 700;">
             الرقم الجامعي: <span id="welcome-student-id" style="color: #C59B27; font-family: monospace; font-weight: 900; font-size: 0.84rem; letter-spacing: 0.5px;">--</span>
         </div>
+        
 <div style="display: flex; align-items: center; gap: 6px;">
+    <!--
             <button type="button" id="btn-open-student-history" style="background: rgba(56, 189, 248, 0.22); border: 1px solid #38BDF8; color: #BAE6FD; padding: 3px 8px; border-radius: 6px; font-size: 0.68rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="View My Attendance Log">
                 <i class="fa-solid fa-clock-rotate-left"></i> <span>History</span>
             </button>
+            -->
             <button type="button" id="btn-force-update-app" style="background: rgba(197, 155, 39, 0.22); border: 1px solid #C59B27; color: #FDE68A; padding: 3px 8px; border-radius: 6px; font-size: 0.68rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Update App Cache">
                 <i class="fa-solid fa-arrows-rotate"></i> <span>Update</span>
             </button>
@@ -1856,33 +1859,40 @@ const stTitleEl = document.getElementById("status-title");
             document.getElementById("pending-banner").classList.toggle("d-none", n === 0);
         }
 
-        async function runSync(manual) {
+async function runSync(manual) {
             const btn = document.getElementById("btn-sync-now");
             const txt = document.getElementById("btn-sync-text");
             const fb = document.getElementById("sync-feedback");
 
-            if (manual) {
-                btn.disabled = true;
-                txt.innerText = "Connecting to server...";
-                fb.innerText = "";
-                await new Promise(r => setTimeout(r, 600));
+            if (!navigator.onLine) {
+                if (manual && fb) {
+                    fb.style.color = "#B91C1C";
+                    fb.innerText = "⚠️ No internet connection. Please turn on Wi-Fi or Mobile Data.";
+                }
+                return;
             }
 
-            const result = await syncPendingAttendance();
-            refreshPendingBanner();
+            if (manual && btn) {
+                btn.disabled = true;
+                txt.innerText = "Connecting to server...";
+                if (fb) fb.innerText = "";
+            }
 
-            if (manual) {
+            const initialPending = getPendingCount();
+            const uploadedCount = await syncPendingAttendance();
+            refreshPendingBanner();
+            const remaining = getPendingCount();
+
+            if (manual && btn) {
                 btn.disabled = false;
                 txt.innerText = "Sync Attendance Now";
-                if (getPendingCount() === 0) {
+
+                if (uploadedCount > 0 && remaining === 0) {
                     fb.style.color = "#15803D";
-                    fb.innerText = "✅ Attendance uploaded successfully";
-                } else if (result === -1 && !navigator.onLine) {
-                    fb.style.color = "#B91C1C";
-                    fb.innerText = "No internet connection. Enable Wi-Fi or Mobile Data and try again.";
-                } else {
-                    fb.style.color = "#B91C1C";
-                    fb.innerText = "Waiting for instructor to upload offline lecture to server...";
+                    fb.innerText = "✅ Attendance uploaded and confirmed on server successfully!";
+                } else if (remaining > 0) {
+                    fb.style.color = "#B45309";
+                    fb.innerText = "⏳ Record is saved on your phone. Waiting for instructor to connect laptop to internet...";
                 }
             }
         }

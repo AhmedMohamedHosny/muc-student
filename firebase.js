@@ -948,43 +948,13 @@ for (const item of queue) {
 }
 
 export function getPendingCount() {
-    if (!localStorage.getItem("muc_purge_old_sync_v5")) {
-        localStorage.removeItem("muc_pending_records");
-        localStorage.removeItem("muc_sync_error");
-        Object.keys(localStorage).forEach(k => {
-            if (k.startsWith("muc_attended_history_")) localStorage.removeItem(k);
-        });
-        localStorage.setItem("muc_purge_old_sync_v5", "done");
+    try {
+        const rawQueue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
+        if (!Array.isArray(rawQueue)) return 0;
+        return rawQueue.filter(item => item && String(item.studentId || "").trim().length >= 7).length;
+    } catch (_) {
         return 0;
     }
-
-    const rawQueue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
-    if (rawQueue.length === 0) return 0;
-
-    const nowMs = Date.now();
-    const MAX_AGE_MS = 12 * 3600 * 1000;
-    const seenLectureKeys = new Set();
-
-    const cleanQueue = rawQueue.filter(item => {
-        const sid = String(item.studentId || "").trim();
-        if (sid.length < 7) return false;
-        if (nowMs - (item.scannedAt || 0) > MAX_AGE_MS) return false;
-
-        // مفتاح فريد لكل محاضرة/مقرر حتى لا يمسح محاضرة مادة أخرى لو حضر الطالب محاضرتين أوفلاين متتاليتين
-        const lecKey = item.pin
-            ? `${sid}_PIN_${Math.floor((item.scannedAt || 0) / (45 * 60 * 1000))}`
-            : `${sid}_${item.courseId && item.courseId !== "MUC_COURSE" ? item.courseId + "_" + (item.lectureNumber || 1) : item.sessionId}`;
-
-        if (seenLectureKeys.has(lecKey)) return false;
-        seenLectureKeys.add(lecKey);
-        return true;
-    });
-
-    if (cleanQueue.length !== rawQueue.length) {
-        localStorage.setItem("muc_pending_records", JSON.stringify(cleanQueue));
-    }
-
-    return cleanQueue.length;
 }
 
 function triggerSmoothSync() {
