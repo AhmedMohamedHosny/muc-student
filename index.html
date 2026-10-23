@@ -1136,77 +1136,20 @@ const lockExists = res.lockSnap.exists();
                         activeDevicesArr.some(d => d.deviceId === myHardwareKey || d.deviceId === deviceId || d.legacyDeviceId === deviceId)
                     );
 
-// 🛡️ وضع الإنقاذ والاسترجاع الذاتي الصامت (Auto-Heal & Silent Rebind):
-                    // إذا كان القفل ممسوحاً من السيرفر ولكن هاتف الطالب موثق ومسجل محلياً من قبل، نعيد إنشاء القفل فوراً بالسحابة دون طرده!
-                    if (!isFirstTimeSetup && !lockExists) {
-                        try {
-                            const phoneName = await getReadablePhoneName();
-                            const nowISO = new Date().toISOString();
-                            const restoredDevObj = {
-                                deviceId: myHardwareKey,
-                                legacyDeviceId: deviceId,
-                                deviceName: phoneName,
-                                screenInfo: `${screen.width}x${screen.height}`,
-                                lockedAtISO: nowISO
-                            };
-
-                            await setDoc(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), {
-                                studentId: cleanId,
-                                studentName: stdName,
-                                department: stdData.department || "هندسة الحاسب",
-                                academicYear: String(stdData.academicYear || "2"),
-                                devices: [restoredDevObj],
-                                deviceIds: [myHardwareKey],
-                                legacyDeviceIds: [deviceId],
-                                legacyDeviceId: deviceId,
-                                deviceId: myHardwareKey,
-                                secondDeviceId: "",
-                                deviceName: `[هاتف 1] ${phoneName}`,
-                                screenInfo: `${screen.width}x${screen.height}`,
-                                firstLockedAtISO: nowISO,
-                                secondLockedAtISO: "",
-                                lockedAt: res.serverTimestamp(),
-                                lockedAtISO: nowISO
-                            }, { merge: true });
-
-                            localStorage.setItem(`muc_lock_claimed_${cleanId}`, "1");
-                            console.log(`✅ تم استرجاع وإعادة ربط هاتف الطالب (${cleanId}) تلقائياً بالسيرفر.`);
-                        } catch (rebindErr) {
-                            console.warn("Silent rebind notice:", rebindErr);
-                        }
-                    } else if (!isFirstTimeSetup && lockExists && !isMyDeviceBound) {
-                        // لو القفل موجود على السيرفر ولكن هذا الهاتف جهاز ثاني للطالب ولم يصل للحد الأقصى (جهازين)
-                        if (boundDevices.length < 2) {
-                            try {
-                                const phoneName = await getReadablePhoneName();
-                                const nowISO = new Date().toISOString();
-                                const secondDevObj = {
-                                    deviceId: myHardwareKey,
-                                    legacyDeviceId: deviceId,
-                                    deviceName: phoneName,
-                                    screenInfo: `${screen.width}x${screen.height}`,
-                                    lockedAtISO: nowISO
-                                };
-                                const updatedList = [...activeDevicesArr, secondDevObj];
-                                await updateDoc(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), {
-                                    devices: updatedList,
-                                    deviceIds: updatedList.map(d => d.deviceId),
-                                    legacyDeviceIds: updatedList.map(d => d.legacyDeviceId || d.deviceId),
-                                    secondDeviceId: myHardwareKey,
-                                    secondLockedAtISO: nowISO,
-                                    deviceName: updatedList.map((d, i) => `[هاتف ${i+1}] ${d.deviceName}`).join(" | ")
-                                });
-                            } catch (_) {}
-                        } else {
-                            clearStudentLocalBinding(cleanId);
-                            inputId.value = "";
-                            welcomeBar.classList.add("d-none");
-                            scannerStep.classList.add("d-none");
-                            resultStep.classList.add("d-none");
-                            inputStep.classList.remove("d-none");
-                            await showCustomAlert("تنبيه", "هذا الرقم مربوط بجهازين بالفعل. يرجى مراجعة المشرف.");
-                            return false;
-                        }
+                    // 1. عند فتح الموقع أو عمل ريستارت (!isFirstTimeSetup): إذا كان القفل محذوفاً أو الهاتف غير موجود فيه -> اطرد فوراً ولا تسجله!
+                    if (!isFirstTimeSetup && (!lockExists || !isMyDeviceBound)) {
+                        clearStudentLocalBinding(cleanId);
+                        inputId.value = "";
+                        welcomeBar.classList.add("d-none");
+                        scannerStep.classList.add("d-none");
+                        resultStep.classList.add("d-none");
+                        inputStep.classList.remove("d-none");
+                        await showCustomAlert(
+                            "تم إلغاء ربط هذا الهاتف",
+                            `🚫 قام مشرف المنظومة بإلغاء ربط هذا الهاتف بالرقم الجامعي (${cleanId}).\n\nيرجى إدخال رقمك الجامعي الصحيح والموافقة على الربط من جديد.`,
+                            true
+                        );
+                        return false;
                     }
 
                     // 2. فحص الحد الأقصى للأجهزة عند التسجيل اليدوي: مسموح بجهازين (2) فقط لكل طالب
