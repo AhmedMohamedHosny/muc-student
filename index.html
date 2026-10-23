@@ -444,7 +444,9 @@ background: #FDF2F3;
 <button type="button" id="btn-retry" class="btn d-none" style="margin-top:1rem;">
                 <i class="fa-solid fa-rotate-right"></i><span>Try Again</span>
             </button>
-
+<button type="button" id="btn-done-result" class="btn" style="margin-top:0.85rem; background:#10B981; color:#fff; font-weight:800; border-radius:10px;">
+    <i class="fa-solid fa-check"></i> <span>Done</span>
+</button>
 <div id="receipt-box" class="receipt d-none" style="text-align: left;">
                 <div class="receipt-row"><span>Student Name:</span><strong id="rcpt-name">--</strong></div>
                 <div class="receipt-row"><span>Student ID:</span><strong id="rcpt-id">--</strong></div>
@@ -1867,7 +1869,7 @@ async function runSync(manual) {
             if (!navigator.onLine) {
                 if (manual && fb) {
                     fb.style.color = "#B91C1C";
-                    fb.innerText = "⚠️ No internet connection. Please turn on Wi-Fi or Mobile Data.";
+                    fb.innerText = "⚠️ No internet connection. Please enable Wi-Fi or Mobile Data.";
                 }
                 return;
             }
@@ -1878,7 +1880,6 @@ async function runSync(manual) {
                 if (fb) fb.innerText = "";
             }
 
-            const initialPending = getPendingCount();
             const uploadedCount = await syncPendingAttendance();
             refreshPendingBanner();
             const remaining = getPendingCount();
@@ -1887,12 +1888,13 @@ async function runSync(manual) {
                 btn.disabled = false;
                 txt.innerText = "Sync Attendance Now";
 
-                if (uploadedCount > 0 && remaining === 0) {
+                if (remaining === 0 && uploadedCount > 0) {
                     fb.style.color = "#15803D";
                     fb.innerText = "✅ Attendance uploaded and confirmed on server successfully!";
                 } else if (remaining > 0) {
                     fb.style.color = "#B45309";
-                    fb.innerText = "⏳ Record is saved on your phone. Waiting for instructor to connect laptop to internet...";
+                    // 👈 الرسالة الإنجليزية الواضحة عندما يكون الدكتور لم يرفع المحاضرة بعد
+                    fb.innerText = "⏳ Saved on your phone. Waiting for instructor to upload offline lecture to server...";
                 }
             }
         }
@@ -2320,6 +2322,13 @@ let pinCheck = null;
             const sid = getSavedStudentId() || inputId.value.trim();
             if (e.target.value) renderCourseAttendanceLog(sid, e.target.value);
         });
+        document.getElementById("btn-done-result")?.addEventListener("click", () => {
+    resultStep.classList.add("d-none");
+    welcomeBar.classList.remove("d-none");
+    footerCreditsBar?.classList.remove("d-none");
+    scannerStep.classList.remove("d-none");
+    refreshPendingBanner();
+});
     </script>
 <!-- الشريط الثابت لحقوق التصميم والتطوير بتأثير مضيء (Glowing Developer Signature) -->
 <div id="app-footer-credits" style="position: fixed; bottom: 0; left: 0; right: 0; text-align: center; padding: 0.42rem 0.75rem; font-size: 0.78rem; font-weight: 700; background: rgba(15, 2, 5, 0.78); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid rgba(197, 155, 39, 0.35); z-index: 9999; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);">
@@ -2395,6 +2404,7 @@ let pinCheck = null;
     body.lang-en .footer-en {
         display: flex !important;
     }
+
 </style>
 <!-- 🔒 درع الحماية ضد الفحص وسرقة الأكواد (Disable DevTools & Right Click) -->
  
