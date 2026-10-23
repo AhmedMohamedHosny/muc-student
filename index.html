@@ -298,12 +298,15 @@ background: #FDF2F3;
         <div style="font-size: 0.76rem; color: #E2E8F0; font-weight: 700;">
             الرقم الجامعي: <span id="welcome-student-id" style="color: #C59B27; font-family: monospace; font-weight: 900; font-size: 0.84rem; letter-spacing: 0.5px;">--</span>
         </div>
-        <div style="display: flex; align-items: center; gap: 6px;">
-            <button type="button" id="btn-force-update-app" style="background: rgba(197, 155, 39, 0.22); border: 1px solid #C59B27; color: #FDE68A; padding: 3px 8px; border-radius: 6px; font-size: 0.68rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="تحديث النسخة والكاش فوراً">
-                <i class="fa-solid fa-arrows-rotate"></i> <span>تحديث</span>
+<div style="display: flex; align-items: center; gap: 6px;">
+            <button type="button" id="btn-open-student-history" style="background: rgba(56, 189, 248, 0.22); border: 1px solid #38BDF8; color: #BAE6FD; padding: 3px 8px; border-radius: 6px; font-size: 0.68rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="View My Attendance Log">
+                <i class="fa-solid fa-clock-rotate-left"></i> <span>History</span>
+            </button>
+            <button type="button" id="btn-force-update-app" style="background: rgba(197, 155, 39, 0.22); border: 1px solid #C59B27; color: #FDE68A; padding: 3px 8px; border-radius: 6px; font-size: 0.68rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Update App Cache">
+                <i class="fa-solid fa-arrows-rotate"></i> <span>Update</span>
             </button>
             <span style="background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(16, 185, 129, 0.45); color: #6EE7B7; padding: 3px 7px; border-radius: 6px; font-size: 0.66rem; font-weight: 800; display: inline-flex; align-items: center; gap: 3px;">
-                <i class="fa-solid fa-shield-halved"></i> موثق
+                <i class="fa-solid fa-shield-halved"></i> Verified
             </span>
         </div>
     </div>
@@ -450,7 +453,69 @@ background: #FDF2F3;
             </div>
         </div>
     </div>
+<!-- ======================================================== -->
+    <!-- 📚 نافذة سجل محاضراتي وحضور المقررات (My Attendance History) -->
+    <!-- ======================================================== -->
+    <div id="modal-student-history" class="d-none" style="position:fixed; inset:0; background:rgba(15,23,42,0.85); z-index:99998; display:flex; align-items:center; justify-content:center; padding:1rem; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);">
+        <div style="background:#ffffff; color:#0F172A; border-radius:20px; width:100%; max-width:440px; max-height:88vh; display:flex; flex-direction:column; box-shadow:0 25px 50px rgba(0,0,0,0.5); border-top:5px solid var(--accent); overflow:hidden;">
+            
+            <!-- Modal Header -->
+            <div style="padding:1rem 1.25rem; border-bottom:1px solid #E2E8F0; display:flex; justify-content:space-between; align-items:center; background:#F8FAFC;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <div style="width:36px; height:36px; border-radius:50%; background:#FEF3C7; color:#B45309; display:flex; align-items:center; justify-content:center; font-size:1.1rem;">
+                        <i class="fa-solid fa-graduation-cap"></i>
+                    </div>
+                    <div>
+                        <h4 style="margin:0; font-size:1.05rem; font-weight:800; color:#0F172A;">Attendance Log</h4>
+                        <span id="history-student-brief" style="font-size:0.75rem; color:#64748B; font-weight:700;">Loading courses...</span>
+                    </div>
+                </div>
+                <button type="button" id="btn-close-history-modal" style="background:none; border:none; font-size:1.3rem; color:#64748B; cursor:pointer; padding:4px 8px;">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
 
+            <!-- Course Selector -->
+            <div style="padding:0.85rem 1.25rem; background:#FFFFFF; border-bottom:1px solid #F1F5F9;">
+                <label style="font-size:0.78rem; font-weight:800; color:#475569; display:block; margin-bottom:5px; text-transform:uppercase; letter-spacing:0.5px;">
+                    <i class="fa-solid fa-book-bookmark" style="color:var(--accent);"></i> Enrolled Course:
+                </label>
+                <select id="history-course-select" style="width:100%; padding:0.6rem 0.8rem; border-radius:10px; border:2px solid #CBD5E1; font-weight:700; font-size:0.88rem; color:#0F172A; background:#FFFFFF; outline:none; cursor:pointer;">
+                    <option value="">Select a course...</option>
+                </select>
+            </div>
+
+            <!-- Course Attendance Summary Card -->
+            <div id="history-summary-box" class="d-none" style="padding:0.85rem 1.25rem 0.5rem; background:#F8FAFC;">
+                <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:8px;">
+                    <div style="background:#ECFDF5; border:1px solid #A7F3D0; border-radius:10px; padding:6px 8px; text-align:center;">
+                        <span style="font-size:0.68rem; font-weight:800; color:#065F46; display:block;">Attended</span>
+                        <strong id="history-stat-attended" style="font-size:1.15rem; color:#059669; font-weight:900;">0</strong>
+                    </div>
+                    <div style="background:#FEF2F2; border:1px solid #FECACA; border-radius:10px; padding:6px 8px; text-align:center;">
+                        <span style="font-size:0.68rem; font-weight:800; color:#991B1B; display:block;">Missed</span>
+                        <strong id="history-stat-missed" style="font-size:1.15rem; color:#DC2626; font-weight:900;">0</strong>
+                    </div>
+                    <div style="background:#EFF6FF; border:1px solid #BFDBFE; border-radius:10px; padding:6px 8px; text-align:center;">
+                        <span style="font-size:0.68rem; font-weight:800; color:#1E40AF; display:block;">Rate</span>
+                        <strong id="history-stat-rate" style="font-size:1.15rem; color:#2563EB; font-weight:900;">0%</strong>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Scrollable Sessions List -->
+            <div id="history-sessions-container" style="flex:1; overflow-y:auto; padding:0.75rem 1.25rem 1.25rem; background:#FFFFFF;">
+                <div id="history-loading-spinner" style="text-align:center; padding:2rem 1rem; color:#64748B;">
+                    <i class="fa-solid fa-spinner fa-spin" style="font-size:1.5rem; color:var(--accent);"></i>
+                    <p style="margin-top:8px; font-size:0.85rem; font-weight:700;">Loading sessions log...</p>
+                </div>
+                <div id="history-sessions-list" class="d-none" style="display:flex; flex-direction:column; gap:8px;">
+                    <!-- Rendered dynamic cards -->
+                </div>
+            </div>
+
+        </div>
+    </div>
 <!-- Custom In-App Modal Dialog (Prevents browser popup with URL) -->
     <div id="custom-app-modal" class="d-none" style="position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:99999; display:flex; align-items:center; justify-content:center; padding:1.25rem; backdrop-filter:blur(4px);">
         <div style="background:#fff; color:#0F172A; border-radius:14px; width:100%; max-width:360px; padding:1.4rem; text-align:center; box-shadow:0 20px 40px rgba(0,0,0,0.4); border-top:4px solid var(--accent);">
@@ -2039,6 +2104,215 @@ let pinCheck = null;
         setInterval(() => { refreshPendingBanner(); showSyncErrorIfAny(); }, 3000);
         refreshPendingBanner();
         runSync(false);
+        // ========================================================
+        // 📚 محرك استعراض سجل المقررات والحضور للطالب (My Attendance History)
+        // ========================================================
+        const KNOWN_COURSES_DISPLAY = {
+            "cse216": "Web Design and Database (CSE216)",
+            "user_centered": "User Centered Design",
+            "cse_modern_workshop": "Modern Workshop",
+            "cse122": "Logic Design (CSE122)",
+            "praxis_programming_lec1": "Praxis Programming (Lec 1)",
+            "praxis_programming_lec2": "Praxis Programming (Lec 2)"
+        };
+
+        async function openStudentHistoryModal() {
+            const sid = getSavedStudentId() || inputId.value.trim();
+            const sname = getSavedStudentName(sid) || "Student";
+            const modal = document.getElementById("modal-student-history");
+            const briefEl = document.getElementById("history-student-brief");
+            const selectEl = document.getElementById("history-course-select");
+
+            briefEl.innerText = `${sname} — ${sid}`;
+            modal.classList.remove("d-none");
+
+            // جلب المقررات المقيد بها الطالب (محلياً وسحابياً)
+            let enrolled = [];
+            try {
+                enrolled = JSON.parse(localStorage.getItem("muc_student_courses") || "[]");
+            } catch (_) {}
+
+            if (navigator.onLine && enrolled.length === 0) {
+                try {
+                    const { db } = await import("./firebase.js");
+                    const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+                    const stdDoc = await getDoc(doc(db, "students", sid));
+                    if (stdDoc.exists()) {
+                        enrolled = stdDoc.data()?.enrolledCourses || [];
+                        localStorage.setItem("muc_student_courses", JSON.stringify(enrolled));
+                    }
+                } catch (_) {}
+            }
+
+            if (enrolled.length === 0) {
+                enrolled = Object.keys(KNOWN_COURSES_DISPLAY);
+            }
+
+            // ملء قائمة المقررات بدون تكرار
+            selectEl.innerHTML = `<option value="">-- Choose Course (${enrolled.length} Enrolled) --</option>`;
+            const cachedMap = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}");
+
+            enrolled.forEach(cid => {
+                const opt = document.createElement("option");
+                opt.value = cid;
+                opt.innerText = cachedMap[cid] || KNOWN_COURSES_DISPLAY[cid] || cid.toUpperCase().replace(/_/g, " ");
+                selectEl.appendChild(opt);
+            });
+
+            // اختيار أول مادة تلقائياً وعرض بياناتها
+            if (enrolled.length > 0) {
+                selectEl.value = enrolled[0];
+                renderCourseAttendanceLog(sid, enrolled[0]);
+            }
+        }
+
+        async function renderCourseAttendanceLog(studentId, courseId) {
+            const listEl = document.getElementById("history-sessions-list");
+            const loaderEl = document.getElementById("history-loading-spinner");
+            const summaryBox = document.getElementById("history-summary-box");
+            const statAttended = document.getElementById("history-stat-attended");
+            const statMissed = document.getElementById("history-stat-missed");
+            const statRate = document.getElementById("history-stat-rate");
+
+            loaderEl.classList.remove("d-none");
+            listEl.classList.add("d-none");
+            summaryBox.classList.add("d-none");
+            listEl.innerHTML = "";
+
+            let allSessions = [];
+            let myRecords = [];
+
+            // 1. جلب السجلات المعلقة أوفلاين في هاتف الطالب أولاً
+            const localQueue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
+            const localAttendedHistory = JSON.parse(localStorage.getItem(`muc_attended_history_${studentId}`) || "{}");
+
+            // 2. إذا كان متصلاً، يجلب الجلسات الرسمية وسجلات الطالب من السيرفر
+            if (navigator.onLine) {
+                try {
+                    const { db } = await import("./firebase.js");
+                    const { collection, query, where, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+
+                    const [sessSnap, recSnap] = await Promise.all([
+                        getDocs(query(collection(db, "attendance_sessions"), where("courseId", "==", courseId))),
+                        getDocs(query(collection(db, "attendance_records"), where("studentId", "==", studentId)))
+                    ]);
+
+                    allSessions = sessSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+                    myRecords = recSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+                } catch (e) {
+                    console.warn("History cloud fetch fallback:", e);
+                }
+            }
+
+            // ترتيب الجلسات من الأحدث للأقدم
+            allSessions.sort((a, b) => ((b.startTime?.seconds || 0) - (a.startTime?.seconds || 0)));
+
+            // إذا تعذر جلب جلسات السيرفر، نعرض سجلات الطالب المحلية
+            if (allSessions.length === 0) {
+                const myCourseQueue = localQueue.filter(q => String(q.courseId).toLowerCase() === String(courseId).toLowerCase());
+                if (myCourseQueue.length > 0) {
+                    allSessions = myCourseQueue.map(q => ({
+                        id: q.sessionId,
+                        lectureNumber: q.lectureNumber || 1,
+                        sessionType: q.sessionType || "lecture",
+                        group: q.group || "",
+                        startedAtDate: q.startedAtDate || new Date(q.scannedAt || Date.now()).toLocaleDateString("en-CA"),
+                        isLocalPending: true
+                    }));
+                }
+            }
+
+            let attendedCount = 0;
+            let missedCount = 0;
+
+            const fragment = document.createDocumentFragment();
+
+            if (allSessions.length === 0) {
+                listEl.innerHTML = `
+                    <div style="text-align:center; padding:1.5rem 0.5rem; color:#94A3B8;">
+                        <i class="fa-solid fa-calendar-xmark" style="font-size:2rem; opacity:0.4; margin-bottom:6px;"></i>
+                        <p style="font-size:0.85rem; font-weight:700;">No attendance sessions found for this course yet.</p>
+                    </div>
+                `;
+            } else {
+                allSessions.forEach(sess => {
+                    const sessLecNo = Number(sess.lectureNumber || 1);
+                    const isSecOrLab = sess.sessionType === "section" || sess.sessionType === "lab";
+                    const typeLabel = sess.sessionType === "lab" ? "Lab" : (isSecOrLab ? "Section" : "Lecture");
+                    const grpLabel = sess.group ? ` (${sess.group})` : "";
+                    const dateStr = sess.startedAtDate || "-";
+
+                    // البحث عن حضور الطالب في هذه الجلسة
+                    const record = myRecords.find(r => r.sessionId === sess.id || (String(r.courseId).toLowerCase() === String(courseId).toLowerCase() && Number(r.lectureNumber) === sessLecNo));
+                    const isPending = localQueue.some(q => q.sessionId === sess.id || (String(q.courseId).toLowerCase() === String(courseId).toLowerCase() && Number(q.lectureNumber) === sessLecNo));
+                    const localAttendedKey = `${String(courseId).toLowerCase()}_L${sessLecNo}`;
+                    const isLocallyRecorded = Boolean(localAttendedHistory[localAttendedKey]);
+
+                    let statusBadge = "";
+                    let isAttended = false;
+
+                    if (isPending) {
+                        isAttended = true;
+                        statusBadge = `<span style="background:#FEF3C7; color:#B45309; border:1px solid #FDE68A; padding:2px 8px; border-radius:6px; font-size:0.7rem; font-weight:800; display:inline-flex; align-items:center; gap:4px;"><i class="fa-solid fa-clock"></i> Pending Sync ⏳</span>`;
+                    } else if (record) {
+                        isAttended = true;
+                        const isOffMethod = record.method === "OFFLINE_QR_SYNC" || String(record.method || "").includes("OFFLINE");
+                        if (isOffMethod) {
+                            statusBadge = `<span style="background:#E0F2FE; color:#0369A1; border:1px solid #BAE6FD; padding:2px 8px; border-radius:6px; font-size:0.7rem; font-weight:800; display:inline-flex; align-items:center; gap:4px;"><i class="fa-solid fa-wifi-slash"></i> Attended (Offline) 📴</span>`;
+                        } else {
+                            statusBadge = `<span style="background:#DCFCE7; color:#15803D; border:1px solid #BBF7D0; padding:2px 8px; border-radius:6px; font-size:0.7rem; font-weight:800; display:inline-flex; align-items:center; gap:4px;"><i class="fa-solid fa-circle-check"></i> Attended (Online) 🌐</span>`;
+                        }
+                    } else if (isLocallyRecorded) {
+                        isAttended = true;
+                        statusBadge = `<span style="background:#DCFCE7; color:#15803D; border:1px solid #BBF7D0; padding:2px 8px; border-radius:6px; font-size:0.7rem; font-weight:800; display:inline-flex; align-items:center; gap:4px;"><i class="fa-solid fa-circle-check"></i> Present ✔</span>`;
+                    } else {
+                        statusBadge = `<span style="background:#FEE2E2; color:#DC2626; border:1px solid #FECACA; padding:2px 8px; border-radius:6px; font-size:0.7rem; font-weight:800; display:inline-flex; align-items:center; gap:4px;"><i class="fa-solid fa-circle-xmark"></i> Missed ❌</span>`;
+                    }
+
+                    if (isAttended) attendedCount++;
+                    else missedCount++;
+
+                    const itemCard = document.createElement("div");
+                    itemCard.style.cssText = "background:#F8FAFC; border:1px solid #E2E8F0; border-radius:12px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center; gap:8px;";
+                    itemCard.innerHTML = `
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <div style="width:34px; height:34px; border-radius:8px; background:${isSecOrLab ? '#EFF6FF' : '#FEF3C7'}; color:${isSecOrLab ? '#1D4ED8' : '#B45309'}; display:flex; align-items:center; justify-content:center; font-size:0.95rem;">
+                                <i class="fa-solid ${isSecOrLab ? 'fa-chalkboard-user' : 'fa-chalkboard'}"></i>
+                            </div>
+                            <div>
+                                <strong style="font-size:0.86rem; color:#0F172A; display:block;">${typeLabel} #${sessLecNo}${grpLabel}</strong>
+                                <span style="font-size:0.73rem; color:#64748B; font-weight:600;"><i class="fa-regular fa-calendar"></i> ${dateStr}</span>
+                            </div>
+                        </div>
+                        <div>${statusBadge}</div>
+                    `;
+                    fragment.appendChild(itemCard);
+                });
+                listEl.appendChild(fragment);
+            }
+
+            // تحديث كروت الإحصائيات في الأعلى
+            const totalSessions = attendedCount + missedCount;
+            const rateVal = totalSessions > 0 ? Math.round((attendedCount / totalSessions) * 100) : 100;
+
+            statAttended.innerText = attendedCount;
+            statMissed.innerText = missedCount;
+            statRate.innerText = `${rateVal}%`;
+
+            loaderEl.classList.add("d-none");
+            summaryBox.classList.remove("d-none");
+            listEl.classList.remove("d-none");
+        }
+
+        // ربط أزرار الفتح والإغلاق وتغيير المادة
+        document.getElementById("btn-open-student-history")?.addEventListener("click", openStudentHistoryModal);
+        document.getElementById("btn-close-history-modal")?.addEventListener("click", () => {
+            document.getElementById("modal-student-history").classList.add("d-none");
+        });
+        document.getElementById("history-course-select")?.addEventListener("change", (e) => {
+            const sid = getSavedStudentId() || inputId.value.trim();
+            if (e.target.value) renderCourseAttendanceLog(sid, e.target.value);
+        });
     </script>
 <!-- الشريط الثابت لحقوق التصميم والتطوير بتأثير مضيء (Glowing Developer Signature) -->
 <div id="app-footer-credits" style="position: fixed; bottom: 0; left: 0; right: 0; text-align: center; padding: 0.42rem 0.75rem; font-size: 0.78rem; font-weight: 700; background: rgba(15, 2, 5, 0.78); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid rgba(197, 155, 39, 0.35); z-index: 9999; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);">
