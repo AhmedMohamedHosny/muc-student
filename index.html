@@ -2051,7 +2051,7 @@ let pinCheck = null;
 
 // 1. استخراج نوع الجلسة الفعلي (الافتراضي دائماً Lecture ما لم تحدد الجلسة غير ذلك)
                 const sessData = (pinCheck && pinCheck.sessionData) ? pinCheck.sessionData : {};
-                const sType = sessData.sessionType === "section" ? "section" : (sessData.sessionType === "lab" ? "lab" : "lecture");
+const sType = sessData.sessionType || decodedPin.sessionType || "lecture";
                 const sGroup = sessData.group || "";
 
                 // 2. فحص السكشن فقط لو كانت الجلسة فعلياً سكشن أو معمل لمعيد وبها مجموعة محددة

@@ -126,7 +126,9 @@ export function decodePinMetadata(pin) {
     const isOfflineModePin = (codeVal % 2) === 1;
     const extractedLecNum = (Math.floor(codeVal / 2) % 15) || 15;
     const courseIdx = Math.floor(codeVal / 30) % 30;
-
+const saltVal = Math.floor(codeVal / 900);
+const typeIdx = isOfflineModePin ? Math.floor(saltVal / 3) : 0;
+const sessionType = typeIdx === 2 ? "lab" : (typeIdx === 1 ? "section" : "lecture");
     let courseId = "";
     let courseName = "";
 
@@ -170,6 +172,7 @@ export function decodePinMetadata(pin) {
         isOfflineModePin,
         lectureNumber: extractedLecNum,
         courseIdx,
+                sessionType,
         courseId: courseId || "MUC_COURSE",
         courseName: resolvedName
     };
