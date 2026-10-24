@@ -2051,7 +2051,7 @@ let pinCheck = null;
 
 // 1. استخراج نوع الجلسة الفعلي (الافتراضي دائماً Lecture ما لم تحدد الجلسة غير ذلك)
                 const sessData = (pinCheck && pinCheck.sessionData) ? pinCheck.sessionData : {};
-const sType = sessData.sessionType || decodedPin.sessionType || "lecture";
+                const sType = sessData.sessionType === "section" ? "section" : (sessData.sessionType === "lab" ? "lab" : "lecture");
                 const sGroup = sessData.group || "";
 
                 // 2. فحص السكشن فقط لو كانت الجلسة فعلياً سكشن أو معمل لمعيد وبها مجموعة محددة
@@ -2121,7 +2121,8 @@ const sType = sessData.sessionType || decodedPin.sessionType || "lecture";
             "user_centered": "User Centered Design",
             "cse_modern_workshop": "Modern Workshop",
             "cse122": "Logic Design (CSE122)",
-    "praxis_programming_lec1": "Praxis Programming",
+            "praxis_programming_lec1": "Praxis Programming (Lec 1)",
+            "praxis_programming_lec2": "Praxis Programming (Lec 2)"
         };
 
         async function openStudentHistoryModal() {
