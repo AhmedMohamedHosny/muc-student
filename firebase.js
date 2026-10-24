@@ -89,7 +89,6 @@ const PRAXIS_LEC2_STUDENTS = new Set([
 ]);
 export function getCoursePinIndex(courseId) {
     const s = String(courseId || "").trim().toLowerCase();
-    if (s.includes("praxis")) return 27;
     if (!s) return 0;
     let h = 0;
     for (let i = 0; i < s.length; i++) {
@@ -110,7 +109,8 @@ const KNOWN_MUC_COURSES = {
     "user_centered": "User Centered Design",
     "cse_modern_workshop": "Modern Workshop",
     "cse122": "Logic Design (CSE122)",
-    "praxis_programming_lec1": "Praxis Programming",
+    "praxis_programming_lec1": "Praxis Programming (Lec 1)",
+    "praxis_programming_lec2": "Praxis Programming (Lec 2)"
 };
 
 function formatReadableCourseId(cid) {
@@ -126,9 +126,7 @@ export function decodePinMetadata(pin) {
     const isOfflineModePin = (codeVal % 2) === 1;
     const extractedLecNum = (Math.floor(codeVal / 2) % 15) || 15;
     const courseIdx = Math.floor(codeVal / 30) % 30;
-const saltVal = Math.floor(codeVal / 900);
-const typeIdx = isOfflineModePin ? Math.floor(saltVal / 3) : 0;
-const sessionType = typeIdx === 2 ? "lab" : (typeIdx === 1 ? "section" : "lecture");
+
     let courseId = "";
     let courseName = "";
 
@@ -172,7 +170,6 @@ const sessionType = typeIdx === 2 ? "lab" : (typeIdx === 1 ? "section" : "lectur
         isOfflineModePin,
         lectureNumber: extractedLecNum,
         courseIdx,
-                sessionType,
         courseId: courseId || "MUC_COURSE",
         courseName: resolvedName
     };
@@ -209,7 +206,6 @@ export function clearLectureAttendedLocally(sid, courseId, lecNum) {
 
 export function isValidPinChecksum(pin) {
     const s = String(pin || "").trim();
-
     if (!/^\d{6}$/.test(s)) return false;
     const d1 = Number(s[0]), d2 = Number(s[1]), d3 = Number(s[2]), d4 = Number(s[3]);
     if (d1 === 0) return false;
