@@ -750,6 +750,7 @@ export async function syncPendingAttendance() {
     if (!Array.isArray(queue) || queue.length === 0) return 0;
 
     let uploaded = 0;
+    const syncedDetails = [];
     isSyncing = true;
 
     try {
@@ -826,14 +827,18 @@ export async function syncPendingAttendance() {
                 const studentRealName = stdSnap.data()?.name || item.studentName || "Student";
                 const recordId = `${matchedSessionId}_${item.studentId}`;
 
+                const finalCourseName = sData.courseName || item.courseName || "Course";
+                const finalLecNum = Number(sData.lectureNumber || item.lectureNumber || 1);
+                const finalType = sData.sessionType || item.sessionType || "lecture";
+
                 // 4. رفع وتثبيت حضور الطالب في جلسة الدكتور الفعلية
                 const recordPayload = {
                     recordId,
                     sessionId: matchedSessionId,
                     courseId: sData.courseId || item.courseId || "MUC_COURSE",
-                    courseName: sData.courseName || item.courseName || "Course",
-                    lectureNumber: Number(sData.lectureNumber || item.lectureNumber || 1),
-                    sessionType: sData.sessionType || item.sessionType || "lecture",
+                    courseName: finalCourseName,
+                    lectureNumber: finalLecNum,
+                    sessionType: finalType,
                     studentId: item.studentId,
                     studentName: studentRealName,
                     deviceId: item.deviceId || getLocalDeviceId(),
@@ -845,14 +850,26 @@ export async function syncPendingAttendance() {
 
                 await withTimeout(setDoc(doc(db, "attendance_records", recordId), recordPayload, { merge: true }), 4500);
 
-                // حذف السجل من طابور الهاتف فقط بعد التأكد التام من وصوله للسيرفر
+                // حذف السجل من طابور الهاتف وتخزين تفاصيل المحاضرة لإشعار الطالب
                 removeFromQueue(item);
                 uploaded++;
-                console.log(`✅ Successfully synced attendance for student (${item.studentId})`);
+                syncedDetails.push({
+                    courseName: finalCourseName,
+                    lectureNumber: finalLecNum,
+                    sessionType: finalType
+                });
+                console.log(`✅ Successfully synced attendance for student (${item.studentId}) in ${finalCourseName}`);
 
             } catch (itemErr) {
                 console.warn("Item sync postponed:", itemErr.message);
             }
+        }
+
+        // إطلاق إشعار نجاح فوري للواجهة يحمل تفاصيل المقررات التي تم رفعها
+        if (syncedDetails.length > 0) {
+            try {
+                window.dispatchEvent(new CustomEvent("muc_attendance_synced_event", { detail: syncedDetails }));
+            } catch (_) {}
         }
     } catch (err) {
         console.warn("Sync batch notice:", err.message);
