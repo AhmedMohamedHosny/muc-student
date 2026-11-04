@@ -1915,6 +1915,39 @@ document.getElementById("btn-clear-pending")?.addEventListener("click", () => {
 });
 */
         window.addEventListener("online", () => runSync(false));
+        // 🔔 إشعار فوري لطمأنة الطالب بتأكيد رفع المحاضرات الأوفلاين باسم المادة ورقمها
+        window.addEventListener("muc_attendance_synced_event", async (e) => {
+            const syncedList = e.detail || [];
+            if (syncedList.length === 0) return;
+
+            refreshPendingBanner();
+
+            // تشغيل نغمة النجاح المبهجة
+            if (typeof playFeedbackSound === "function") {
+                playFeedbackSound(true);
+            }
+
+            // إعداد كشف المحاضرات المرفوعة بدقة
+            const lecturesSummary = syncedList.map(item => {
+                const typeName = item.sessionType === "lab" ? "Lab" : (item.sessionType === "section" ? "Section" : "Lecture");
+                return `📚 ${item.courseName}\n📌 ${typeName} #${item.lectureNumber}`;
+            }).join("\n\n");
+
+            // عرض نافذة التأكيد الرسمية المعتمدة
+            await showCustomAlert(
+                "Attendance Uploaded Successfully! 🎉",
+                `تم تأكيد ورفع حضورك بنجاح:\n\n${lecturesSummary}\n\nالحالة الآن: حاضر (Present ✔) وموثقة في كشف الدكتور.`,
+                false
+            );
+
+            // لو الطالب كان فاتح شاشة الإيصال، نحول له الحالة لـ Present ✔
+            const statusEl = document.getElementById("rcpt-status");
+            if (statusEl) statusEl.innerText = "Present ✔";
+            const titleEl = document.getElementById("status-title");
+            if (titleEl) titleEl.innerText = "Attendance Confirmed Successfully!";
+            const msgEl = document.getElementById("status-msg");
+            if (msgEl) msgEl.innerText = "Your attendance has been uploaded and registered on the server.";
+        });
         document.addEventListener("visibilitychange", () => {
             if (document.visibilityState === "visible") runSync(false);
         });
