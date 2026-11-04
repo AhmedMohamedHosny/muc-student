@@ -2024,8 +2024,8 @@ let pinCheck = null;
                     throw new Error("🌐 هذه المحاضرة أونلاين (مباشرة) وتتطلب اتصالاً بالإنترنت لتسجيل حضورك فوراً على شاشة المدرج!\n\nيرجى فتح بيانات الهاتف (Mobile Data) أو الـ Wi-Fi والمحاولة مرة أخرى.");
                 }
 
-                // 1. فحص السيرفر أولاً إذا كان الطالب متصلاً بالإنترنت
-                if (navigator.onLine) {
+// 1. فحص السيرفر لحظياً فقط إذا كانت المحاضرة أونلاين (!isOfflineModePin)
+                if (!isOfflineModePin && navigator.onLine) {
                     try {
                         pinCheck = await verifyPinOnServerFast(enteredPin);
 
