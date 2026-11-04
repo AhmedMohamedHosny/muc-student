@@ -1516,13 +1516,13 @@ let html5QrScanner = null;
             } catch (e) {}
         }
 
-// دالة تنفيذ تسجيل الحضور الذكي بمجرد لقط الـ QR (بنفس منطق وثبات الـ PIN تماماً)
+// دالة تنفيذ تسجيل الحضور الذكي بمجرد لقط الـ QR (أونلاين وأوفلاين)
         async function processInstantQrCheckIn() {
             const sid = getSavedStudentId() || inputId.value.trim();
             const studentRealName = getSavedStudentName(sid) || "طالب";
 
             try {
-                // أ. لو الباركود لمحاضرة أوفلاين (يُحفظ في الهاتف وينتظر رفع الدكتور مثل الـ PIN الأوفلاين تماماً)
+                // أ. لو الباركود لمحاضرة أوفلاين
                 if (offlinePayload) {
                     const enrolledLocal = JSON.parse(localStorage.getItem("muc_student_courses") || "[]").map(c => String(c).toLowerCase().trim());
                     if (enrolledLocal.length > 0) {
@@ -1553,21 +1553,36 @@ let html5QrScanner = null;
                         sessionType: offlinePayload.st,
                         group: offlinePayload.g,
                         hostRole: offlinePayload.hr,
-                        doctorId: offlinePayload.d,
-                        pin: offlinePayload.pin || ""
+                        doctorId: offlinePayload.d
                     });
 
-                    // لا نرفع فوراً عند مسح الأوفلاين بل نُظهر حالة الحفظ المحلي انتظاراً لرفع الدكتور مثل الـ PIN تماماً
+                    if (navigator.onLine) {
+                        await syncPendingAttendance();
+                    }
                     refreshPendingBanner();
-                    showResult(true, "Saved Offline!", "QR verified and saved on your phone. It will sync automatically once the lecture is uploaded.");
+
+                    const syncErr = localStorage.getItem("muc_sync_error");
+                    if (syncErr) {
+                        localStorage.removeItem("muc_sync_error");
+                        throw new Error(syncErr);
+                    }
+
+                    const isAlreadySynced = getPendingCount() === 0;
+                    if (isAlreadySynced) {
+                        showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been uploaded and registered on the server.");
+                        document.getElementById("rcpt-status").innerText = "Present ✔";
+                    } else {
+                        showResult(true, "Attendance Saved Offline!", "Saved locally on your phone. It will upload automatically once internet is available.");
+                        document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
+                    }
+
                     document.getElementById("rcpt-name").innerText = getSavedStudentName(sid) || studentRealName;
                     document.getElementById("rcpt-id").innerText = sid;
                     document.getElementById("rcpt-course").innerText = String(offlinePayload.cn || "").toLowerCase().includes("praxis") ? "Praxis Programming" : (offlinePayload.cn || "Course");
-                    const offType = offlinePayload.st === "lab" ? "Lab" : (offlinePayload.st === "section" ? "Section" : "Lecture");
-                    document.getElementById("rcpt-lecture").innerText = `${offType} #${realLectureNum}`;
-                    document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
+const offType = offlinePayload.st === "lab" ? "Lab" : (offlinePayload.st === "section" ? "Section" : "Lecture");
+document.getElementById("rcpt-lecture").innerText = `${offType} #${realLectureNum}`;
+                                        document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
                     document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
-                    document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
                     document.getElementById("receipt-box").classList.remove("d-none");
                     return;
                 }
@@ -1581,14 +1596,10 @@ let html5QrScanner = null;
                 try {
                     res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
                 } catch (firstErr) {
-                    // إذا تأخر تثبيت معرّف الجلسة المباشر، نتحقق فوراً عبر كود الـ PIN المدمج في الباركود مثل زر الـ PIN تماماً
-                    if (window.lastScannedPin && /^\d{6}$/.test(String(window.lastScannedPin))) {
-                        const pinCheck = await verifyPinOnServerFast(String(window.lastScannedPin));
-                        if (pinCheck && pinCheck.status === "VALID" && pinCheck.sessionId) {
-                            res = await recordStudentAttendance(pinCheck.sessionId, "PIN_VERIFIED", sid, deviceId, pinCheck.sessionData);
-                        } else {
-                            throw firstErr;
-                        }
+                    const fm = String(firstErr?.message || "");
+                    if (fm === "NETWORK_TIMEOUT" || fm.includes("Failed to fetch") || fm.includes("network-request-failed")) {
+                        // محاولة ثانية تلقائية فورية عند ازدحام الشبكة بالمدرج
+                        res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
                     } else {
                         throw firstErr;
                     }
@@ -1659,10 +1670,7 @@ let html5QrScanner = null;
                                 const tParam = parsed.searchParams.get("token") || "";
                                 const isOffline = parsed.searchParams.get("offline") === "1" || tParam.startsWith("OFF_") || sParam.startsWith("off_");
 
-const scannedPin = parsed.searchParams.get("pin") || "";
-                                window.lastScannedPin = scannedPin;
-
-                                if (isOffline) {
+if (isOffline) {
                                     activeSessionId = sParam;
                                     activeToken = tParam;
                                     const cName = parsed.searchParams.get("cname") || parsed.searchParams.get("course") || "جلسة أوفلاين";
@@ -1675,7 +1683,6 @@ const scannedPin = parsed.searchParams.get("pin") || "";
                                         l: Number(parsed.searchParams.get("lec") || 1),
                                         st: sType,
                                         g: sGroup,
-                                        pin: scannedPin,
                                         t: Math.floor(Date.now() / 10000),
                                         h: activeToken,
                                         ts: Number(parsed.searchParams.get("ts") || Date.now())
@@ -1907,61 +1914,12 @@ document.getElementById("btn-clear-pending")?.addEventListener("click", () => {
     document.getElementById("sync-feedback").innerText = "";
 });
 */
-// 🔔 إشعار فوري لطمأنة الطالب بتأكيد رفع المحاضرات الأوفلاين باسم المادة ورقمها
-        window.addEventListener("muc_attendance_synced_event", async (e) => {
-            const syncedList = e.detail || [];
-            if (syncedList.length === 0) return;
-
-            refreshPendingBanner();
-
-            // تشغيل نغمة النجاح المبهجة
-            if (typeof playFeedbackSound === "function") {
-                playFeedbackSound(true);
-            }
-
-            // إعداد كشف المحاضرات المرفوعة بدقة
-            const lecturesSummary = syncedList.map(item => {
-                const typeName = item.sessionType === "lab" ? "Lab" : (item.sessionType === "section" ? "Section" : "Lecture");
-                return `📚 ${item.courseName}\n📌 ${typeName} #${item.lectureNumber}`;
-            }).join("\n\n");
-
-            // عرض نافذة التأكيد الرسمية المعتمدة
-            await showCustomAlert(
-                "Attendance Uploaded Successfully! 🎉",
-                `تم تأكيد ورفع حضورك بنجاح:\n\n${lecturesSummary}\n\nالحالة الآن: حاضر (Present ✔) وموثقة في كشف الدكتور.`,
-                false
-            );
-
-            // لو الطالب كان فاتح شاشة الإيصال، نحول له الحالة لـ Present ✔
-            const statusEl = document.getElementById("rcpt-status");
-            if (statusEl) statusEl.innerText = "Present ✔";
-            const titleEl = document.getElementById("status-title");
-            if (titleEl) titleEl.innerText = "Attendance Confirmed Successfully!";
-            const msgEl = document.getElementById("status-msg");
-            if (msgEl) msgEl.innerText = "Your attendance has been uploaded and registered on the server.";
-        });
-
-        // 🚀 مجسات المزامنة الصامتة الذكية (تدعم أندرويد + سفاري آيفون iOS بالكامل بدون لمس زر الرفع)
-        const triggerSilentAutoSync = () => {
-            if (navigator.onLine && typeof getPendingCount === "function" && getPendingCount() > 0) {
-                runSync(false);
-            }
-        };
-
         window.addEventListener("online", () => runSync(false));
-        window.addEventListener("focus", triggerSilentAutoSync);
-        window.addEventListener("pageshow", triggerSilentAutoSync); // مخصص لمتصفح Safari في الآيفون عند فتح الشاشة
         document.addEventListener("visibilitychange", () => {
-            if (document.visibilityState === "visible") triggerSilentAutoSync();
+            if (document.visibilityState === "visible") runSync(false);
         });
-        // بمجرد أن يلمس الطالب شاشة الموبايل في أي مكان والنت شغال يرفع تلقائياً
-        document.addEventListener("touchstart", triggerSilentAutoSync, { passive: true });
 
 document.getElementById("btn-enter-pin")?.addEventListener("click", async () => {
-            // 🛡️ رفع تراكمي لأي محاضرة سابقة معلقة فور فتح نافذة الـ PIN
-            if (navigator.onLine && typeof getPendingCount === "function" && getPendingCount() > 0) {
-                syncPendingAttendance().catch(() => {});
-            }
             if (html5QrScanner) {
                 try { await html5QrScanner.stop(); await html5QrScanner.clear(); } catch(e) {}
             }
@@ -2012,8 +1970,8 @@ let pinCheck = null;
                     throw new Error("🌐 هذه المحاضرة أونلاين (مباشرة) وتتطلب اتصالاً بالإنترنت لتسجيل حضورك فوراً على شاشة المدرج!\n\nيرجى فتح بيانات الهاتف (Mobile Data) أو الـ Wi-Fi والمحاولة مرة أخرى.");
                 }
 
-// 1. فحص السيرفر لحظياً فقط إذا كانت المحاضرة أونلاين (!isOfflineModePin)
-                if (!isOfflineModePin && navigator.onLine) {
+                // 1. فحص السيرفر أولاً إذا كان الطالب متصلاً بالإنترنت
+                if (navigator.onLine) {
                     try {
                         pinCheck = await verifyPinOnServerFast(enteredPin);
 
@@ -2159,18 +2117,7 @@ let pinCheck = null;
                 btnPin.innerHTML = `<i class="fa-solid fa-keyboard"></i> <span>Enter 6-Digit PIN</span>`;
             }
         });
-setInterval(() => {
-            refreshPendingBanner();
-            showSyncErrorIfAny();
-        }, 3000);
-
-        // فحص دوري صامت كل 10 ثوانٍ يرفع السجل تلقائياً بمجرد رفع الدكتور للمحاضرة
-        setInterval(() => {
-            if (navigator.onLine && typeof getPendingCount === "function" && getPendingCount() > 0) {
-                runSync(false);
-            }
-        }, 10000);
-
+        setInterval(() => { refreshPendingBanner(); showSyncErrorIfAny(); }, 3000);
         refreshPendingBanner();
         runSync(false);
         // ========================================================
@@ -2506,4 +2453,4 @@ setInterval(() => {
 </script>
 
 </body>
-</html>
+                    </html>
