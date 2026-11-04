@@ -1516,18 +1516,13 @@ let html5QrScanner = null;
             } catch (e) {}
         }
 
-// دالة تنفيذ تسجيل الحضور الذكي بمجرد لقط الـ QR (أونلاين وأوفلاين)
+// دالة تنفيذ تسجيل الحضور الذكي بمجرد لقط الـ QR (بنفس منطق وثبات الـ PIN تماماً)
         async function processInstantQrCheckIn() {
             const sid = getSavedStudentId() || inputId.value.trim();
             const studentRealName = getSavedStudentName(sid) || "طالب";
 
-            // 🛡️ الرفع التراكمي التلقائي: رفع أي محاضرات قديمة معلقة في الهاتف قبل تسجيل المحاضرة الحالية
-            if (navigator.onLine && typeof getPendingCount === "function" && getPendingCount() > 0) {
-                try { await syncPendingAttendance(); } catch (_) {}
-            }
-
             try {
-                // أ. لو الباركود لمحاضرة أوفلاين
+                // أ. لو الباركود لمحاضرة أوفلاين (يُحفظ في الهاتف وينتظر رفع الدكتور مثل الـ PIN الأوفلاين تماماً)
                 if (offlinePayload) {
                     const enrolledLocal = JSON.parse(localStorage.getItem("muc_student_courses") || "[]").map(c => String(c).toLowerCase().trim());
                     if (enrolledLocal.length > 0) {
@@ -1558,36 +1553,21 @@ let html5QrScanner = null;
                         sessionType: offlinePayload.st,
                         group: offlinePayload.g,
                         hostRole: offlinePayload.hr,
-                        doctorId: offlinePayload.d
+                        doctorId: offlinePayload.d,
+                        pin: offlinePayload.pin || ""
                     });
 
-                    if (navigator.onLine) {
-                        await syncPendingAttendance();
-                    }
+                    // لا نرفع فوراً عند مسح الأوفلاين بل نُظهر حالة الحفظ المحلي انتظاراً لرفع الدكتور مثل الـ PIN تماماً
                     refreshPendingBanner();
-
-                    const syncErr = localStorage.getItem("muc_sync_error");
-                    if (syncErr) {
-                        localStorage.removeItem("muc_sync_error");
-                        throw new Error(syncErr);
-                    }
-
-                    const isAlreadySynced = getPendingCount() === 0;
-                    if (isAlreadySynced) {
-                        showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been uploaded and registered on the server.");
-                        document.getElementById("rcpt-status").innerText = "Present ✔";
-                    } else {
-                        showResult(true, "Attendance Saved Offline!", "Saved locally on your phone. It will upload automatically once internet is available.");
-                        document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
-                    }
-
+                    showResult(true, "Saved Offline!", "QR verified and saved on your phone. It will sync automatically once the lecture is uploaded.");
                     document.getElementById("rcpt-name").innerText = getSavedStudentName(sid) || studentRealName;
                     document.getElementById("rcpt-id").innerText = sid;
                     document.getElementById("rcpt-course").innerText = String(offlinePayload.cn || "").toLowerCase().includes("praxis") ? "Praxis Programming" : (offlinePayload.cn || "Course");
-const offType = offlinePayload.st === "lab" ? "Lab" : (offlinePayload.st === "section" ? "Section" : "Lecture");
-document.getElementById("rcpt-lecture").innerText = `${offType} #${realLectureNum}`;
-                                        document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
+                    const offType = offlinePayload.st === "lab" ? "Lab" : (offlinePayload.st === "section" ? "Section" : "Lecture");
+                    document.getElementById("rcpt-lecture").innerText = `${offType} #${realLectureNum}`;
+                    document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
                     document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
+                    document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
                     document.getElementById("receipt-box").classList.remove("d-none");
                     return;
                 }
@@ -1601,10 +1581,14 @@ document.getElementById("rcpt-lecture").innerText = `${offType} #${realLectureNu
                 try {
                     res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
                 } catch (firstErr) {
-                    const fm = String(firstErr?.message || "");
-                    if (fm === "NETWORK_TIMEOUT" || fm.includes("Failed to fetch") || fm.includes("network-request-failed")) {
-                        // محاولة ثانية تلقائية فورية عند ازدحام الشبكة بالمدرج
-                        res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
+                    // إذا تأخر تثبيت معرّف الجلسة المباشر، نتحقق فوراً عبر كود الـ PIN المدمج في الباركود مثل زر الـ PIN تماماً
+                    if (window.lastScannedPin && /^\d{6}$/.test(String(window.lastScannedPin))) {
+                        const pinCheck = await verifyPinOnServerFast(String(window.lastScannedPin));
+                        if (pinCheck && pinCheck.status === "VALID" && pinCheck.sessionId) {
+                            res = await recordStudentAttendance(pinCheck.sessionId, "PIN_VERIFIED", sid, deviceId, pinCheck.sessionData);
+                        } else {
+                            throw firstErr;
+                        }
                     } else {
                         throw firstErr;
                     }
@@ -1675,7 +1659,10 @@ document.getElementById("rcpt-lecture").innerText = `${offType} #${realLectureNu
                                 const tParam = parsed.searchParams.get("token") || "";
                                 const isOffline = parsed.searchParams.get("offline") === "1" || tParam.startsWith("OFF_") || sParam.startsWith("off_");
 
-if (isOffline) {
+const scannedPin = parsed.searchParams.get("pin") || "";
+                                window.lastScannedPin = scannedPin;
+
+                                if (isOffline) {
                                     activeSessionId = sParam;
                                     activeToken = tParam;
                                     const cName = parsed.searchParams.get("cname") || parsed.searchParams.get("course") || "جلسة أوفلاين";
@@ -1688,6 +1675,7 @@ if (isOffline) {
                                         l: Number(parsed.searchParams.get("lec") || 1),
                                         st: sType,
                                         g: sGroup,
+                                        pin: scannedPin,
                                         t: Math.floor(Date.now() / 10000),
                                         h: activeToken,
                                         ts: Number(parsed.searchParams.get("ts") || Date.now())
