@@ -1521,6 +1521,11 @@ let html5QrScanner = null;
             const sid = getSavedStudentId() || inputId.value.trim();
             const studentRealName = getSavedStudentName(sid) || "طالب";
 
+            // 🛡️ الرفع التراكمي التلقائي: رفع أي محاضرات قديمة معلقة في الهاتف قبل تسجيل المحاضرة الحالية
+            if (navigator.onLine && typeof getPendingCount === "function" && getPendingCount() > 0) {
+                try { await syncPendingAttendance(); } catch (_) {}
+            }
+
             try {
                 // أ. لو الباركود لمحاضرة أوفلاين
                 if (offlinePayload) {
@@ -1914,8 +1919,7 @@ document.getElementById("btn-clear-pending")?.addEventListener("click", () => {
     document.getElementById("sync-feedback").innerText = "";
 });
 */
-        window.addEventListener("online", () => runSync(false));
-        // 🔔 إشعار فوري لطمأنة الطالب بتأكيد رفع المحاضرات الأوفلاين باسم المادة ورقمها
+// 🔔 إشعار فوري لطمأنة الطالب بتأكيد رفع المحاضرات الأوفلاين باسم المادة ورقمها
         window.addEventListener("muc_attendance_synced_event", async (e) => {
             const syncedList = e.detail || [];
             if (syncedList.length === 0) return;
@@ -1948,11 +1952,28 @@ document.getElementById("btn-clear-pending")?.addEventListener("click", () => {
             const msgEl = document.getElementById("status-msg");
             if (msgEl) msgEl.innerText = "Your attendance has been uploaded and registered on the server.";
         });
+
+        // 🚀 مجسات المزامنة الصامتة الذكية (تدعم أندرويد + سفاري آيفون iOS بالكامل بدون لمس زر الرفع)
+        const triggerSilentAutoSync = () => {
+            if (navigator.onLine && typeof getPendingCount === "function" && getPendingCount() > 0) {
+                runSync(false);
+            }
+        };
+
+        window.addEventListener("online", () => runSync(false));
+        window.addEventListener("focus", triggerSilentAutoSync);
+        window.addEventListener("pageshow", triggerSilentAutoSync); // مخصص لمتصفح Safari في الآيفون عند فتح الشاشة
         document.addEventListener("visibilitychange", () => {
-            if (document.visibilityState === "visible") runSync(false);
+            if (document.visibilityState === "visible") triggerSilentAutoSync();
         });
+        // بمجرد أن يلمس الطالب شاشة الموبايل في أي مكان والنت شغال يرفع تلقائياً
+        document.addEventListener("touchstart", triggerSilentAutoSync, { passive: true });
 
 document.getElementById("btn-enter-pin")?.addEventListener("click", async () => {
+            // 🛡️ رفع تراكمي لأي محاضرة سابقة معلقة فور فتح نافذة الـ PIN
+            if (navigator.onLine && typeof getPendingCount === "function" && getPendingCount() > 0) {
+                syncPendingAttendance().catch(() => {});
+            }
             if (html5QrScanner) {
                 try { await html5QrScanner.stop(); await html5QrScanner.clear(); } catch(e) {}
             }
@@ -2150,7 +2171,18 @@ let pinCheck = null;
                 btnPin.innerHTML = `<i class="fa-solid fa-keyboard"></i> <span>Enter 6-Digit PIN</span>`;
             }
         });
-        setInterval(() => { refreshPendingBanner(); showSyncErrorIfAny(); }, 3000);
+setInterval(() => {
+            refreshPendingBanner();
+            showSyncErrorIfAny();
+        }, 3000);
+
+        // فحص دوري صامت كل 10 ثوانٍ يرفع السجل تلقائياً بمجرد رفع الدكتور للمحاضرة
+        setInterval(() => {
+            if (navigator.onLine && typeof getPendingCount === "function" && getPendingCount() > 0) {
+                runSync(false);
+            }
+        }, 10000);
+
         refreshPendingBanner();
         runSync(false);
         // ========================================================
