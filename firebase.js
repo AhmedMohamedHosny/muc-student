@@ -325,22 +325,25 @@ function withTimeout(promise, ms = 10000) {
     ]);
 }
 
-// فحص كود الـ PIN على السيرفر بسرعة فائقة وعلى التوازي
+// فحص كود الـ PIN على السيرفر بسرعة فائقة وعلى التوازي مع دعم فوري لأول كود في المحاضرة
 export async function verifyPinOnServerFast(enteredPin) {
     await withTimeout(ensureStudentAuth(), 6000);
     const pinNum = Number(enteredPin);
+    const decoded = decodePinMetadata(enteredPin);
+    const todayCA = new Date().toLocaleDateString("en-CA");
 
     const checkOnce = async () => {
         const [pinDocRes, queryRes] = await Promise.allSettled([
-            withTimeout(getDoc(doc(db, "attendance_pins", String(enteredPin))), 7000),
-            withTimeout(getDocs(query(collection(db, "attendance_sessions"), where("pinHistory", "array-contains", pinNum))), 7000)
+            withTimeout(getDoc(doc(db, "attendance_pins", String(enteredPin))), 6000),
+            withTimeout(getDocs(query(collection(db, "attendance_sessions"), where("pinHistory", "array-contains", pinNum))), 6000)
         ]);
 
+        // 1. الفحص المباشر في جدول attendance_pins
         if (pinDocRes.status === "fulfilled" && pinDocRes.value.exists()) {
             const pData = pinDocRes.value.data() || {};
             if (pData.sessionId) {
                 try {
-                    const sSnap = await withTimeout(getDoc(doc(db, "attendance_sessions", pData.sessionId)), 6000);
+                    const sSnap = await withTimeout(getDoc(doc(db, "attendance_sessions", pData.sessionId)), 5500);
                     if (sSnap.exists()) {
                         const sData = sSnap.data() || {};
                         if (sData.status === "deleted" || sData.finalized === true || sData.pinClosed === true) {
@@ -360,6 +363,7 @@ export async function verifyPinOnServerFast(enteredPin) {
             }
         }
 
+        // 2. الفحص في attendance_sessions عبر تاريخ الأكواد pinHistory
         if (queryRes.status === "fulfilled" && !queryRes.value.empty) {
             const qSnap = queryRes.value;
             const activeDoc = qSnap.docs.find(d => d.data().status === "active" || d.data().qrOffline === true) || qSnap.docs[0];
@@ -378,10 +382,43 @@ export async function verifyPinOnServerFast(enteredPin) {
             return { status: "VALID", sessionId: activeDoc.id, sessionData: sData, pinMeta: sData };
         }
 
+        // 3. الفحص الذكي لأول كود في أول ثانية: إذا كانت وثيقة الجلسة النشطة قد فُتحت للتو لنفس المقرر ورقم المحاضرة ولم يصل حقل الكود بعد
+        if (!decoded.isOfflineModePin) {
+            try {
+                const activeSnap = await withTimeout(getDocs(query(
+                    collection(db, "attendance_sessions"),
+                    where("status", "==", "active"),
+                    where("startedAtDate", "==", todayCA)
+                )), 5500);
+
+                if (!activeSnap.empty) {
+                    const matchedActive = activeSnap.docs.find(d => {
+                        const s = d.data() || {};
+                        if (s.pinClosed === true || s.finalized === true) return false;
+                        const sIdx = getCoursePinIndex(s.courseId || s.courseCode || "");
+                        const lecMatch = (Number(s.lectureNumber || 1) % 15 || 15) === decoded.lectureNumber;
+                        // يُقبل إذا لم يُكتب activePinCode بعد (في أول ثانية) أو كان مطابقاً للكود الحالي
+                        const pinAllowed = !s.activePinCode || Number(s.activePinCode) === pinNum || Number(s.prevPinCode) === pinNum;
+                        return sIdx === decoded.courseIdx && lecMatch && pinAllowed;
+                    });
+
+                    if (matchedActive) {
+                        const sData = matchedActive.data() || {};
+                        return { status: "VALID", sessionId: matchedActive.id, sessionData: sData, pinMeta: sData };
+                    }
+                }
+            } catch (e) {}
+        }
+
         return { status: "NOT_FOUND" };
     };
 
+    // محاولتان متتاليتان تلقائياً إذا كان الدكتور قد ضغط على بدء المحاضرة في نفس الثانية
     let resCheck = await checkOnce();
+    if (resCheck.status === "NOT_FOUND") {
+        await new Promise(r => setTimeout(r, 800));
+        resCheck = await checkOnce();
+    }
     if (resCheck.status === "NOT_FOUND") {
         await new Promise(r => setTimeout(r, 900));
         resCheck = await checkOnce();
