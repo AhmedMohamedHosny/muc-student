@@ -1516,91 +1516,123 @@ let html5QrScanner = null;
             } catch (e) {}
         }
 
-// دالة تنفيذ تسجيل الحضور الذكي بمجرد لقط الـ QR (مطابقة تماماً لذكاء وثبات الـ PIN)
+// دالة تنفيذ تسجيل الحضور الذكي بمجرد لقط الـ QR (أونلاين وأوفلاين)
         async function processInstantQrCheckIn() {
             const sid = getSavedStudentId() || inputId.value.trim();
             const studentRealName = getSavedStudentName(sid) || "طالب";
 
+            // 🛡️ الرفع التراكمي التلقائي: رفع أي محاضرات قديمة معلقة في الهاتف قبل تسجيل المحاضرة الحالية
+            if (navigator.onLine && typeof getPendingCount === "function" && getPendingCount() > 0) {
+                try { await syncPendingAttendance(); } catch (_) {}
+            }
+
             try {
-                // استخراج بيانات المقرر ورقم المحاضرة من رابط الـ QR الممسوخ
-                let targetCourseId = "MUC_COURSE";
-                let targetCourseName = window.lastScannedCourseName || "المقرر الدراسي";
-                let targetLecNum = window.lastScannedLecNo || 1;
-                let targetSessionId = activeSessionId || (offlinePayload ? offlinePayload.s : "");
-                let targetSessionType = "lecture";
-                let targetGroup = "";
-
+                // أ. لو الباركود لمحاضرة أوفلاين
                 if (offlinePayload) {
-                    targetCourseId = offlinePayload.c || "MUC_COURSE";
-                    targetCourseName = offlinePayload.cn || "المقرر الدراسي";
-                    targetLecNum = Number(offlinePayload.l ?? offlinePayload.ln ?? offlinePayload.lectureNumber ?? 1);
-                    targetSessionId = offlinePayload.s;
-                    targetSessionType = offlinePayload.st || "lecture";
-                    targetGroup = offlinePayload.g || "";
-                } else if (activeSessionId) {
-                    targetSessionId = activeSessionId;
+                    const enrolledLocal = JSON.parse(localStorage.getItem("muc_student_courses") || "[]").map(c => String(c).toLowerCase().trim());
+                    if (enrolledLocal.length > 0) {
+                        const targetCidLower = String(offlinePayload.c || "").toLowerCase().trim();
+                        const isPraxisTarget = targetCidLower.includes("praxis") || String(offlinePayload.cn || "").toLowerCase().includes("praxis");
+                        const targetIdx = (targetCidLower && targetCidLower !== "muc_course") ? getCoursePinIndex(targetCidLower) : -1;
+
+                        const isLocallyEnrolled = (targetCidLower && targetCidLower !== "muc_course" && enrolledLocal.includes(targetCidLower)) ||
+                                                  (targetIdx >= 0 && enrolledLocal.some(c => getCoursePinIndex(c) === targetIdx)) ||
+                                                  (isPraxisTarget && enrolledLocal.some(c => c.includes("praxis") || c.includes("cse212")));
+
+                        if (!isLocallyEnrolled) {
+                            throw new Error(`NOT_ENROLLED:${studentRealName}:${offlinePayload.cn || "هذا المقرر"}`);
+                        }
+                    }
+
+                    const realLectureNum = Number(offlinePayload.l ?? offlinePayload.ln ?? offlinePayload.lectureNumber ?? 1);
+                    await queueOfflineAttendance({
+                        studentId: sid,
+                        studentName: studentRealName,
+                        sessionId: offlinePayload.s,
+                        courseId: offlinePayload.c,
+                        courseName: offlinePayload.cn,
+                        lectureNumber: realLectureNum,
+                        timeSlot: offlinePayload.t,
+                        hash: offlinePayload.h,
+                        sessionStart: offlinePayload.ts,
+                        sessionType: offlinePayload.st,
+                        group: offlinePayload.g,
+                        hostRole: offlinePayload.hr,
+                        doctorId: offlinePayload.d
+                    });
+
+                    if (navigator.onLine) {
+                        await syncPendingAttendance();
+                    }
+                    refreshPendingBanner();
+
+                    const syncErr = localStorage.getItem("muc_sync_error");
+                    if (syncErr) {
+                        localStorage.removeItem("muc_sync_error");
+                        throw new Error(syncErr);
+                    }
+
+                    const isAlreadySynced = getPendingCount() === 0;
+                    if (isAlreadySynced) {
+                        showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been uploaded and registered on the server.");
+                        document.getElementById("rcpt-status").innerText = "Present ✔";
+                    } else {
+                        showResult(true, "Attendance Saved Offline!", "Saved locally on your phone. It will upload automatically once internet is available.");
+                        document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
+                    }
+
+                    document.getElementById("rcpt-name").innerText = getSavedStudentName(sid) || studentRealName;
+                    document.getElementById("rcpt-id").innerText = sid;
+                    document.getElementById("rcpt-course").innerText = String(offlinePayload.cn || "").toLowerCase().includes("praxis") ? "Praxis Programming" : (offlinePayload.cn || "Course");
+const offType = offlinePayload.st === "lab" ? "Lab" : (offlinePayload.st === "section" ? "Section" : "Lecture");
+document.getElementById("rcpt-lecture").innerText = `${offType} #${realLectureNum}`;
+                                        document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
+                    document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
+                    document.getElementById("receipt-box").classList.remove("d-none");
+                    return;
                 }
 
-                if (!targetSessionId) {
-                    targetSessionId = `qr_session_${targetCourseId}_L${targetLecNum}_${new Date().toLocaleDateString("en-CA")}`;
+                // ب. لو الباركود لمحاضرة أونلاين
+                if (!navigator.onLine) {
+                    throw new Error("🌐 هذه المحاضرة أونلاين (مباشرة) وتتطلب اتصالاً بالإنترنت لتسجيل حضورك فوراً على شاشة المدرج!\n\nيرجى فتح بيانات الهاتف (Mobile Data) أو الـ Wi-Fi والمحاولة مرة أخرى.");
                 }
 
-                // فحص القيد المحلي أولاً لضمان سرعة الاستجابة ومنع الأخطاء
-                const enrolledLocal = JSON.parse(localStorage.getItem("muc_student_courses") || "[]").map(c => String(c).toLowerCase().trim());
-                if (enrolledLocal.length > 0 && targetCourseId && targetCourseId !== "MUC_COURSE") {
-                    const targetCidLower = targetCourseId.toLowerCase();
-                    const isPraxisTarget = targetCidLower.includes("praxis") || targetCourseName.toLowerCase().includes("praxis");
-                    const targetIdx = getCoursePinIndex(targetCidLower);
-
-                    const isLocallyEnrolled = enrolledLocal.includes(targetCidLower) ||
-                                              enrolledLocal.some(c => getCoursePinIndex(c) === targetIdx) ||
-                                              (isPraxisTarget && enrolledLocal.some(c => c.includes("praxis") || c.includes("cse212")));
-
-                    if (!isLocallyEnrolled) {
-                        throw new Error(`NOT_ENROLLED:${studentRealName}:${targetCourseName}`);
+                let res;
+                try {
+                    res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
+                } catch (firstErr) {
+                    const fm = String(firstErr?.message || "");
+                    if (fm === "NETWORK_TIMEOUT" || fm.includes("Failed to fetch") || fm.includes("network-request-failed")) {
+                        // محاولة ثانية تلقائية فورية عند ازدحام الشبكة بالمدرج
+                        res = await recordStudentAttendance(activeSessionId, activeToken, sid, deviceId);
+                    } else {
+                        throw firstErr;
                     }
                 }
 
-                // حفظ الحضور في طابور الأوفلاين الذكي (ليترفع فوراً لو الدكتور فاتح نت، أو ينتظر لو قافل نت مثل الـ PIN تماماً)
-                await queueOfflineAttendance({
-                    studentId: sid,
-                    studentName: studentRealName,
-                    sessionId: targetSessionId,
-                    courseId: targetCourseId,
-                    courseName: targetCourseName,
-                    lectureNumber: targetLecNum,
-                    sessionType: targetSessionType,
-                    group: targetGroup,
-                    timeSlot: Math.floor(Date.now() / 10000),
-                    hash: activeToken || "QR_SCAN",
-                    pin: "" // معامل فارغ ليميزه النظام كمسح QR ناجح
-                });
-
-                // محاولة مزامنة فورية لو الإنترنت متوفر
-                if (navigator.onLine && typeof syncPendingAttendance === "function") {
-                    await syncPendingAttendance().catch(() => {});
+                if (res.studentName) {
+                    saveStudentIdPermanently(sid, res.studentName);
+                    welcomeNameEl.innerText = res.studentName;
                 }
                 refreshPendingBanner();
-
-                const isAlreadySynced = getPendingCount() === 0;
-                if (isAlreadySynced || navigator.onLine) {
-                    showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been recorded and registered successfully.");
-                    document.getElementById("rcpt-status").innerText = "Present ✔";
-                } else {
-                    showResult(true, "Attendance Saved Offline!", "Saved locally on your phone. It will sync automatically once internet is available.");
-                    document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
-                }
-
-                document.getElementById("rcpt-name").innerText = getSavedStudentName(sid) || studentRealName;
-                document.getElementById("rcpt-id").innerText = sid;
-                document.getElementById("rcpt-course").innerText = String(targetCourseName).toLowerCase().includes("praxis") ? "Praxis Programming" : targetCourseName;
-                const offDispType = targetSessionType === "lab" ? "Lab" : (targetSessionType === "section" ? "Section" : "Lecture");
-                document.getElementById("rcpt-lecture").innerText = `${offDispType} #${targetLecNum}`;
-                document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
-                document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
+                const typeName = res.sessionType === "lab" ? "Lab" : (res.sessionType === "section" ? "Section" : "Lecture");
+                const lecNum = res.lectureNumber || window.lastScannedLecNo || 1;
+                showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been recorded on the live classroom screen.");
+                document.getElementById("rcpt-name").innerText = res.studentName;
+                document.getElementById("rcpt-id").innerText = res.studentId;
+                document.getElementById("rcpt-course").innerText = String(res.courseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : res.courseName;
+                document.getElementById("rcpt-lecture").innerText = `${typeName} #${lecNum}`;
+                document.getElementById("rcpt-date").innerText = res.date;
+                document.getElementById("rcpt-time").innerText = res.time;
+                document.getElementById("rcpt-status").innerText = res.status === "Present" ? "Present ✔" : "Late";
                 document.getElementById("receipt-box").classList.remove("d-none");
-
             } catch (err) {
+                const errMsg = String(err.message || "");
+                if (errMsg === "NETWORK_TIMEOUT" || errMsg.includes("Failed to fetch") || errMsg.includes("network-request-failed")) {
+                    showResult(false, "Weak Network Signal", "⚠️ إشارة الإنترنت في المدرج ضعيفة جداً حالياً. يرجى الضغط على Try Again للمحاولة مرة أخرى.");
+                    return;
+                }
+                isExpiredQrError = errMsg.includes("expired") || errMsg.includes("صلاحية");
                 showResult(false, "Check-in Failed", friendlyError(err));
             }
         }
