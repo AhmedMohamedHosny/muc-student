@@ -750,7 +750,6 @@ export async function syncPendingAttendance() {
     if (!Array.isArray(queue) || queue.length === 0) return 0;
 
     let uploaded = 0;
-    const syncedDetails = [];
     isSyncing = true;
 
     try {
@@ -758,64 +757,57 @@ export async function syncPendingAttendance() {
             await withTimeout(signInAnonymously(auth), 5000);
         }
 
-        const todayCA = new Date().toLocaleDateString("en-CA");
-
         for (const item of queue) {
             try {
                 let matchedSessionId = null;
                 let matchedSessionData = null;
-                const studentScanTime = Number(item.scannedAt || Date.now());
 
-                // 1. إذا كان التسجيل بكود PIN
+                // 1. إذا كان التسجيل بكود PIN: يجب أن يطابق الكود الفعلي للجلسة الحالية حصراً
                 if (item.pin) {
-                    const pinNum = Number(item.pin);
-                    const itemCourse = String(item.courseId || "").toLowerCase();
-                    const itemLec = Number(item.lectureNumber || 1);
+                    const pinStr = String(item.pin).trim();
+                    const pinNum = Number(pinStr);
 
-                    // البحث حصرياً في جلسات اليوم لنفس المقرر التي تحتوي على الكود ورُفعت بعد وقت حضور الطالب
-                    const qSnap = await withTimeout(getDocs(query(
-                        collection(db, "attendance_sessions"),
-                        where("startedAtDate", "==", item.startedAtDate || todayCA),
-                        where("pinHistory", "array-contains", pinNum)
-                    )), 5000).catch(() => ({ empty: true, docs: [] }));
-
-                    if (!qSnap.empty) {
-                        const validDocs = qSnap.docs
-                            .map(d => ({ id: d.id, ...d.data() }))
-                            .filter(s => {
-                                if (s.status === "deleted") return false;
-                                const sCourse = String(s.courseId || "").toLowerCase();
-                                const isPraxis = itemCourse.includes("praxis") && sCourse.includes("praxis");
-                                const courseMatches = isPraxis || (sCourse === itemCourse);
-                                const lecMatches = Number(s.lectureNumber || 1) === itemLec;
-                                return courseMatches && lecMatches;
-                            })
-                            .sort((a, b) => {
-                                const tA = Number(a.uploadedAtMs || (a.startTime?.seconds * 1000) || 0);
-                                const tB = Number(b.uploadedAtMs || (b.startTime?.seconds * 1000) || 0);
-                                return tB - tA;
-                            });
-
-                        if (validDocs.length > 0) {
-                            matchedSessionId = validDocs[0].id;
-                            matchedSessionData = validDocs[0];
+                    // أ) البحث في جدول أكواد الـ PIN النشطة
+                    try {
+                        const pinSnap = await withTimeout(getDoc(doc(db, "attendance_pins", pinStr)), 4000);
+                        if (pinSnap.exists()) {
+                            const pData = pinSnap.data() || {};
+                            if (pData.sessionId) {
+                                matchedSessionId = pData.sessionId;
+                                matchedSessionData = pData;
+                            }
                         }
+                    } catch (_) {}
+
+                    // ب) البحث في تاريخ أكواد جلسة الدكتور
+                    if (!matchedSessionId) {
+                        try {
+                            const qSnap = await withTimeout(getDocs(query(
+                                collection(db, "attendance_sessions"),
+                                where("pinHistory", "array-contains", pinNum)
+                            )), 4500);
+                            if (!qSnap.empty) {
+                                const matchedDoc = qSnap.docs[0];
+                                matchedSessionId = matchedDoc.id;
+                                matchedSessionData = matchedDoc.data();
+                            }
+                        } catch (_) {}
                     }
 
-                    // 🛑 إذا لم تكن الدكتورة قد رفعت الجلسة الجديدة على السيرفر: انتظر ولا تمسح السجل
+                    // 🛑 إذا لم يرفع الدكتور الجلسة بعد: نتوقف فوراً ونُبقي السجل بأمان داخل هاتف الطالب
                     if (!matchedSessionId) {
-                        console.log(`⏳ Waiting for instructor to upload session for PIN (${item.pin})...`);
+                        console.log(`⏳ PIN (${pinStr}) not found on server yet. Waiting for instructor to sync...`);
                         continue;
                     }
                 } else {
-                    // في حالة مسح الـ QR
+                    // في حالة مسح الـ QR: نستخدم معرّف الجلسة المباشر
                     matchedSessionId = item.sessionId;
                 }
 
-                // 2. التحقق من وجود الجلسة على السيرفر
+                // 2. التحقق من وجود الجلسة على السيرفر وأنها ليست محذوفة
                 const sessSnap = await withTimeout(getDoc(doc(db, "attendance_sessions", matchedSessionId)), 4500);
                 if (!sessSnap.exists()) {
-                    continue; // لم ترفعها الدكتورة بعد
+                    continue; // الدكتور لم يرفع المحاضرة بعد -> انتظر ولا تمسح السجل
                 }
 
                 const sData = sessSnap.data() || {};
@@ -824,7 +816,7 @@ export async function syncPendingAttendance() {
                     continue;
                 }
 
-                // 3. التحقق من هوية الطالب
+                // 3. التحقق من قيد الطالب
                 const stdSnap = await withTimeout(getDoc(doc(db, "students", item.studentId)), 4500);
                 if (!stdSnap.exists()) {
                     removeFromQueue(item);
@@ -834,52 +826,36 @@ export async function syncPendingAttendance() {
                 const studentRealName = stdSnap.data()?.name || item.studentName || "Student";
                 const recordId = `${matchedSessionId}_${item.studentId}`;
 
-                const finalCourseName = sData.courseName || item.courseName || "Course";
-                const finalLecNum = Number(sData.lectureNumber || item.lectureNumber || 1);
-                const finalType = sData.sessionType || item.sessionType || "lecture";
-
-                // 4. رفع وتثبيت الحضور في قاعدة البيانات
+                // 4. رفع وتثبيت حضور الطالب في جلسة الدكتور الفعلية
                 const recordPayload = {
                     recordId,
                     sessionId: matchedSessionId,
                     courseId: sData.courseId || item.courseId || "MUC_COURSE",
-                    courseName: finalCourseName,
-                    lectureNumber: finalLecNum,
-                    sessionType: finalType,
+                    courseName: sData.courseName || item.courseName || "Course",
+                    lectureNumber: Number(sData.lectureNumber || item.lectureNumber || 1),
+                    sessionType: sData.sessionType || item.sessionType || "lecture",
                     studentId: item.studentId,
                     studentName: studentRealName,
                     deviceId: item.deviceId || getLocalDeviceId(),
                     status: "Present",
                     method: item.pin ? "OFFLINE_PIN_SYNC" : "OFFLINE_QR_SYNC",
                     recordedAt: serverTimestamp(),
-                    offlineScannedAt: new Date(Number(item.scannedAt) || Date.now()).toISOString()
+                    offlineScannedAt: new Date(item.scannedAt || Date.now()).toISOString()
                 };
 
                 await withTimeout(setDoc(doc(db, "attendance_records", recordId), recordPayload, { merge: true }), 4500);
 
-                // إزالة السجل المعلق بنجاح وحفظ تفاصيل التهنئة
+                // حذف السجل من طابور الهاتف فقط بعد التأكد التام من وصوله للسيرفر
                 removeFromQueue(item);
                 uploaded++;
-                syncedDetails.push({
-                    courseName: finalCourseName,
-                    lectureNumber: finalLecNum,
-                    sessionType: finalType
-                });
-                console.log(`✅ Synced attendance for (${item.studentId}) in [${finalCourseName}]`);
+                console.log(`✅ Successfully synced attendance for student (${item.studentId})`);
 
             } catch (itemErr) {
-                console.warn("Sync item postponed:", itemErr.message);
+                console.warn("Item sync postponed:", itemErr.message);
             }
         }
-
-        // إطلاق إشعار التهنئة المبهج فور نجاح الرفع
-        if (syncedDetails.length > 0) {
-            try {
-                window.dispatchEvent(new CustomEvent("muc_attendance_synced_event", { detail: syncedDetails }));
-            } catch (_) {}
-        }
     } catch (err) {
-        console.warn("Sync batch error:", err.message);
+        console.warn("Sync batch notice:", err.message);
     } finally {
         isSyncing = false;
     }
@@ -925,4 +901,4 @@ export function subscribeToCourseAttendance(courseId, onChange) {
         fire();
     });
     return () => { u1(); u2(); };
-}
+        }
