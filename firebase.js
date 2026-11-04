@@ -758,58 +758,53 @@ export async function syncPendingAttendance() {
             await withTimeout(signInAnonymously(auth), 5000);
         }
 
+        const todayCA = new Date().toLocaleDateString("en-CA");
+
         for (const item of queue) {
             try {
                 let matchedSessionId = null;
                 let matchedSessionData = null;
+                const studentScanTime = Number(item.scannedAt || Date.now());
 
                 // 1. إذا كان التسجيل بكود PIN
                 if (item.pin) {
-                    const pinStr = String(item.pin).trim();
-                    const pinNum = Number(pinStr);
+                    const pinNum = Number(item.pin);
+                    const itemCourse = String(item.courseId || "").toLowerCase();
+                    const itemLec = Number(item.lectureNumber || 1);
 
-                    // أ) البحث المباشر في جدول attendance_pins
-                    try {
-                        const pinSnap = await withTimeout(getDoc(doc(db, "attendance_pins", pinStr)), 4000);
-                        if (pinSnap.exists()) {
-                            const pData = pinSnap.data() || {};
-                            if (pData.sessionId) {
-                                matchedSessionId = pData.sessionId;
-                                matchedSessionData = pData;
-                            }
+                    // البحث حصرياً في جلسات اليوم لنفس المقرر التي تحتوي على الكود ورُفعت بعد وقت حضور الطالب
+                    const qSnap = await withTimeout(getDocs(query(
+                        collection(db, "attendance_sessions"),
+                        where("startedAtDate", "==", item.startedAtDate || todayCA),
+                        where("pinHistory", "array-contains", pinNum)
+                    )), 5000).catch(() => ({ empty: true, docs: [] }));
+
+                    if (!qSnap.empty) {
+                        const validDocs = qSnap.docs
+                            .map(d => ({ id: d.id, ...d.data() }))
+                            .filter(s => {
+                                if (s.status === "deleted") return false;
+                                const sCourse = String(s.courseId || "").toLowerCase();
+                                const isPraxis = itemCourse.includes("praxis") && sCourse.includes("praxis");
+                                const courseMatches = isPraxis || (sCourse === itemCourse);
+                                const lecMatches = Number(s.lectureNumber || 1) === itemLec;
+                                return courseMatches && lecMatches;
+                            })
+                            .sort((a, b) => {
+                                const tA = Number(a.uploadedAtMs || (a.startTime?.seconds * 1000) || 0);
+                                const tB = Number(b.uploadedAtMs || (b.startTime?.seconds * 1000) || 0);
+                                return tB - tA;
+                            });
+
+                        if (validDocs.length > 0) {
+                            matchedSessionId = validDocs[0].id;
+                            matchedSessionData = validDocs[0];
                         }
-                    } catch (_) {}
-
-                    // ب) البحث في كولكشن attendance_sessions عبر تاريخ الأكواد pinHistory
-                    if (!matchedSessionId) {
-                        try {
-                            const qSnap = await withTimeout(getDocs(query(
-                                collection(db, "attendance_sessions"),
-                                where("pinHistory", "array-contains", pinNum)
-                            )), 4500);
-
-                            if (!qSnap.empty) {
-                                // فلترة الجلسات المفتوحة أو غير المحذوفة لنفس تاريخ اليوم
-                                const targetDocs = qSnap.docs
-                                    .map(d => ({ id: d.id, ...d.data() }))
-                                    .filter(s => s.status !== "deleted")
-                                    .sort((a, b) => {
-                                        const tA = (a.startTime && a.startTime.seconds) || 0;
-                                        const tB = (b.startTime && b.startTime.seconds) || 0;
-                                        return tB - tA;
-                                    });
-
-                                if (targetDocs.length > 0) {
-                                    matchedSessionId = targetDocs[0].id;
-                                    matchedSessionData = targetDocs[0];
-                                }
-                            }
-                        } catch (_) {}
                     }
 
-                    // 🛑 إذا لم تكن المحاضرة قد رُفعت بعد على السيرفر: انتظر
+                    // 🛑 إذا لم تكن الدكتورة قد رفعت الجلسة الجديدة على السيرفر: انتظر ولا تمسح السجل
                     if (!matchedSessionId) {
-                        console.log(`⏳ PIN (${pinStr}) session not on server yet. Waiting for instructor...`);
+                        console.log(`⏳ Waiting for instructor to upload session for PIN (${item.pin})...`);
                         continue;
                     }
                 } else {
@@ -820,7 +815,7 @@ export async function syncPendingAttendance() {
                 // 2. التحقق من وجود الجلسة على السيرفر
                 const sessSnap = await withTimeout(getDoc(doc(db, "attendance_sessions", matchedSessionId)), 4500);
                 if (!sessSnap.exists()) {
-                    continue; // لم يرفعها الدكتور بعد
+                    continue; // لم ترفعها الدكتورة بعد
                 }
 
                 const sData = sessSnap.data() || {};
