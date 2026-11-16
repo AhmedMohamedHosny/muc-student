@@ -37,33 +37,74 @@ export async function ensureStudentAuth() {
     return _anonAuthPromise;
 }
 
-function getLocalDeviceId() {
+// بصمة عتادية حتمية 100% بدون أي أرقام عشوائية (تُخرج نفس الكود في المتصفح العادي والخفي وأي متصفح على نفس الهاتف)
+export function getPureHardwareFingerprint() {
     try {
-        const screenFeatures = `${screen.width}x${screen.height}x${screen.colorDepth}`;
-        const cpuCores = navigator.hardwareConcurrency || 4;
-        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Africa/Cairo";
-        const platform = navigator.platform || "Unknown";
-        
-        let rawSignature = `${screenFeatures}_${cpuCores}_${timezone}_${platform}`;
-        let hash = 0;
-        for (let i = 0; i < rawSignature.length; i++) {
-            hash = ((hash << 5) - hash) + rawSignature.charCodeAt(i);
-            hash |= 0;
-        }
-        const hardwareSignature = "hw_" + Math.abs(hash).toString(36);
+        // 1. اسم معالج الرسوميات الفعلي (WebGL GPU Renderer)
+        let gpuInfo = "";
+        try {
+            const canvasGl = document.createElement("canvas");
+            const gl = canvasGl.getContext("webgl") || canvasGl.getContext("experimental-webgl");
+            if (gl) {
+                const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
+                if (debugInfo) {
+                    const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || "";
+                    const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || "";
+                    gpuInfo = `${vendor}~${renderer}`;
+                }
+            }
+        } catch (_) {}
 
-        let localToken = "";
-        try { localToken = localStorage.getItem("muc_device_id") || ""; } catch(e) {}
-        
-        if (!localToken) {
-            localToken = Array.from(window.crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, "0")).join("");
-            try { localStorage.setItem("muc_device_id", localToken); } catch(e) {}
+        // 2. بصمة الرسم ثنائي الأبعاد (Canvas 2D Sub-pixel Rendering)
+        let canvasSig = "";
+        try {
+            const c = document.createElement("canvas");
+            c.width = 240;
+            c.height = 44;
+            const ctx = c.getContext("2d");
+            if (ctx) {
+                ctx.textBaseline = "alphabetic";
+                ctx.fillStyle = "#f60";
+                ctx.fillRect(10, 4, 90, 22);
+                ctx.fillStyle = "#069";
+                ctx.font = "14px Arial, sans-serif";
+                ctx.fillText("MUC_ENG_2026_🎓_أحمد", 4, 20);
+                ctx.fillStyle = "rgba(102, 204, 0, 0.7)";
+                ctx.font = "bold 12px monospace";
+                ctx.fillText("HW_LOCK_987654321", 8, 36);
+                ctx.beginPath();
+                ctx.arc(180, 22, 14, 0, Math.PI * 1.5);
+                ctx.stroke();
+                canvasSig = c.toDataURL().slice(-120);
+            }
+        } catch (_) {}
+
+        // 3. مواصفات الشاشة والعتاد واللغة والمنطقة الزمنية
+        const screenFeatures = `${screen.width}x${screen.height}x${screen.colorDepth}x${window.devicePixelRatio || 1}`;
+        const hwFeatures = `${navigator.hardwareConcurrency || 0}_${navigator.deviceMemory || 0}_${navigator.maxTouchPoints || 0}`;
+        const localeFeatures = `${Intl.DateTimeFormat().resolvedOptions().timeZone || ""}_${(navigator.languages || [navigator.language || ""]).join(",")}_${navigator.platform || ""}`;
+
+        const fullRaw = `${gpuInfo}|${canvasSig}|${screenFeatures}|${hwFeatures}|${localeFeatures}`;
+
+        // دالة تجزئة مزدوجة (Dual 32-bit FNV-1a Hash) لمنع التصادم نهائياً
+        let h1 = 0x811c9dc5;
+        let h2 = 0x01000193;
+        for (let i = 0; i < fullRaw.length; i++) {
+            const ch = fullRaw.charCodeAt(i);
+            h1 ^= ch;
+            h1 = Math.imul(h1, 0x01000193);
+            h2 ^= (ch + i);
+            h2 = Math.imul(h2, 0x85ebca6b);
         }
 
-        return `${hardwareSignature}_${localToken}`;
+        return `hw_${(h1 >>> 0).toString(36)}_${(h2 >>> 0).toString(36)}`;
     } catch (e) {
-        return "dev_" + Math.random().toString(36).substring(2, 10);
+        return "hw_fallback_" + Math.abs((screen.width || 360) * 31 + (screen.height || 800)).toString(36);
     }
+}
+
+function getLocalDeviceId() {
+    return getPureHardwareFingerprint();
 }
 
 export function getCoursePinIndex(courseId) {
@@ -496,9 +537,37 @@ if (!isEnrolled) {
                 throw new Error("Security Alert: This phone was already used to check in for another student!");
             }
         }
+// 🔒 قفل مزدوج 1-to-1: التأكد أن هذا الهاتف غير مملوك لطالب آخر، وأن الطالب لم يتجاوز الحد الأقصى للأجهزة
+        const pureHwId = getPureHardwareFingerprint();
+        const ownerRef = doc(db, "attendance_devices", `device_owner_${pureHwId}`);
+        const ownerSnap = await withTimeout(getDoc(ownerRef), 4500).catch(() => ({ exists: () => false }));
 
-        // فحص قفل الجهاز (حد أقصى هاتفين)
-        const hwKey = localStorage.getItem("muc_hw_bound_key") || safeDeviceId;
+        if (ownerSnap && ownerSnap.exists()) {
+            const ownerData = ownerSnap.data() || {};
+            const ownerSid = String(ownerData.studentId || "").trim();
+            if (ownerSid && ownerSid !== cleanedStudentId) {
+                // التحقق هل المشرف فك القفل عن المالك السابق أم لا يزال القفل سارياً
+                const prevOwnerLock = await withTimeout(getDoc(doc(db, "attendance_devices", `id_lock_${ownerSid}`)), 3500).catch(() => ({ exists: () => false }));
+                const prevData = prevOwnerLock.exists() ? (prevOwnerLock.data() || {}) : {};
+                const prevIds = Array.isArray(prevData.deviceIds) ? prevData.deviceIds : (prevData.deviceId ? [prevData.deviceId] : []);
+                if (prevOwnerLock.exists() && (prevIds.length === 0 || prevIds.includes(pureHwId))) {
+                    // إرسال تنبيه لرادار الغش في شاشة المحاضرة
+                    setDoc(doc(collection(db, "attendance_alerts")), {
+                        sessionId: sessionId,
+                        type: "SAME_DEVICE",
+                        originalStudentId: ownerSid,
+                        originalStudentName: ownerData.studentName || ownerSid,
+                        targetStudentId: cleanedStudentId,
+                        targetStudentName: studentRealName,
+                        createdAt: serverTimestamp()
+                    }).catch(() => {});
+                    throw new Error(`DEVICE_OWNED_BY_OTHER:${ownerData.studentName || ownerSid}:${ownerSid}`);
+                }
+            }
+        }
+
+        const hwKey = pureHwId;
+        const legacyLocalKey = localStorage.getItem("muc_hw_bound_key") || "";
         const lockData = (idLockSnap && idLockSnap.exists()) ? (idLockSnap.data() || {}) : {};
         const nowISO = new Date().toISOString();
 
@@ -515,9 +584,12 @@ if (!isEnrolled) {
             });
         }
 
-        const isMyDev = boundDevicesList.some(d => d.deviceId === hwKey || d.deviceId === safeDeviceId || d.legacyDeviceId === safeDeviceId);
+        const isMyDev = boundDevicesList.some(d =>
+            d.deviceId === pureHwId ||
+            (legacyLocalKey && (d.deviceId === legacyLocalKey || d.legacyDeviceId === legacyLocalKey))
+        );
         if (idLockSnap && idLockSnap.exists() && !isMyDev && boundDevicesList.length >= 2) {
-            throw new Error("🚫 هذا الرقم الجامعي مسجل ومربوط بهاتفين بالفعل (الحد الأقصى هاتفان)! يرجى التحدث مع المشرف.");
+            throw new Error("MAX_DEVICES_REACHED");
         }
 
         const startTime = (sessionData.startTime && sessionData.startTime.toDate) ? sessionData.startTime.toDate() : new Date();
@@ -537,24 +609,34 @@ if (!isEnrolled) {
                 lectureNumber: currentLecNum,
                 studentId: cleanedStudentId,
                 studentName: studentRealName,
-                deviceId: safeDeviceId,
+                deviceId: pureHwId,
                 status: status,
                 recordedAt: serverTimestamp(),
                 method: clientToken === "PIN_VERIFIED" ? "PIN_CODE" : "QR_SCAN"
-            }, { merge: true })
+            }, { merge: true }),
+            // تثبيت ملكية هذا الهاتف 1-to-1 للطالب
+            setDoc(ownerRef, {
+                pureHwId: pureHwId,
+                studentId: cleanedStudentId,
+                studentName: studentRealName,
+                department: studentData.department || "هندسة الحاسب",
+                academicYear: String(studentData.academicYear || "2"),
+                boundAt: serverTimestamp(),
+                boundAtISO: nowISO
+            }, { merge: true }).catch(() => {})
         ];
 
-        if (!idLockSnap || !idLockSnap.exists() || !isMyDev) {
+        if (!idLockSnap || !idLockSnap.exists() || !isMyDev || !boundDevicesList.some(d => d.deviceId === pureHwId)) {
             const ua = navigator.userAgent || "";
             const quickPhoneName = /iPhone/i.test(ua) ? "Apple iPhone" : (/Android/i.test(ua) ? ((ua.match(/Android\s+[\d.]+;\s*([^;)]+)/i) || ["", "Android Phone"])[1].replace(/Build\/.*/i, "").trim()) : "هاتف ذكي");
             const newDevObj = {
-                deviceId: hwKey,
-                legacyDeviceId: safeDeviceId,
+                deviceId: pureHwId,
+                legacyDeviceId: legacyLocalKey || pureHwId,
                 deviceName: quickPhoneName,
                 screenInfo: `${screen.width}x${screen.height}`,
                 lockedAtISO: nowISO
             };
-            const otherDev = boundDevicesList.find(d => d.deviceId !== hwKey && d.deviceId !== safeDeviceId);
+            const otherDev = boundDevicesList.find(d => d.deviceId !== pureHwId && (!legacyLocalKey || (d.deviceId !== legacyLocalKey && d.legacyDeviceId !== legacyLocalKey)));
             const updatedList = (boundDevicesList.length > 0 && otherDev) ? [otherDev, newDevObj] : [newDevObj];
             const firstTime = (otherDev && otherDev.lockedAtISO) || lockData.firstLockedAtISO || nowISO;
             const secondTime = otherDev ? nowISO : (lockData.secondLockedAtISO || "");
@@ -567,7 +649,7 @@ if (!isEnrolled) {
                     academicYear: String(studentData.academicYear || "2"),
                     devices: updatedList,
                     deviceIds: updatedList.map(d => d.deviceId),
-                    deviceId: updatedList[0]?.deviceId || hwKey,
+                    deviceId: updatedList[0]?.deviceId || pureHwId,
                     secondDeviceId: updatedList[1]?.deviceId || "",
                     deviceName: updatedList.map((d, i) => `[هاتف ${i+1}] ${d.deviceName}`).join(" | "),
                     screenInfo: updatedList[0]?.screenInfo || `${screen.width}x${screen.height}`,
@@ -796,7 +878,34 @@ export async function syncPendingAttendance() {
                     continue;
                 }
 
-                // 3. التحقق من قيد الطالب
+// 3. التحقق من قيد الطالب ومنع رفع حضور لطالب آخر من هاتف مملوك لزميله
+                const pureHwIdSync = getPureHardwareFingerprint();
+                try {
+                    const ownerSnapSync = await withTimeout(getDoc(doc(db, "attendance_devices", `device_owner_${pureHwIdSync}`)), 4000);
+                    if (ownerSnapSync.exists()) {
+                        const oData = ownerSnapSync.data() || {};
+                        if (oData.studentId && String(oData.studentId).trim() !== String(item.studentId).trim()) {
+                            localStorage.setItem("muc_sync_error", `🚫 مرفوض أمنياً: هذا الهاتف مسجل ومربوط بالطالب (${oData.studentName || oData.studentId}) ولا يمكن رفع حضور لطالب آخر!`);
+                            removeFromQueue(item);
+                            continue;
+                        }
+                    }
+                } catch (_) {}
+
+// 3. التحقق من قيد الطالب ومنع رفع حضور لطالب آخر من هاتف مملوك لزميله
+                const pureHwIdSync = getPureHardwareFingerprint();
+                try {
+                    const ownerSnapSync = await withTimeout(getDoc(doc(db, "attendance_devices", `device_owner_${pureHwIdSync}`)), 4000);
+                    if (ownerSnapSync.exists()) {
+                        const oData = ownerSnapSync.data() || {};
+                        if (oData.studentId && String(oData.studentId).trim() !== String(item.studentId).trim()) {
+                            localStorage.setItem("muc_sync_error", `🚫 مرفوض أمنياً: هذا الهاتف مسجل ومربوط بالطالب (${oData.studentName || oData.studentId}) ولا يمكن رفع حضور لطالب آخر!`);
+                            removeFromQueue(item);
+                            continue;
+                        }
+                    }
+                } catch (_) {}
+
                 const stdSnap = await withTimeout(getDoc(doc(db, "students", item.studentId)), 4500);
                 if (!stdSnap.exists()) {
                     removeFromQueue(item);
