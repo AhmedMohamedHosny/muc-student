@@ -37,9 +37,46 @@ export async function ensureStudentAuth() {
     return _anonAuthPromise;
 }
 
+// بصمة هاردوير بدون عشوائية لمنع نفس الموبايل من تحضير طالبين في نفس المحاضرة حتى من المتصفح الخفي
+export function getSessionHardwareSignature() {
+    try {
+        const w = Math.min(screen.width || 0, screen.height || 0);
+        const h = Math.max(screen.width || 0, screen.height || 0);
+        const dpr = window.devicePixelRatio || 1;
+        const cores = navigator.hardwareConcurrency || 4;
+        const mem = navigator.deviceMemory || 0;
+        const ua = navigator.userAgent || "";
+        const modelMatch = ua.match(/Android\s+[\d.]+;\s*([^;)]+)/i) || ua.match(/iPhone\s+OS\s+[\d_]+/i) || ["", ""];
+        const modelStr = (modelMatch[1] || modelMatch[0] || "").replace(/Build\/.*/i, "").trim();
+
+        let gpu = "";
+        try {
+            const c = document.createElement("canvas");
+            const gl = c.getContext("webgl") || c.getContext("experimental-webgl");
+            if (gl) {
+                const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+                if (dbg) gpu = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || "";
+            }
+        } catch (_) {}
+
+        const raw = `${w}x${h}x${dpr}_${cores}_${mem}_${modelStr}_${gpu}`;
+        let hash = 2166136261;
+        for (let i = 0; i < raw.length; i++) {
+            hash ^= raw.charCodeAt(i);
+            hash = Math.imul(hash, 16777619);
+        }
+        return "shw_" + (hash >>> 0).toString(36);
+    } catch (_) {
+        return "shw_default";
+    }
+}
+
 function getLocalDeviceId() {
     try {
-        const screenFeatures = `${screen.width}x${screen.height}x${screen.colorDepth}`;
+        const savedHw = localStorage.getItem("muc_hw_bound_key");
+        if (savedHw) return savedHw;
+
+        const screenFeatures = `${Math.min(screen.width, screen.height)}x${Math.max(screen.width, screen.height)}x${screen.colorDepth}`;
         const cpuCores = navigator.hardwareConcurrency || 4;
         const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Africa/Cairo";
         const platform = navigator.platform || "Unknown";
@@ -497,8 +534,19 @@ if (!isEnrolled) {
             }
         }
 
-        // فحص قفل الجهاز (حد أقصى هاتفين)
+// 🔒 قفل صارم (هاتف واحد ومتصفح واحد لكل طالب 1/1): منع المتصفح الخفي وأي متصفح أو هاتف آخر
         const hwKey = localStorage.getItem("muc_hw_bound_key") || safeDeviceId;
+        const ownerRef = doc(db, "attendance_devices", `device_owner_${hwKey}`);
+        const ownerSnap = await withTimeout(getDoc(ownerRef), 4000).catch(() => ({ exists: () => false }));
+
+        if (ownerSnap && ownerSnap.exists()) {
+            const oData = ownerSnap.data() || {};
+            const ownerSid = String(oData.studentId || "").trim();
+            if (ownerSid && ownerSid !== cleanedStudentId) {
+                throw new Error(`🚫 مرفوض أمنياً: هذا الهاتف مربوط بالفعل بالطالب (${oData.studentName || ownerSid}) ولا يمكن استخدامه لطالب آخر!`);
+            }
+        }
+
         const lockData = (idLockSnap && idLockSnap.exists()) ? (idLockSnap.data() || {}) : {};
         const nowISO = new Date().toISOString();
 
@@ -515,9 +563,12 @@ if (!isEnrolled) {
             });
         }
 
-        const isMyDev = boundDevicesList.some(d => d.deviceId === hwKey || d.deviceId === safeDeviceId || d.legacyDeviceId === safeDeviceId);
-        if (idLockSnap && idLockSnap.exists() && !isMyDev && boundDevicesList.length >= 2) {
-            throw new Error("🚫 هذا الرقم الجامعي مسجل ومربوط بهاتفين بالفعل (الحد الأقصى هاتفان)! يرجى التحدث مع المشرف.");
+        // السماح فقط بالمتصفح الأساسي الأول للطالب (1/1) ورفض أي متصفح خفي أو متصفح ثانٍ
+        const primaryBoundList = boundDevicesList.slice(0, 1);
+        const isMyDev = primaryBoundList.some(d => d.deviceId === hwKey || d.deviceId === safeDeviceId || d.legacyDeviceId === safeDeviceId || d.legacyDeviceId === hwKey);
+
+        if (idLockSnap && idLockSnap.exists() && !isMyDev && primaryBoundList.length >= 1) {
+            throw new Error("🚫 هذا الرقم الجامعي مربوط بالفعل بمتصفحك الأساسي! لا يمكن تسجيل الحضور من المتصفح الخفي أو من هاتف/متصفح آخر.");
         }
 
         const startTime = (sessionData.startTime && sessionData.startTime.toDate) ? sessionData.startTime.toDate() : new Date();
@@ -537,11 +588,26 @@ if (!isEnrolled) {
                 lectureNumber: currentLecNum,
                 studentId: cleanedStudentId,
                 studentName: studentRealName,
-                deviceId: safeDeviceId,
+                deviceId: hwKey,
                 status: status,
                 recordedAt: serverTimestamp(),
                 method: clientToken === "PIN_VERIFIED" ? "PIN_CODE" : "QR_SCAN"
-            }, { merge: true })
+            }, { merge: true }),
+            setDoc(deviceRef, {
+                sessionId: sessionId,
+                deviceId: safeDeviceId,
+                studentId: cleanedStudentId,
+                createdAt: serverTimestamp()
+            }, { merge: true }).catch(() => {}),
+            setDoc(ownerRef, {
+                deviceId: hwKey,
+                studentId: cleanedStudentId,
+                studentName: studentRealName,
+                department: studentData.department || "هندسة الحاسب",
+                academicYear: String(studentData.academicYear || "2"),
+                boundAt: serverTimestamp(),
+                boundAtISO: nowISO
+            }, { merge: true }).catch(() => {})
         ];
 
         if (!idLockSnap || !idLockSnap.exists() || !isMyDev) {
@@ -554,10 +620,8 @@ if (!isEnrolled) {
                 screenInfo: `${screen.width}x${screen.height}`,
                 lockedAtISO: nowISO
             };
-            const otherDev = boundDevicesList.find(d => d.deviceId !== hwKey && d.deviceId !== safeDeviceId);
-            const updatedList = (boundDevicesList.length > 0 && otherDev) ? [otherDev, newDevObj] : [newDevObj];
-            const firstTime = (otherDev && otherDev.lockedAtISO) || lockData.firstLockedAtISO || nowISO;
-            const secondTime = otherDev ? nowISO : (lockData.secondLockedAtISO || "");
+            const updatedList = [newDevObj];
+            const firstTime = lockData.firstLockedAtISO || nowISO;
 
             writePromises.push(
                 setDoc(idLockRef, {
@@ -566,15 +630,15 @@ if (!isEnrolled) {
                     department: studentData.department || "هندسة الحاسب",
                     academicYear: String(studentData.academicYear || "2"),
                     devices: updatedList,
-                    deviceIds: updatedList.map(d => d.deviceId),
-                    deviceId: updatedList[0]?.deviceId || hwKey,
-                    secondDeviceId: updatedList[1]?.deviceId || "",
-                    deviceName: updatedList.map((d, i) => `[هاتف ${i+1}] ${d.deviceName}`).join(" | "),
-                    screenInfo: updatedList[0]?.screenInfo || `${screen.width}x${screen.height}`,
+                    deviceIds: [hwKey],
+                    deviceId: hwKey,
+                    secondDeviceId: "",
+                    deviceName: `[هاتف 1] ${quickPhoneName}`,
+                    screenInfo: `${screen.width}x${screen.height}`,
                     firstLockedAtISO: firstTime,
-                    secondLockedAtISO: secondTime,
+                    secondLockedAtISO: "",
                     lockedAt: serverTimestamp(),
-                    lockedAtISO: secondTime || firstTime
+                    lockedAtISO: firstTime
                 }, { merge: true }).catch(() => {})
             );
             localStorage.setItem(`muc_lock_claimed_${cleanedStudentId}`, "1");
