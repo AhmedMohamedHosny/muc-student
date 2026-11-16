@@ -547,7 +547,7 @@ background: #FDF2F3;
     </div>
     <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
     <script type="module">
-import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum, decodePinMetadata, verifyPinOnServerFast, getCoursePinIndex, getPureHardwareFingerprint } from "./firebase.js";
+import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum, decodePinMetadata, verifyPinOnServerFast, getCoursePinIndex } from "./firebase.js";
         // 🌐 Language Switcher Logic
         let currentLang = "en";
         document.getElementById("btn-lang-toggle")?.addEventListener("click", () => {
@@ -921,15 +921,6 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
         // تحويل أكواد الأخطاء لرسائل مفهومة للطالب
 function friendlyError(err) {
     const m = String(err?.message || err || "");
-    if (m.startsWith("DEVICE_OWNED_BY_OTHER:")) {
-        const parts = m.split(":");
-        const ownerName = parts[1] || "طالب آخر";
-        const ownerId = parts[2] || "";
-        return `🚫 مخالفة أمنية (هاتف واحد لكل طالب)!\nهذا الهاتف مسجل ومربوط حصرياً بالطالب:\n[${ownerName}] (${ownerId})\n\nلا يمكن استخدام نفس الهاتف لتسجيل حضور طالب آخر.\n\nSecurity Alert: This phone is permanently bound to another student (${ownerId}).`;
-    }
-    if (m.startsWith("MAX_DEVICES_REACHED")) {
-        return `🚫 هذا الرقم الجامعي مسجل ومربوط بهاتفين بالفعل (الحد الأقصى هاتفان)!\nيرجى التواصل مع المشرف.\n\nThis Student ID is already bound to 2 devices.`;
-    }
     if (m.startsWith("WRONG_SECTION:")) {
         const parts = m.split(":");
         const stdName = parts[1] || "الطالب";
@@ -949,11 +940,25 @@ const welcomeBar = document.getElementById("student-welcome-bar");
         const welcomeNameEl = document.getElementById("welcome-student-name");
         const welcomeIdEl = document.getElementById("welcome-student-id");
 
-// بصمة عتادية حتمية 100% للهاتف لمنع فتح أي ID آخر من متصفح خفي أو متصفح بديل
-        const myLegacyDeviceKey = localStorage.getItem("muc_hw_bound_key") || "";
-        const myHardwareKey = getPureHardwareFingerprint();
-        localStorage.setItem("muc_hw_bound_key", myHardwareKey);
-        document.cookie = `muc_hw_bound_key=${encodeURIComponent(myHardwareKey)}; max-age=31536000; path=/; SameSite=Lax`;
+// بصمة عتادية ثابتة للهاتف لمنع فتح نفس الـ ID من هاتف آخر أو متصفح خفي
+        function getHardwareDeviceKey() {
+            let savedKey = localStorage.getItem("muc_hw_bound_key");
+            if (!savedKey) {
+                const match = document.cookie.match(/(?:^|;\s*)muc_hw_bound_key=([^;]*)/);
+                if (match && match[1]) savedKey = decodeURIComponent(match[1]);
+            }
+            if (!savedKey) {
+                const sig = `${screen.width}x${screen.height}x${screen.colorDepth}_${navigator.hardwareConcurrency || 4}_${navigator.platform || "MUC"}`;
+                let h = 0;
+                for (let i = 0; i < sig.length; i++) { h = ((h << 5) - h) + sig.charCodeAt(i); h |= 0; }
+                const rand = Math.random().toString(36).substring(2, 10);
+                savedKey = `hw_${Math.abs(h).toString(36)}_${rand}`;
+            }
+            localStorage.setItem("muc_hw_bound_key", savedKey);
+            document.cookie = `muc_hw_bound_key=${encodeURIComponent(savedKey)}; max-age=31536000; path=/; SameSite=Lax`;
+            return savedKey;
+        }
+        const myHardwareKey = getHardwareDeviceKey();
 
         // حفظ واسترجاع الرقم الجامعي والاسم نهائياً من LocalStorage + Cookies لمدة 365 يوماً
         function saveStudentIdPermanently(sid, sname = "") {
@@ -1083,19 +1088,18 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                     const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
                     const { doc, getDoc, setDoc, serverTimestamp } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
 
-const verifyOnServer = async () => {
+                    const verifyOnServer = async () => {
                         if (!auth.currentUser) await signInAnonymously(auth);
-                        const [stdSnap, lockSnap, ownerSnap] = await Promise.all([
+                        const [stdSnap, lockSnap] = await Promise.all([
                             getDoc(doc(db, "students", cleanId)),
-                            getDoc(doc(db, "attendance_devices", `id_lock_${cleanId}`)),
-                            getDoc(doc(db, "attendance_devices", `device_owner_${myHardwareKey}`))
+                            getDoc(doc(db, "attendance_devices", `id_lock_${cleanId}`))
                         ]);
-                        return { stdSnap, lockSnap, ownerSnap, db, doc, setDoc, serverTimestamp };
+                        return { stdSnap, lockSnap, db, doc, setDoc, serverTimestamp };
                     };
 
                     const res = await Promise.race([
                         verifyOnServer(),
-                        new Promise((_, rej) => setTimeout(() => rej(new Error("TIMEOUT")), 5500))
+                        new Promise((_, rej) => setTimeout(() => rej(new Error("TIMEOUT")), 4500))
                     ]);
 
                     if (!res.stdSnap.exists()) {
@@ -1107,32 +1111,7 @@ const verifyOnServer = async () => {
                         return false;
                     }
 
-                    // 🔒 فحص القفل العكسي (1-to-1): هل هذا الهاتف مملوك مسبقاً لطالب آخر؟
-                    if (res.ownerSnap && res.ownerSnap.exists()) {
-                        const oData = res.ownerSnap.data() || {};
-                        const ownerSid = String(oData.studentId || "").trim();
-                        if (ownerSid && ownerSid !== cleanId) {
-                            const prevLockSnap = await getDoc(doc(res.db, "attendance_devices", `id_lock_${ownerSid}`)).catch(() => ({ exists: () => false }));
-                            const prevLockData = prevLockSnap.exists() ? (prevLockSnap.data() || {}) : {};
-                            const prevIds = Array.isArray(prevLockData.deviceIds) ? prevLockData.deviceIds : (prevLockData.deviceId ? [prevLockData.deviceId] : []);
-                            if (prevLockSnap.exists() && (prevIds.length === 0 || prevIds.includes(myHardwareKey))) {
-                                clearStudentLocalBinding(cleanId);
-                                inputId.value = "";
-                                welcomeBar.classList.add("d-none");
-                                scannerStep.classList.add("d-none");
-                                resultStep.classList.add("d-none");
-                                inputStep.classList.remove("d-none");
-                                await showCustomAlert(
-                                    "ممنوع استخدام هاتف طالب آخر!",
-                                    `🚫 هذا الهاتف مسجل ومربوط حصرياً بالطالب:\n[${oData.studentName || ownerSid}] (${ownerSid})\n\nنظام المنظومة يسمح بطالب واحد فقط لكل هاتف طوال الفصل الدراسي!`,
-                                    true
-                                );
-                                return false;
-                            }
-                        }
-                    }
-
-                    const stdData = res.stdSnap.data() || {};
+const stdData = res.stdSnap.data() || {};
                     stdName = stdData.name || cleanId;
                     try {
                         const myCourses = stdData.enrolledCourses || [];
@@ -1154,20 +1133,22 @@ const verifyOnServer = async () => {
                         });
                     } catch (e) {}
 
-                    const lockExists = res.lockSnap.exists();
+const lockExists = res.lockSnap.exists();
                     const lockData = lockExists ? (res.lockSnap.data() || {}) : {};
+                    
+                    // فحص صارم للأجهزة المربوطة حالياً فقط (بدون الاعتماد على legacyDeviceIds القديم)
                     const activeDevicesArr = Array.isArray(lockData.devices) ? lockData.devices : [];
-                    const boundDevices = Array.isArray(lockData.deviceIds)
-                        ? [...lockData.deviceIds]
+                    const boundDevices = Array.isArray(lockData.deviceIds) 
+                        ? [...lockData.deviceIds] 
                         : (lockData.deviceId ? [lockData.deviceId] : []);
 
                     const isMyDeviceBound = lockExists && (
                         boundDevices.includes(myHardwareKey) ||
-                        (myLegacyDeviceKey && boundDevices.includes(myLegacyDeviceKey)) ||
-                        activeDevicesArr.some(d => d.deviceId === myHardwareKey || (myLegacyDeviceKey && (d.deviceId === myLegacyDeviceKey || d.legacyDeviceId === myLegacyDeviceKey)))
+                        boundDevices.includes(deviceId) ||
+                        activeDevicesArr.some(d => d.deviceId === myHardwareKey || d.deviceId === deviceId || d.legacyDeviceId === deviceId)
                     );
 
-                    // 1. إذا كان الطالب مسجلاً مسبقاً وتم حذف قفله من المشرف -> يطرد فوراً
+                    // 1. عند فتح الموقع أو عمل ريستارت (!isFirstTimeSetup): إذا كان القفل محذوفاً أو الهاتف غير موجود فيه -> اطرد فوراً ولا تسجله!
                     if (!isFirstTimeSetup && (!lockExists || !isMyDeviceBound)) {
                         clearStudentLocalBinding(cleanId);
                         inputId.value = "";
@@ -1183,20 +1164,7 @@ const verifyOnServer = async () => {
                         return false;
                     }
 
-                    // 2. إذا كان الطالب مربوطاً مسبقاً، نؤمن تسجيل ملكية الهاتف له تلقائياً
-                    if (!isFirstTimeSetup && isMyDeviceBound && (!res.ownerSnap || !res.ownerSnap.exists())) {
-                        setDoc(doc(res.db, "attendance_devices", `device_owner_${myHardwareKey}`), {
-                            pureHwId: myHardwareKey,
-                            studentId: cleanId,
-                            studentName: stdName,
-                            department: stdData.department || "هندسة الحاسب",
-                            academicYear: String(stdData.academicYear || "2"),
-                            boundAt: res.serverTimestamp(),
-                            boundAtISO: new Date().toISOString()
-                        }, { merge: true }).catch(() => {});
-                    }
-
-                    // 3. فحص الحد الأقصى للأجهزة عند التسجيل اليدوي
+                    // 2. فحص الحد الأقصى للأجهزة عند التسجيل اليدوي: مسموح بجهازين (2) فقط لكل طالب
                     if (!isMyDeviceBound && boundDevices.length >= 2) {
                         clearStudentLocalBinding(cleanId);
                         welcomeBar.classList.add("d-none");
@@ -1210,7 +1178,7 @@ const verifyOnServer = async () => {
                         return false;
                     }
 
-                    // 4. التسجيل والربط لأول مرة وتثبيت ملكية الهاتف 1-to-1
+                    // 3. التسجيل والربط يتم حصرياً إذا كان الطالب يكتب رقمه بيده لأول مرة (isFirstTimeSetup === true)
                     if (isFirstTimeSetup) {
                         const phoneName = await getReadablePhoneName();
                         const isConfirmed = await askAnimatedIdConfirmation(cleanId, stdName);
@@ -1237,7 +1205,7 @@ const verifyOnServer = async () => {
 
                             const currentDeviceObj = {
                                 deviceId: myHardwareKey,
-                                legacyDeviceId: myLegacyDeviceKey || myHardwareKey,
+                                legacyDeviceId: deviceId,
                                 deviceName: phoneName,
                                 screenInfo: `${screen.width}x${screen.height}`,
                                 lockedAtISO: nowISO
@@ -1251,7 +1219,7 @@ const verifyOnServer = async () => {
                                 updatedDevicesList = [currentDeviceObj];
                                 firstTime = nowISO;
                             } else {
-                                const otherDev = existingDevices.find(d => d.deviceId !== myHardwareKey && (!myLegacyDeviceKey || (d.deviceId !== myLegacyDeviceKey && d.legacyDeviceId !== myLegacyDeviceKey)));
+                                const otherDev = existingDevices.find(d => d.deviceId !== myHardwareKey && d.deviceId !== deviceId);
                                 if (otherDev) {
                                     updatedDevicesList = [otherDev, currentDeviceObj];
                                     firstTime = otherDev.lockedAtISO || firstTime;
@@ -1263,36 +1231,25 @@ const verifyOnServer = async () => {
                             }
 
                             await Promise.race([
-                                Promise.all([
-                                    setDoc(doc(res.db, "attendance_devices", `device_owner_${myHardwareKey}`), {
-                                        pureHwId: myHardwareKey,
-                                        studentId: cleanId,
-                                        studentName: stdName,
-                                        department: stdData.department || "هندسة الحاسب",
-                                        academicYear: String(stdData.academicYear || "2"),
-                                        boundAt: res.serverTimestamp(),
-                                        boundAtISO: nowISO
-                                    }, { merge: true }),
-                                    setDoc(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), {
-                                        studentId: cleanId,
-                                        studentName: stdName,
-                                        department: stdData.department || "هندسة الحاسب",
-                                        academicYear: String(stdData.academicYear || "2"),
-                                        devices: updatedDevicesList,
-                                        deviceIds: updatedDevicesList.map(d => d.deviceId),
-                                        legacyDeviceIds: updatedDevicesList.map(d => d.legacyDeviceId || d.deviceId),
-                                        legacyDeviceId: updatedDevicesList[0]?.legacyDeviceId || myHardwareKey,
-                                        deviceId: updatedDevicesList[0]?.deviceId || myHardwareKey,
-                                        secondDeviceId: updatedDevicesList[1]?.deviceId || "",
-                                        deviceName: updatedDevicesList.map((d, i) => `[هاتف ${i+1}] ${d.deviceName}`).join(" | "),
-                                        screenInfo: updatedDevicesList[0]?.screenInfo || `${screen.width}x${screen.height}`,
-                                        firstLockedAtISO: firstTime,
-                                        secondLockedAtISO: secondTime,
-                                        lockedAt: res.serverTimestamp(),
-                                        lockedAtISO: secondTime || firstTime
-                                    }, { merge: true })
-                                ]),
-                                new Promise((r) => setTimeout(r, 3500))
+                                setDoc(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), {
+                                    studentId: cleanId,
+                                    studentName: stdName,
+                                    department: stdData.department || "هندسة الحاسب",
+                                    academicYear: String(stdData.academicYear || "2"),
+                                    devices: updatedDevicesList,
+                                    deviceIds: updatedDevicesList.map(d => d.deviceId),
+                                    legacyDeviceIds: updatedDevicesList.map(d => d.legacyDeviceId || d.deviceId),
+                                    legacyDeviceId: updatedDevicesList[0]?.legacyDeviceId || deviceId,
+                                    deviceId: updatedDevicesList[0]?.deviceId || myHardwareKey,
+                                    secondDeviceId: updatedDevicesList[1]?.deviceId || "",
+                                    deviceName: updatedDevicesList.map((d, i) => `[هاتف ${i+1}] ${d.deviceName}`).join(" | "),
+                                    screenInfo: updatedDevicesList[0]?.screenInfo || `${screen.width}x${screen.height}`,
+                                    firstLockedAtISO: firstTime,
+                                    secondLockedAtISO: secondTime,
+                                    lockedAt: res.serverTimestamp(),
+                                    lockedAtISO: secondTime || firstTime
+                                }, { merge: true }),
+                                new Promise((r) => setTimeout(r, 3000))
                             ]);
                             localStorage.setItem(`muc_lock_claimed_${cleanId}`, "1");
                         } catch (lockErr) {
@@ -1300,7 +1257,7 @@ const verifyOnServer = async () => {
                         }
                     }
 
-                    // 5. مراقب لحظي للطرد الفوري عند فك القفل من المشرف
+                    // 4. مراقب لحظي (Live Kick Listener): يطرد الهاتف في نفس الثانية التي يضغط فيها المشرف على "طرد" حتى لو الطالب فاتح الشاشة!
                     try {
                         const { onSnapshot } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
                         if (window._liveKickUnsub) window._liveKickUnsub();
@@ -1312,8 +1269,8 @@ const verifyOnServer = async () => {
                             const devs = Array.isArray(d.devices) ? d.devices : [];
                             const stillBound = snap.exists() && (
                                 ids.includes(myHardwareKey) ||
-                                (myLegacyDeviceKey && ids.includes(myLegacyDeviceKey)) ||
-                                devs.some(x => x.deviceId === myHardwareKey || (myLegacyDeviceKey && (x.deviceId === myLegacyDeviceKey || x.legacyDeviceId === myLegacyDeviceKey)))
+                                ids.includes(deviceId) ||
+                                devs.some(x => x.deviceId === myHardwareKey || x.deviceId === deviceId || x.legacyDeviceId === deviceId)
                             );
                             if (!stillBound) {
                                 if (window._liveKickUnsub) { window._liveKickUnsub(); window._liveKickUnsub = null; }
@@ -1374,101 +1331,30 @@ const verifyOnServer = async () => {
             return true;
         }
 
-// 🕵️‍♂️ 1. دالة كشف وحظر المتصفح الخفي المحدثة (Safari + Chrome + Samsung + Firefox)
+// 🕵️‍♂️ 1. دالة كشف وحظر المتصفح الخفي (Incognito Detector)
         async function isIncognitoMode() {
             try {
-                let engineMsgLen = 0;
-                try { (-1).toFixed(-1); } catch (e) { engineMsgLen = (e.message || "").length; }
-
-                const isSafariEngine = engineMsgLen === 43 || engineMsgLen === 44 || (navigator.vendor && navigator.vendor.includes("Apple"));
-                const isFirefoxEngine = engineMsgLen === 25 || ("MozAppearance" in document.documentElement.style);
-
-                // 1) Safari على iPhone / iPad
-                if (isSafariEngine) {
-                    if (navigator.storage && typeof navigator.storage.getDirectory === "function") {
-                        try {
-                            await navigator.storage.getDirectory();
-                            return false;
-                        } catch (err) {
-                            const msg = String(err?.message || "").toLowerCase();
-                            if (msg.includes("transient") || err?.name === "SecurityError" || err?.name === "UnknownError") {
-                                return true;
-                            }
-                        }
-                    }
+                // فحص متصفحات Chromium (Chrome, Edge, Samsung Browser, Opera)
+                if ('storage' in navigator && 'estimate' in navigator.storage) {
+                    const { quota } = await navigator.storage.estimate();
+                    // في الوضع الخفي يحدد كروم مساحة تخزين ضئيلة جداً (أقل من 120 ميجابايت)
+                    if (quota && quota < 120000000) return true;
+                }
+                // فحص متصفح Safari على أجهزة iPhone و iPad
+                if (navigator.vendor && navigator.vendor.includes('Apple')) {
                     try {
-                        localStorage.setItem("__muc_priv_probe", "1");
-                        localStorage.removeItem("__muc_priv_probe");
+                        window.openDatabase(null, null, null, null);
                     } catch (_) {
                         return true;
                     }
-                    return false;
                 }
-
-                // 2) Firefox
-                if (isFirefoxEngine) {
-                    if (navigator.storage && typeof navigator.storage.getDirectory === "function") {
-                        try {
-                            await navigator.storage.getDirectory();
-                            return false;
-                        } catch (err) {
-                            if (err?.name === "SecurityError" || String(err?.message || "").toLowerCase().includes("security")) {
-                                return true;
-                            }
-                        }
-                    }
+                // فحص متصفح Firefox
+                if ('MozAppearance' in document.documentElement.style) {
                     return new Promise((resolve) => {
-                        const req = indexedDB.open("muc_incognito_test");
-                        req.onerror = () => resolve(true);
-                        req.onsuccess = () => {
-                            try { req.result.close(); indexedDB.deleteDatabase("muc_incognito_test"); } catch (_) {}
-                            resolve(false);
-                        };
+                        const db = indexedDB.open("muc_incognito_test");
+                        db.onerror = () => resolve(true);
+                        db.onsuccess = () => resolve(false);
                     });
-                }
-
-                // 3) متصفحات Chromium (Chrome, Samsung Internet, Edge, Brave, Opera)
-                if ("indexedDB" in window) {
-                    const isRamOnly = await Promise.race([
-                        new Promise((resolve) => {
-                            const dbName = "muc_probe_" + Date.now();
-                            const req = indexedDB.open(dbName, 1);
-                            req.onupgradeneeded = () => req.result.createObjectStore("s");
-                            req.onerror = () => resolve(true);
-                            req.onsuccess = async () => {
-                                const idb = req.result;
-                                try {
-                                    const runWrite = (durability) => new Promise((res, rej) => {
-                                        const t0 = performance.now();
-                                        const tx = idb.transaction("s", "readwrite", { durability });
-                                        const store = tx.objectStore("s");
-                                        for (let i = 0; i < 20; i++) store.put("x".repeat(1024), i);
-                                        tx.oncomplete = () => res(performance.now() - t0);
-                                        tx.onerror = () => rej();
-                                    });
-
-                                    await runWrite("relaxed");
-                                    await runWrite("strict");
-
-                                    const ratios = [];
-                                    for (let r = 0; r < 4; r++) {
-                                        const tRel = await runWrite("relaxed");
-                                        const tStr = await runWrite("strict");
-                                        if (tRel > 0) ratios.push(tStr / tRel);
-                                    }
-                                    ratios.sort((a, b) => a - b);
-                                    const medianRatio = ratios[Math.floor(ratios.length / 2)] || 1.5;
-                                    resolve(medianRatio < 1.08);
-                                } catch (_) {
-                                    resolve(false);
-                                } finally {
-                                    try { idb.close(); indexedDB.deleteDatabase(dbName); } catch (_) {}
-                                }
-                            };
-                        }),
-                        new Promise((resolve) => setTimeout(() => resolve(false), 600))
-                    ]);
-                    if (isRamOnly) return true;
                 }
             } catch (e) {
                 return false;
@@ -2529,7 +2415,7 @@ const KNOWN_COURSES_DISPLAY = {
 
 </style>
 <!-- 🔒 درع الحماية ضد الفحص وسرقة الأكواد (Disable DevTools & Right Click) -->
- <!--
+ 
 <script>
     (function () {
         // 1. تعطيل النقر بزر الماوس الأيمن (Right-Click Context Menu)
@@ -2566,6 +2452,6 @@ const KNOWN_COURSES_DISPLAY = {
         }, false);
     })();
 </script>
- -->
+
 </body>
                     </html>
