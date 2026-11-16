@@ -940,7 +940,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
         const welcomeNameEl = document.getElementById("welcome-student-name");
         const welcomeIdEl = document.getElementById("welcome-student-id");
 
-// بصمة عتادية ثابتة للهاتف لمنع فتح نفس الـ ID من هاتف آخر أو متصفح خفي
+// 🔒 بصمة وخزنة هوية الهاتف (تحفظ هوية الجهاز ومالكه في LocalStorage + Cookies + Cache Storage)
         function getHardwareDeviceKey() {
             let savedKey = localStorage.getItem("muc_hw_bound_key");
             if (!savedKey) {
@@ -948,7 +948,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                 if (match && match[1]) savedKey = decodeURIComponent(match[1]);
             }
             if (!savedKey) {
-                const sig = `${screen.width}x${screen.height}x${screen.colorDepth}_${navigator.hardwareConcurrency || 4}_${navigator.platform || "MUC"}`;
+                const sig = `${Math.min(screen.width, screen.height)}x${Math.max(screen.width, screen.height)}x${screen.colorDepth}_${navigator.hardwareConcurrency || 4}_${navigator.platform || "MUC"}`;
                 let h = 0;
                 for (let i = 0; i < sig.length; i++) { h = ((h << 5) - h) + sig.charCodeAt(i); h |= 0; }
                 const rand = Math.random().toString(36).substring(2, 10);
@@ -958,7 +958,50 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             document.cookie = `muc_hw_bound_key=${encodeURIComponent(savedKey)}; max-age=31536000; path=/; SameSite=Lax`;
             return savedKey;
         }
-        const myHardwareKey = getHardwareDeviceKey();
+        let myHardwareKey = getHardwareDeviceKey();
+
+        // خزنة عميقة داخل Cache Storage لمنع تبديل الحساب حتى لو مسح الطالب الكوكيز
+        async function saveIdentityToVault(hwKey, ownerSid, ownerName) {
+            try {
+                localStorage.setItem("muc_bound_owner_id", ownerSid);
+                document.cookie = `muc_bound_owner_id=${encodeURIComponent(ownerSid)}; max-age=31536000; path=/; SameSite=Lax`;
+                if ("caches" in window) {
+                    const cache = await caches.open("muc_device_identity_vault_v1");
+                    await cache.put("/__muc_identity_lock", new Response(JSON.stringify({ hwKey, ownerSid, ownerName })));
+                }
+            } catch (_) {}
+        }
+
+        async function loadIdentityFromVault() {
+            try {
+                if ("caches" in window) {
+                    const cache = await caches.open("muc_device_identity_vault_v1");
+                    const res = await cache.match("/__muc_identity_lock");
+                    if (res) {
+                        const data = await res.json();
+                        if (data && data.hwKey) {
+                            myHardwareKey = data.hwKey;
+                            localStorage.setItem("muc_hw_bound_key", data.hwKey);
+                            document.cookie = `muc_hw_bound_key=${encodeURIComponent(data.hwKey)}; max-age=31536000; path=/; SameSite=Lax`;
+                        }
+                        return data;
+                    }
+                }
+            } catch (_) {}
+            const cookieOwner = (document.cookie.match(/(?:^|;\s*)muc_bound_owner_id=([^;]*)/) || [])[1];
+            const localOwner = localStorage.getItem("muc_bound_owner_id") || (cookieOwner ? decodeURIComponent(cookieOwner) : "");
+            return localOwner ? { hwKey: myHardwareKey, ownerSid: localOwner } : null;
+        }
+
+        async function clearIdentityVault() {
+            try {
+                localStorage.removeItem("muc_bound_owner_id");
+                document.cookie = "muc_bound_owner_id=; max-age=0; path=/";
+                if ("caches" in window) {
+                    await caches.delete("muc_device_identity_vault_v1");
+                }
+            } catch (_) {}
+        }
 
         // حفظ واسترجاع الرقم الجامعي والاسم نهائياً من LocalStorage + Cookies لمدة 365 يوماً
         function saveStudentIdPermanently(sid, sname = "") {
@@ -969,6 +1012,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                 localStorage.setItem("muc_saved_student_name", sname);
                 document.cookie = `muc_saved_student_name=${encodeURIComponent(sname)}; max-age=31536000; path=/; SameSite=Lax`;
             }
+            saveIdentityToVault(myHardwareKey, sid, sname);
         }
 
         function getSavedStudentId() {
@@ -995,7 +1039,6 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             return "";
         }
 
-        // نافذة الأنيميشن لتأكيد الـ ID بـ Yes أو No
         function askAnimatedIdConfirmation(sid, sname) {
             return new Promise((resolve) => {
                 const modal = document.getElementById("id-lock-confirm-modal");
@@ -1014,7 +1057,6 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             });
         }
 
-// دالة ذكية لاستخراج اسم وموديل الهاتف والمتصفح ليظهر للمشرف في لوحة التحكم
         async function getReadablePhoneName() {
             try {
                 const ua = navigator.userAgent || "";
@@ -1062,16 +1104,17 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             localStorage.removeItem(`muc_lock_claimed_${cleanId}`);
             document.cookie = "muc_saved_student_id=; max-age=0; path=/";
             document.cookie = "muc_saved_student_name=; max-age=0; path=/";
+            clearIdentityVault();
         }
 
- // دالة التحقق من ملكية الـ ID وتفعيله نهائياً (عرض فوري في 0 ثانية للطالب المسجل مسبقاً!)
+        // دالة التحقق من ملكية الـ ID وتفعيله نهائياً (هاتف واحد ومتصفح واحد لكل طالب 1/1)
         async function activateStudentProfile(sid, isFirstTimeSetup = false) {
             const cleanId = String(sid || "").trim();
             if (!cleanId) return false;
 
+            const vaultData = await loadIdentityFromVault();
             let stdName = getSavedStudentName(cleanId);
 
-            // ⚡ إذا كان الطالب مسجلاً من قبل على هذا الهاتف: نفتح له شاشة المسح والترحيب فوراً في 0 ثانية بدون انتظار الشبكة!
             if (!isFirstTimeSetup) {
                 inputId.value = cleanId;
                 welcomeNameEl.innerText = stdName || "طالب جامعة مايو";
@@ -1090,16 +1133,17 @@ const welcomeBar = document.getElementById("student-welcome-bar");
 
                     const verifyOnServer = async () => {
                         if (!auth.currentUser) await signInAnonymously(auth);
-                        const [stdSnap, lockSnap] = await Promise.all([
+                        const [stdSnap, lockSnap, ownerSnap] = await Promise.all([
                             getDoc(doc(db, "students", cleanId)),
-                            getDoc(doc(db, "attendance_devices", `id_lock_${cleanId}`))
+                            getDoc(doc(db, "attendance_devices", `id_lock_${cleanId}`)),
+                            getDoc(doc(db, "attendance_devices", `device_owner_${myHardwareKey}`))
                         ]);
-                        return { stdSnap, lockSnap, db, doc, setDoc, serverTimestamp };
+                        return { stdSnap, lockSnap, ownerSnap, db, doc, setDoc, serverTimestamp };
                     };
 
                     const res = await Promise.race([
                         verifyOnServer(),
-                        new Promise((_, rej) => setTimeout(() => rej(new Error("TIMEOUT")), 4500))
+                        new Promise((_, rej) => setTimeout(() => rej(new Error("TIMEOUT")), 5000))
                     ]);
 
                     if (!res.stdSnap.exists()) {
@@ -1111,7 +1155,27 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                         return false;
                     }
 
-const stdData = res.stdSnap.data() || {};
+                    // 🛑 1. منع تبديل الحساب على نفس الهاتف: إذا كان الهاتف مملوكاً لطالب آخر في الخزنة أو السيرفر
+                    const previousOwnerId = (res.ownerSnap && res.ownerSnap.exists() && res.ownerSnap.data()?.studentId) || (vaultData && vaultData.ownerSid) || "";
+                    if (previousOwnerId && String(previousOwnerId).trim() !== cleanId) {
+                        const prevLockSnap = await getDoc(doc(res.db, "attendance_devices", `id_lock_${previousOwnerId}`)).catch(() => ({ exists: () => false }));
+                        if (prevLockSnap.exists()) {
+                            const prevName = prevLockSnap.data()?.studentName || (res.ownerSnap?.data()?.studentName) || previousOwnerId;
+                            inputId.value = "";
+                            welcomeBar.classList.add("d-none");
+                            scannerStep.classList.add("d-none");
+                            resultStep.classList.add("d-none");
+                            inputStep.classList.remove("d-none");
+                            await showCustomAlert(
+                                "ممنوع فتح حساب طالب آخر!",
+                                `🚫 هذا الهاتف مربوط بالفعل بالطالب:\n[${prevName}] (${previousOwnerId})\n\nلا يسمح النظام بفتح أكثر من حساب واحد على نفس الهاتف.`,
+                                true
+                            );
+                            return false;
+                        }
+                    }
+
+                    const stdData = res.stdSnap.data() || {};
                     stdName = stdData.name || cleanId;
                     try {
                         const myCourses = stdData.enrolledCourses || [];
@@ -1133,22 +1197,24 @@ const stdData = res.stdSnap.data() || {};
                         });
                     } catch (e) {}
 
-const lockExists = res.lockSnap.exists();
+                    const lockExists = res.lockSnap.exists();
                     const lockData = lockExists ? (res.lockSnap.data() || {}) : {};
-                    
-                    // فحص صارم للأجهزة المربوطة حالياً فقط (بدون الاعتماد على legacyDeviceIds القديم)
                     const activeDevicesArr = Array.isArray(lockData.devices) ? lockData.devices : [];
                     const boundDevices = Array.isArray(lockData.deviceIds) 
                         ? [...lockData.deviceIds] 
                         : (lockData.deviceId ? [lockData.deviceId] : []);
 
+                    // اعتماد الهاتف الأول الأساسي فقط (1/1) لمنع أي متصفح خفي أو متصفح ثانٍ من الدخول
+                    const primaryBoundIds = boundDevices.slice(0, 1);
+                    const primaryDevicesArr = activeDevicesArr.slice(0, 1);
+
                     const isMyDeviceBound = lockExists && (
-                        boundDevices.includes(myHardwareKey) ||
-                        boundDevices.includes(deviceId) ||
-                        activeDevicesArr.some(d => d.deviceId === myHardwareKey || d.deviceId === deviceId || d.legacyDeviceId === deviceId)
+                        primaryBoundIds.includes(myHardwareKey) ||
+                        primaryBoundIds.includes(deviceId) ||
+                        primaryDevicesArr.some(d => d.deviceId === myHardwareKey || d.deviceId === deviceId || d.legacyDeviceId === deviceId || d.legacyDeviceId === myHardwareKey)
                     );
 
-                    // 1. عند فتح الموقع أو عمل ريستارت (!isFirstTimeSetup): إذا كان القفل محذوفاً أو الهاتف غير موجود فيه -> اطرد فوراً ولا تسجله!
+                    // 2. إذا قام المشرف بطرد الهاتف من لوحة التحكم -> يطرد فوراً
                     if (!isFirstTimeSetup && (!lockExists || !isMyDeviceBound)) {
                         clearStudentLocalBinding(cleanId);
                         inputId.value = "";
@@ -1164,21 +1230,34 @@ const lockExists = res.lockSnap.exists();
                         return false;
                     }
 
-                    // 2. فحص الحد الأقصى للأجهزة عند التسجيل اليدوي: مسموح بجهازين (2) فقط لكل طالب
-                    if (!isMyDeviceBound && boundDevices.length >= 2) {
-                        clearStudentLocalBinding(cleanId);
+                    // 🛑 3. قفل الهاتف الواحد والمتصفح الواحد (1/1): يرفض فوراً أي دخول من المتصفح الخفي أو من متصفح/هاتف آخر!
+                    if (!isMyDeviceBound && primaryBoundIds.length >= 1) {
+                        inputId.value = "";
                         welcomeBar.classList.add("d-none");
                         scannerStep.classList.add("d-none");
                         inputStep.classList.remove("d-none");
                         await showCustomAlert(
-                            "الرقم الجامعي مستخدم بالفعل!",
-                            `🚫 عفواً، الرقم الجامعي (${cleanId}) مربوط بالفعل بهاتفين (الحد الأقصى المسموح به هو هاتفان فقط)!\n\nيرجى التحدث مع المشرف لفك القفل.\n\nThis Student ID is already bound to 2 devices.`,
+                            "الرقم الجامعي مربوط بهاتف ومتصفح آخر!",
+                            `🚫 عفواً، الرقم الجامعي (${cleanId}) مربوط بالفعل بمتصفح الطالب الأساسي (مسموح بهاتف ومتصفح واحد فقط لكل طالب)!\n\nلا يمكن فتح الحساب من المتصفح الخفي (Incognito) أو من متصفح أو هاتف آخر.`,
                             true
                         );
                         return false;
                     }
 
-                    // 3. التسجيل والربط يتم حصرياً إذا كان الطالب يكتب رقمه بيده لأول مرة (isFirstTimeSetup === true)
+                    // تأمين حفظ ملكية الهاتف للطالب الحالي
+                    if (!isFirstTimeSetup && isMyDeviceBound && (!res.ownerSnap || !res.ownerSnap.exists())) {
+                        setDoc(doc(res.db, "attendance_devices", `device_owner_${myHardwareKey}`), {
+                            deviceId: myHardwareKey,
+                            studentId: cleanId,
+                            studentName: stdName,
+                            department: stdData.department || "هندسة الحاسب",
+                            academicYear: String(stdData.academicYear || "2"),
+                            boundAt: res.serverTimestamp(),
+                            boundAtISO: new Date().toISOString()
+                        }, { merge: true }).catch(() => {});
+                    }
+
+                    // 4. التسجيل والربط لأول مرة (1/1)
                     if (isFirstTimeSetup) {
                         const phoneName = await getReadablePhoneName();
                         const isConfirmed = await askAnimatedIdConfirmation(cleanId, stdName);
@@ -1189,20 +1268,6 @@ const lockExists = res.lockSnap.exists();
 
                         try {
                             const nowISO = new Date().toISOString();
-                            let existingDevices = Array.isArray(lockData.devices) ? [...lockData.devices] : [];
-
-                            if (existingDevices.length === 0 && lockData.deviceId) {
-                                const rawName = String(lockData.deviceName || "");
-                                const namePart1 = rawName.includes(" + ") ? rawName.split(" + ")[0].trim() : (rawName.includes(" | ") ? rawName.split(" | ")[0].replace(/^[?هاتف 1]?\s*/, "").trim() : (rawName || "هاتف 1"));
-                                existingDevices.push({
-                                    deviceId: lockData.deviceId,
-                                    legacyDeviceId: lockData.legacyDeviceId || lockData.deviceId,
-                                    deviceName: namePart1,
-                                    screenInfo: lockData.screenInfo || "",
-                                    lockedAtISO: lockData.firstLockedAtISO || lockData.lockedAtISO || nowISO
-                                });
-                            }
-
                             const currentDeviceObj = {
                                 deviceId: myHardwareKey,
                                 legacyDeviceId: deviceId,
@@ -1211,45 +1276,37 @@ const lockExists = res.lockSnap.exists();
                                 lockedAtISO: nowISO
                             };
 
-                            let updatedDevicesList = [];
-                            let firstTime = lockData.firstLockedAtISO || (existingDevices[0]?.lockedAtISO) || nowISO;
-                            let secondTime = lockData.secondLockedAtISO || "";
-
-                            if (existingDevices.length === 0) {
-                                updatedDevicesList = [currentDeviceObj];
-                                firstTime = nowISO;
-                            } else {
-                                const otherDev = existingDevices.find(d => d.deviceId !== myHardwareKey && d.deviceId !== deviceId);
-                                if (otherDev) {
-                                    updatedDevicesList = [otherDev, currentDeviceObj];
-                                    firstTime = otherDev.lockedAtISO || firstTime;
-                                    secondTime = nowISO;
-                                } else {
-                                    updatedDevicesList = [currentDeviceObj];
-                                    firstTime = currentDeviceObj.lockedAtISO || nowISO;
-                                }
-                            }
-
                             await Promise.race([
-                                setDoc(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), {
-                                    studentId: cleanId,
-                                    studentName: stdName,
-                                    department: stdData.department || "هندسة الحاسب",
-                                    academicYear: String(stdData.academicYear || "2"),
-                                    devices: updatedDevicesList,
-                                    deviceIds: updatedDevicesList.map(d => d.deviceId),
-                                    legacyDeviceIds: updatedDevicesList.map(d => d.legacyDeviceId || d.deviceId),
-                                    legacyDeviceId: updatedDevicesList[0]?.legacyDeviceId || deviceId,
-                                    deviceId: updatedDevicesList[0]?.deviceId || myHardwareKey,
-                                    secondDeviceId: updatedDevicesList[1]?.deviceId || "",
-                                    deviceName: updatedDevicesList.map((d, i) => `[هاتف ${i+1}] ${d.deviceName}`).join(" | "),
-                                    screenInfo: updatedDevicesList[0]?.screenInfo || `${screen.width}x${screen.height}`,
-                                    firstLockedAtISO: firstTime,
-                                    secondLockedAtISO: secondTime,
-                                    lockedAt: res.serverTimestamp(),
-                                    lockedAtISO: secondTime || firstTime
-                                }, { merge: true }),
-                                new Promise((r) => setTimeout(r, 3000))
+                                Promise.all([
+                                    setDoc(doc(res.db, "attendance_devices", `device_owner_${myHardwareKey}`), {
+                                        deviceId: myHardwareKey,
+                                        studentId: cleanId,
+                                        studentName: stdName,
+                                        department: stdData.department || "هندسة الحاسب",
+                                        academicYear: String(stdData.academicYear || "2"),
+                                        boundAt: res.serverTimestamp(),
+                                        boundAtISO: nowISO
+                                    }, { merge: true }),
+                                    setDoc(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), {
+                                        studentId: cleanId,
+                                        studentName: stdName,
+                                        department: stdData.department || "هندسة الحاسب",
+                                        academicYear: String(stdData.academicYear || "2"),
+                                        devices: [currentDeviceObj],
+                                        deviceIds: [myHardwareKey],
+                                        legacyDeviceIds: [deviceId],
+                                        legacyDeviceId: deviceId,
+                                        deviceId: myHardwareKey,
+                                        secondDeviceId: "",
+                                        deviceName: `[هاتف 1] ${phoneName}`,
+                                        screenInfo: `${screen.width}x${screen.height}`,
+                                        firstLockedAtISO: nowISO,
+                                        secondLockedAtISO: "",
+                                        lockedAt: res.serverTimestamp(),
+                                        lockedAtISO: nowISO
+                                    }, { merge: true })
+                                ]),
+                                new Promise((r) => setTimeout(r, 3500))
                             ]);
                             localStorage.setItem(`muc_lock_claimed_${cleanId}`, "1");
                         } catch (lockErr) {
@@ -1257,7 +1314,7 @@ const lockExists = res.lockSnap.exists();
                         }
                     }
 
-                    // 4. مراقب لحظي (Live Kick Listener): يطرد الهاتف في نفس الثانية التي يضغط فيها المشرف على "طرد" حتى لو الطالب فاتح الشاشة!
+                    // 5. مراقب لحظي للطرد الفوري عند فك القفل من المشرف
                     try {
                         const { onSnapshot } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
                         if (window._liveKickUnsub) window._liveKickUnsub();
@@ -1265,8 +1322,8 @@ const lockExists = res.lockSnap.exists();
                         window._liveKickUnsub = onSnapshot(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), async (snap) => {
                             if (initialSkip) { initialSkip = false; return; }
                             const d = snap.exists() ? (snap.data() || {}) : {};
-                            const ids = Array.isArray(d.deviceIds) ? d.deviceIds : (d.deviceId ? [d.deviceId] : []);
-                            const devs = Array.isArray(d.devices) ? d.devices : [];
+                            const ids = (Array.isArray(d.deviceIds) ? d.deviceIds : (d.deviceId ? [d.deviceId] : [])).slice(0, 1);
+                            const devs = (Array.isArray(d.devices) ? d.devices : []).slice(0, 1);
                             const stillBound = snap.exists() && (
                                 ids.includes(myHardwareKey) ||
                                 ids.includes(deviceId) ||
@@ -1305,9 +1362,7 @@ const lockExists = res.lockSnap.exists();
                 }
             }
 
-// 🛡️ معالجة ذكية للاسم: عدم تثبيت "طالب جامعة مايو" في الكاش إذا تعذر الاتصال
             if (!stdName || stdName === "طالب جامعة مايو") {
-                // محاولة استخراج الاسم من ملف البيانات المحلي المدمج إن وجد
                 try {
                     const localMap = JSON.parse(localStorage.getItem(`muc_student_name_${cleanId}`) || "null");
                     if (localMap) stdName = localMap;
@@ -1318,6 +1373,7 @@ const lockExists = res.lockSnap.exists();
                 saveStudentIdPermanently(cleanId, stdName);
                 welcomeNameEl.innerText = stdName;
             } else {
+                saveStudentIdPermanently(cleanId, "");
                 welcomeNameEl.innerText = `طالب (${cleanId})`;
             }
 
