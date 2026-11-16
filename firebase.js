@@ -89,6 +89,7 @@ const KNOWN_MUC_COURSES = {
     "cse_modern_workshop": "Modern Workshop",
     "cse122": "Logic Design (CSE122)",
     "cse111": "Discrete Mathematics (CSE111)",
+    "phm112": "Mathematics for Engineers and Scientists 2 (PHM112)",
     "praxis_programming": "Praxis Programming"
 };
 
