@@ -892,20 +892,6 @@ export async function syncPendingAttendance() {
                     }
                 } catch (_) {}
 
-// 3. التحقق من قيد الطالب ومنع رفع حضور لطالب آخر من هاتف مملوك لزميله
-                const pureHwIdSync = getPureHardwareFingerprint();
-                try {
-                    const ownerSnapSync = await withTimeout(getDoc(doc(db, "attendance_devices", `device_owner_${pureHwIdSync}`)), 4000);
-                    if (ownerSnapSync.exists()) {
-                        const oData = ownerSnapSync.data() || {};
-                        if (oData.studentId && String(oData.studentId).trim() !== String(item.studentId).trim()) {
-                            localStorage.setItem("muc_sync_error", `🚫 مرفوض أمنياً: هذا الهاتف مسجل ومربوط بالطالب (${oData.studentName || oData.studentId}) ولا يمكن رفع حضور لطالب آخر!`);
-                            removeFromQueue(item);
-                            continue;
-                        }
-                    }
-                } catch (_) {}
-
                 const stdSnap = await withTimeout(getDoc(doc(db, "students", item.studentId)), 4500);
                 if (!stdSnap.exists()) {
                     removeFromQueue(item);
