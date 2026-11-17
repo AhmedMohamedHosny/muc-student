@@ -1882,7 +1882,7 @@ if (isOffline) {
 }
         }
 
-        function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
+function showResult(isSuccess, title, msg, canRetry = !isSuccess) {
             welcomeBar.classList.add("d-none");
             footerCreditsBar?.classList.add("d-none");
             document.getElementById("receipt-box")?.classList.add("d-none");
@@ -1892,6 +1892,7 @@ if (isOffline) {
             inputStep.classList.add("d-none");
             resultStep.classList.remove("d-none");
             document.getElementById("btn-retry").classList.toggle("d-none", !canRetry);
+            document.getElementById("btn-errors-guide-result")?.classList.toggle("d-none", isSuccess);
 
             const icon = document.getElementById("status-icon");
             icon.className = "icon-circle";
