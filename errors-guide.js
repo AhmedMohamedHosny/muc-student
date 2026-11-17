@@ -247,8 +247,9 @@ function detectCurrentAppContext() {
     const isResultVisible = resultStep && !resultStep.classList.contains("d-none");
     const isScannerVisible = scannerStep && !scannerStep.classList.contains("d-none");
 
-    let activeErrorText = "";
-    if (isResultVisible) {
+let activeErrorText = "";
+    const isErrorResult = document.getElementById("status-icon")?.classList.contains("icon-danger");
+    if (isResultVisible && isErrorResult) {
         const t = document.getElementById("status-title")?.innerText || "";
         const m = document.getElementById("status-msg")?.innerText || "";
         activeErrorText = `${t} ${m}`.trim();
