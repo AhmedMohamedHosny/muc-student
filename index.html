@@ -547,7 +547,7 @@ background: #FDF2F3;
     </div>
     <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
     <script type="module">
-import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum, decodePinMetadata, verifyPinOnServerFast, getCoursePinIndex } from "./firebase.js";
+import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum, decodePinMetadata, verifyPinOnServerFast, getCoursePinIndex, ensureStudentAuth, verifyStudentSectionAndTA, doSectionGroupsMatch } from "./firebase.js";
         // 🌐 Language Switcher Logic
         let currentLang = "en";
         document.getElementById("btn-lang-toggle")?.addEventListener("click", () => {
@@ -1182,14 +1182,13 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                         localStorage.setItem("muc_student_courses", JSON.stringify(myCourses));
                         localStorage.setItem("muc_student_sections", JSON.stringify(stdData.sections || {}));
                         localStorage.setItem("muc_student_group", stdData.section || stdData.group || "");
-                        const { collection, query, where, limit, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
-                        const mapCache = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}");
+const mapCache = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}");
                         myCourses.forEach(cid => {
-                            getDocs(query(collection(res.db, "attendance_sessions"), where("courseId", "==", cid), limit(1))).then(sSnap => {
-                                if (!sSnap.empty) {
-                                    const sData = sSnap.docs[0].data() || {};
-                                    if (sData.courseName) {
-                                        mapCache[cid] = sData.courseName;
+                            getDoc(doc(res.db, "courses", cid)).then(cSnap => {
+                                if (cSnap.exists()) {
+                                    const cData = cSnap.data() || {};
+                                    if (cData.courseName) {
+                                        mapCache[cid] = cData.courseCode ? `${cData.courseName} (${cData.courseCode})` : cData.courseName;
                                         localStorage.setItem("muc_course_names_map", JSON.stringify(mapCache));
                                     }
                                 }
@@ -1344,22 +1343,27 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                                 );
                             }
                         });
-                    } catch (e) {}
+} catch (e) {}
                 } catch (e) {
                     if (isFirstTimeSetup) {
-                        const isConfirmed = await askAnimatedIdConfirmation(cleanId, stdName || "طالب جامعة مايو");
-                        if (!isConfirmed) {
-                            inputId.focus();
-                            return false;
-                        }
+                        welcomeBar.classList.add("d-none");
+                        scannerStep.classList.add("d-none");
+                        inputStep.classList.remove("d-none");
+                        await showCustomAlert(
+                            "الشبكة ضعيفة حالياً",
+                            "⚠️ تعذر الاتصال بسيرفر الجامعة للتحقق من رقمك الجامعي وتفعيل الهاتف لأول مرة.\n\nيرجى التأكد من جودة الإنترنت والمحاولة مرة أخرى.",
+                            true
+                        );
+                        return false;
                     }
                 }
             } else if (isFirstTimeSetup) {
-                const isConfirmed = await askAnimatedIdConfirmation(cleanId, stdName || "طالب جامعة مايو");
-                if (!isConfirmed) {
-                    inputId.focus();
-                    return false;
-                }
+                await showCustomAlert(
+                    "مطلوب اتصال بالإنترنت",
+                    "⚠️ تفعيل الرقم الجامعي وربطه بالهاتف لأول مرة يتطلب اتصالاً بالإنترنت.\n\nيرجى فتح Wi-Fi أو بيانات الهاتف والمحاولة مرة أخرى.",
+                    true
+                );
+                return false;
             }
 
             if (!stdName || stdName === "طالب جامعة مايو") {
@@ -1441,8 +1445,11 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             `;
         }
 
-        // 🚀 3. تشغيل الفحص عند الإقلاع
+// 🚀 3. تشغيل الفحص وتجهيز اتصال السيرفر عند الإقلاع
         (async function initAppStartup() {
+            if (navigator.onLine) {
+                ensureStudentAuth().catch(() => {});
+            }
             const isPrivate = await isIncognitoMode();
             if (isPrivate) {
                 blockIncognitoUser();
@@ -2026,9 +2033,9 @@ let pinCheck = null;
                     throw new Error("🌐 هذه المحاضرة أونلاين (مباشرة) وتتطلب اتصالاً بالإنترنت لتسجيل حضورك فوراً على شاشة المدرج!\n\nيرجى فتح بيانات الهاتف (Mobile Data) أو الـ Wi-Fi والمحاولة مرة أخرى.");
                 }
 
-                // 1. فحص السيرفر أولاً إذا كان الطالب متصلاً بالإنترنت
+// 1. فحص السيرفر أولاً مع إعادة محاولة تلقائية عند ضعف الشبكة في المدرج (موحد مع الـ QR)
                 if (navigator.onLine) {
-                    try {
+                    const attemptOnlinePinCheckIn = async () => {
                         pinCheck = await verifyPinOnServerFast(enteredPin);
 
                         if (pinCheck.status === "EXPIRED" || pinCheck.status === "DELETED") {
@@ -2050,20 +2057,42 @@ let pinCheck = null;
                                 }
                             }
 
-                            // فحص السكشن والمعيد (منع طالب سكشن 1 من التسجيل في سكشن 4)
                             const studentSections = JSON.parse(localStorage.getItem("muc_student_sections") || "{}");
                             const studentGeneralGroup = localStorage.getItem("muc_student_group") || "";
                             if (typeof verifyStudentSectionAndTA === "function") {
                                 verifyStudentSectionAndTA({ name: stdName, studentId: studentIdVal, sections: studentSections, group: studentGeneralGroup }, sData);
                             }
 
-                            const res = await recordStudentAttendance(
+                            return await recordStudentAttendance(
                                 pinCheck.sessionId,
                                 "PIN_VERIFIED",
                                 studentIdVal,
                                 deviceId,
                                 sData
                             );
+                        }
+
+                        if (!isOfflineModePin && pinCheck.status === "NOT_FOUND") {
+                            throw new Error(`❌ الكود الرقمي (${enteredPin}) غير صحيح أو لم يتم تفعيله بعد على الشاشة!\n\nInvalid PIN code!`);
+                        }
+                        return null;
+                    };
+
+                    try {
+                        let res = null;
+                        try {
+                            res = await attemptOnlinePinCheckIn();
+                        } catch (firstErr) {
+                            const fm = String(firstErr?.message || "");
+                            if (fm === "NETWORK_TIMEOUT" || fm.includes("Failed to fetch") || fm.includes("network-request-failed")) {
+                                // محاولة ثانية تلقائية عند بطء الشبكة في المدرج
+                                res = await attemptOnlinePinCheckIn();
+                            } else {
+                                throw firstErr;
+                            }
+                        }
+
+                        if (res) {
                             const typeName = res.sessionType === "lab" ? "Lab" : (res.sessionType === "section" ? "Section" : "Lecture");
                             const lecNum = res.lectureNumber || pinCheck.pinMeta?.lectureNumber || extractedLecNum;
 
@@ -2079,15 +2108,12 @@ let pinCheck = null;
                             document.getElementById("receipt-box").classList.remove("d-none");
                             return;
                         }
-
-                        if (!isOfflineModePin && pinCheck.status === "NOT_FOUND") {
-                            throw new Error(`❌ الكود الرقمي (${enteredPin}) غير صحيح أو لم يتم تفعيله بعد على الشاشة!\n\nInvalid PIN code!`);
-                        }
                     } catch (netErr) {
                         const msg = String(netErr?.message || "");
                         if (msg.startsWith("NOT_ENROLLED:") || msg.startsWith("WRONG_SECTION:")) throw netErr;
                         if (!isOfflineModePin && (msg === "NETWORK_TIMEOUT" || msg.includes("Failed to fetch") || msg.includes("network-request-failed"))) {
-                            throw new Error("🌐 هذه المحاضرة أونلاين (مباشرة) وتتطلب اتصالاً فعلياً بالإنترنت لتسجيل الحضور!\n\nيرجى التأكد من اتصال الإنترنت والمحاولة مرة أخرى.");
+                            showResult(false, "Weak Network Signal", "⚠️ إشارة الإنترنت في المدرج ضعيفة جداً حالياً. يرجى الضغط على Try Again للمحاولة مرة أخرى.");
+                            return;
                         }
                         if (!isOfflineModePin) throw netErr;
                     }
