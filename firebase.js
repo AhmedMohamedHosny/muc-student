@@ -827,66 +827,9 @@ let uploaded = 0;
             await withTimeout(signInAnonymously(auth), 5000);
         }
 
-        for (const item of queue) {
+for (const item of queue) {
             try {
-                let matchedSessionId = null;
-                let matchedSessionData = null;
-
-                // 1. إذا كان التسجيل بكود PIN: يجب أن يطابق الكود الفعلي للجلسة الحالية حصراً
-                if (item.pin) {
-                    const pinStr = String(item.pin).trim();
-                    const pinNum = Number(pinStr);
-
-                    // أ) البحث في جدول أكواد الـ PIN النشطة
-                    try {
-                        const pinSnap = await withTimeout(getDoc(doc(db, "attendance_pins", pinStr)), 4000);
-                        if (pinSnap.exists()) {
-                            const pData = pinSnap.data() || {};
-                            if (pData.sessionId) {
-                                matchedSessionId = pData.sessionId;
-                                matchedSessionData = pData;
-                            }
-                        }
-                    } catch (_) {}
-
-                    // ب) البحث في تاريخ أكواد جلسة الدكتور
-                    if (!matchedSessionId) {
-                        try {
-                            const qSnap = await withTimeout(getDocs(query(
-                                collection(db, "attendance_sessions"),
-                                where("pinHistory", "array-contains", pinNum)
-                            )), 4500);
-                            if (!qSnap.empty) {
-                                const matchedDoc = qSnap.docs[0];
-                                matchedSessionId = matchedDoc.id;
-                                matchedSessionData = matchedDoc.data();
-                            }
-                        } catch (_) {}
-                    }
-
-                    // 🛑 إذا لم يرفع الدكتور الجلسة بعد: نتوقف فوراً ونُبقي السجل بأمان داخل هاتف الطالب
-                    if (!matchedSessionId) {
-                        console.log(`⏳ PIN (${pinStr}) not found on server yet. Waiting for instructor to sync...`);
-                        continue;
-                    }
-                } else {
-                    // في حالة مسح الـ QR: نستخدم معرّف الجلسة المباشر
-                    matchedSessionId = item.sessionId;
-                }
-
-                // 2. التحقق من وجود الجلسة على السيرفر وأنها ليست محذوفة
-                const sessSnap = await withTimeout(getDoc(doc(db, "attendance_sessions", matchedSessionId)), 4500);
-                if (!sessSnap.exists()) {
-                    continue; // الدكتور لم يرفع المحاضرة بعد -> انتظر ولا تمسح السجل
-                }
-
-                const sData = sessSnap.data() || {};
-                if (sData.status === "deleted") {
-                    removeFromQueue(item);
-                    continue;
-                }
-
-// 3. التحقق من قيد الطالب في المقرر والسكشن قبل اعتماد المزامنة
+                // جلب بيانات الطالب أولاً للتحقق من القيد والسكشن بدقة
                 const stdSnap = await withTimeout(getDoc(doc(db, "students", item.studentId)), 4500);
                 if (!stdSnap.exists()) {
                     localStorage.setItem("muc_sync_error", `⚠️ الرقم الجامعي (${item.studentId}) غير مسجل بقاعدة البيانات!`);
@@ -896,8 +839,108 @@ let uploaded = 0;
 
                 const stdData = stdSnap.data() || {};
                 const studentRealName = stdData.name || item.studentName || "Student";
-
                 const enrolled = stdData.enrolledCourses || [];
+
+                let matchedSessionId = null;
+                let sData = null;
+
+                // دالة فحص ذكية تمنع تصادم أكواد الـ PIN القديمة أو الخاصة بسكاشن أخرى
+                const isSessionMatchingStudentPin = (candSession) => {
+                    if (!candSession || candSession.status === "deleted") return false;
+
+                    // 1. يجب أن تكون الجلسة في نفس يوم تسجيل الطالب (عدم مطابقة جلسات أسابيع سابقة)
+                    const itemDate = item.startedAtDate || new Date(item.scannedAt || Date.now()).toLocaleDateString("en-CA");
+                    const sessStartMs = (candSession.startTime?.seconds || 0) * 1000;
+                    const scanMs = Number(item.scannedAt || Date.now());
+                    const sameDay = candSession.startedAtDate === itemDate || (sessStartMs > 0 && Math.abs(scanMs - sessStartMs) < 18 * 60 * 60 * 1000);
+                    if (!sameDay) return false;
+
+                    // 2. يجب أن تطابق المقرر الدراسي
+                    const cid = String(candSession.courseId || "").trim().toLowerCase();
+                    const itemCid = String(item.courseId || "").trim().toLowerCase();
+                    if (itemCid && itemCid !== "muc_course" && cid && cid !== "muc_course") {
+                        const sameCourse = cid === itemCid || getCoursePinIndex(cid) === getCoursePinIndex(itemCid);
+                        if (!sameCourse) return false;
+                    }
+
+                    // 3. يجب أن تطابق سكشن الطالب (أو تكون محاضرة عامة)
+                    try {
+                        verifyStudentSectionAndTA(stdData, candSession);
+                    } catch (_) {
+                        return false;
+                    }
+
+                    return true;
+                };
+
+                if (item.pin) {
+                    const pinStr = String(item.pin).trim();
+                    const pinNum = Number(pinStr);
+
+                    // أ) فحص جدول أكواد الـ PIN المباشرة
+                    try {
+                        const pinSnap = await withTimeout(getDoc(doc(db, "attendance_pins", pinStr)), 4000);
+                        if (pinSnap.exists()) {
+                            const pData = pinSnap.data() || {};
+                            if (pData.sessionId) {
+                                const candSnap = await withTimeout(getDoc(doc(db, "attendance_sessions", pData.sessionId)), 4000);
+                                if (candSnap.exists() && isSessionMatchingStudentPin(candSnap.data())) {
+                                    matchedSessionId = candSnap.id;
+                                    sData = candSnap.data();
+                                }
+                            }
+                        }
+                    } catch (_) {}
+
+                    // ب) فحص جميع الجلسات التي تحتوي على هذا الكود واختيار الجلسة المطابقة ليوم وسكشن الطالب فقط
+                    if (!matchedSessionId) {
+                        try {
+                            const qSnap = await withTimeout(getDocs(query(
+                                collection(db, "attendance_sessions"),
+                                where("pinHistory", "array-contains", pinNum)
+                            )), 4500);
+                            if (!qSnap.empty) {
+                                const validDoc = qSnap.docs.find(d => isSessionMatchingStudentPin(d.data()));
+                                if (validDoc) {
+                                    matchedSessionId = validDoc.id;
+                                    sData = validDoc.data();
+                                }
+                            }
+                        } catch (_) {}
+                    }
+
+                    // 🛑 إذا لم يرفع الدكتور جلسته بعد: نبقي السجل بأمان في تليفون الطالب بدون أي رسالة خطأ أو حذف
+                    if (!matchedSessionId || !sData) {
+                        if (Date.now() - (item.scannedAt || Date.now()) > 72 * 60 * 60 * 1000) {
+                            removeFromQueue(item);
+                        } else {
+                            console.log(`⏳ Waiting for instructor to upload session for PIN (${pinStr})...`);
+                        }
+                        continue;
+                    }
+                } else {
+                    // في حالة مسح الـ QR: معرّف الجلسة فريد 100%
+                    matchedSessionId = item.sessionId;
+                    const sessSnap = await withTimeout(getDoc(doc(db, "attendance_sessions", matchedSessionId)), 4500);
+                    if (!sessSnap.exists()) {
+                        continue; // الدكتور لم يرفع المحاضرة بعد -> انتظر ولا تمسح السجل
+                    }
+                    sData = sessSnap.data() || {};
+                    if (sData.status === "deleted") {
+                        removeFromQueue(item);
+                        continue;
+                    }
+                    try {
+                        verifyStudentSectionAndTA(stdData, sData);
+                    } catch (secErr) {
+                        const parts = String(secErr.message || "").split(":");
+                        localStorage.setItem("muc_sync_error", `🚫 لم يُسجَّل الحضور: الطالب (${studentRealName}) مقيد في [${parts[2] || "سكشن آخر"}] وليس [${parts[3] || "هذا السكشن"}].`);
+                        removeFromQueue(item);
+                        continue;
+                    }
+                }
+
+                // التحقق من قيد الطالب في المقرر
                 const cid = String(sData.courseId || "").trim().toLowerCase();
                 const ccode = String(sData.courseCode || "").trim().toLowerCase();
                 const isPraxisSync = cid.includes("praxis") || ccode.includes("praxis");
@@ -908,15 +951,6 @@ let uploaded = 0;
 
                 if (!isEnrolledSync) {
                     localStorage.setItem("muc_sync_error", `⚠️ الرقم (${item.studentId}) غير مقيد في مقرر (${sData.courseName || sData.courseId})!`);
-                    removeFromQueue(item);
-                    continue;
-                }
-
-                try {
-                    verifyStudentSectionAndTA(stdData, sData);
-                } catch (secErr) {
-                    const parts = String(secErr.message || "").split(":");
-                    localStorage.setItem("muc_sync_error", `🚫 لم يُسجَّل الحضور: الطالب (${studentRealName}) مقيد في [${parts[2] || "سكشن آخر"}] وليس [${parts[3] || "هذا السكشن"}].`);
                     removeFromQueue(item);
                     continue;
                 }
