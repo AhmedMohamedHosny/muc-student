@@ -121,18 +121,29 @@ export function cleanCourseDisplayName(name) {
 }
 
 const KNOWN_MUC_COURSES = {
-    "cse216": "Web Design and Database (CSE216)",
-    "user_centered": "User Centered Design",
-    "cse_modern_workshop": "Modern Workshop",
-    "cse122": "Logic Design (CSE122)",
-    "cse111": "Discrete Mathematics (CSE111)",
+    "eng101": "Introduction to Engineering (ENG101)",
+    "phm111": "Mathematics for Engineers and Scientists 1 (PHM111)",
     "phm112": "Mathematics for Engineers and Scientists 2 (PHM112)",
-    "praxis_programming": "Praxis Programming"
+    "cse111": "Discrete Mathematics (CSE111)",
+    "cse122": "Logic Design (CSE122)",
+    "cse212": "Praxis Programming (CSE212)",
+    "cse214": "Data Structures and Algorithms (CSE214)",
+    "cse215": "Database Systems (CSE215)",
+    "cse216": "Web Design and Database (CSE216)",
+    "cse219": "Software Engineering (CSE219)",
+    "user_centered": "User Centered Design",
+    "cse_uc": "User Centered Design",
+    "cse_modern_workshop": "Modern Workshop",
+    "praxis_programming": "Praxis Programming",
+    "praxis_programming_lec1": "Praxis Programming",
+    "praxis_programming_lec2": "Praxis Programming"
 };
 
 function formatReadableCourseId(cid) {
     if (!cid) return "";
-    if (KNOWN_MUC_COURSES[cid]) return KNOWN_MUC_COURSES[cid];
+    const lower = String(cid).trim().toLowerCase();
+    if (KNOWN_MUC_COURSES[lower]) return KNOWN_MUC_COURSES[lower];
+    if (/^[a-z]{2,4}\d{3}$/i.test(lower)) return `Course (${lower.toUpperCase()})`;
     return cleanCourseDisplayName(String(cid).replace(/^cse_/, "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()));
 }
 
@@ -352,6 +363,11 @@ export async function verifyPinOnServerFast(enteredPin) {
             withTimeout(getDoc(doc(db, "attendance_pins", String(enteredPin))), 7000),
             withTimeout(getDocs(query(collection(db, "attendance_sessions"), where("pinHistory", "array-contains", pinNum))), 7000)
         ]);
+
+        // إذا فشل الطلبان معاً بسبب بطء الشبكة في المدرج -> نرفع خطأ NETWORK_TIMEOUT لإعادة المحاولة تلقائياً
+        if (pinDocRes.status === "rejected" && queryRes.status === "rejected") {
+            throw new Error("NETWORK_TIMEOUT");
+        }
 
         if (pinDocRes.status === "fulfilled" && pinDocRes.value.exists()) {
             const pData = pinDocRes.value.data() || {};
@@ -644,7 +660,16 @@ if (!isEnrolled) {
             localStorage.setItem(`muc_lock_claimed_${cleanedStudentId}`, "1");
         }
 
-        await withTimeout(Promise.all(writePromises), 9000);
+try {
+            await withTimeout(Promise.all(writePromises), 9000);
+        } catch (writeErr) {
+            if (String(writeErr?.message || "") === "NETWORK_TIMEOUT") {
+                const checkSaved = await withTimeout(getDoc(recordRef), 4500).catch(() => null);
+                if (!checkSaved || !checkSaved.exists()) throw writeErr;
+            } else {
+                throw writeErr;
+            }
+        }
         markLectureAttendedLocally(cleanedStudentId, sessionData.courseId, currentLecNum, sessionId);
         removeFromQueue({ studentId: cleanedStudentId, sessionId: sessionId, courseId: sessionData.courseId, scannedAt: Date.now() });
 
@@ -860,14 +885,41 @@ export async function syncPendingAttendance() {
                     continue;
                 }
 
-                // 3. التحقق من قيد الطالب
+// 3. التحقق من قيد الطالب في المقرر والسكشن قبل اعتماد المزامنة
                 const stdSnap = await withTimeout(getDoc(doc(db, "students", item.studentId)), 4500);
                 if (!stdSnap.exists()) {
+                    localStorage.setItem("muc_sync_error", `⚠️ الرقم الجامعي (${item.studentId}) غير مسجل بقاعدة البيانات!`);
                     removeFromQueue(item);
                     continue;
                 }
 
-                const studentRealName = stdSnap.data()?.name || item.studentName || "Student";
+                const stdData = stdSnap.data() || {};
+                const studentRealName = stdData.name || item.studentName || "Student";
+
+                const enrolled = stdData.enrolledCourses || [];
+                const cid = String(sData.courseId || "").trim().toLowerCase();
+                const ccode = String(sData.courseCode || "").trim().toLowerCase();
+                const isPraxisSync = cid.includes("praxis") || ccode.includes("praxis");
+                const isEnrolledSync = !cid || cid === "muc_course" ||
+                    enrolled.some(id => String(id).trim().toLowerCase() === cid || (ccode && String(id).trim().toLowerCase() === ccode)) ||
+                    (isPraxisSync && enrolled.some(id => String(id).toLowerCase().includes("praxis") || String(id).toLowerCase().includes("cse212"))) ||
+                    (stdData.sections && Object.keys(stdData.sections).some(k => String(k).trim().toLowerCase() === cid || (ccode && String(k).trim().toLowerCase() === ccode)));
+
+                if (!isEnrolledSync) {
+                    localStorage.setItem("muc_sync_error", `⚠️ الرقم (${item.studentId}) غير مقيد في مقرر (${sData.courseName || sData.courseId})!`);
+                    removeFromQueue(item);
+                    continue;
+                }
+
+                try {
+                    verifyStudentSectionAndTA(stdData, sData);
+                } catch (secErr) {
+                    const parts = String(secErr.message || "").split(":");
+                    localStorage.setItem("muc_sync_error", `🚫 لم يُسجَّل الحضور: الطالب (${studentRealName}) مقيد في [${parts[2] || "سكشن آخر"}] وليس [${parts[3] || "هذا السكشن"}].`);
+                    removeFromQueue(item);
+                    continue;
+                }
+
                 const recordId = `${matchedSessionId}_${item.studentId}`;
 
                 // 4. رفع وتثبيت حضور الطالب في جلسة الدكتور الفعلية
