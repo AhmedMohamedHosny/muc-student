@@ -312,6 +312,9 @@ background: #FDF2F3;
                 <i class="fa-solid fa-clock-rotate-left"></i> <span>History</span>
             </button>
             -->
+    <button type="button" id="btn-errors-guide-after" style="background: rgba(239, 68, 68, 0.26); border: 1px solid #EF4444; color: #FCA5A5; padding: 3px 8px; border-radius: 6px; font-size: 0.68rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="دليل الأخطاء والحلول">
+                <i class="fa-solid fa-circle-exclamation" style="color:#F87171;"></i> <span>Errors</span>
+            </button>
             <button type="button" id="btn-force-update-app" style="background: rgba(197, 155, 39, 0.22); border: 1px solid #C59B27; color: #FDE68A; padding: 3px 8px; border-radius: 6px; font-size: 0.68rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Update App Cache">
                 <i class="fa-solid fa-arrows-rotate"></i> <span>Update</span>
             </button>
@@ -409,11 +412,15 @@ background: #FDF2F3;
                     </label>
                     <input type="text" id="student-id" placeholder="اكتب رقمك الجامعي هنا..." inputmode="numeric" autocomplete="off" required>
                 </div>
-                <button type="submit" id="btn-submit" class="btn">
+<button type="submit" id="btn-submit" class="btn">
                     <span>تسجيل الدخول ومتابعة (Continue)</span>
                     <i class="fa-solid fa-arrow-right"></i>
                 </button>
             </form>
+            <button type="button" id="btn-errors-guide-before" style="width:100%; margin-top:12px; padding:0.65rem 0.9rem; border-radius:10px; background:#FEF2F2; border:1.5px solid #FECACA; color:#DC2626; font-size:0.84rem; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+                <i class="fa-solid fa-circle-exclamation" style="font-size:1.05rem;"></i>
+                <span>واجهتك رسالة خطأ؟ اضغط هنا لمعرفة السبب والحل</span>
+            </button>
         </div>
 
         <!-- 3. شاشة أزرار مسح الـ QR وإدخال الـ PIN (تظهر فوراً بعد معرفة الطالب) -->
@@ -453,6 +460,10 @@ background: #FDF2F3;
             </button>
 <button type="button" id="btn-done-result" class="btn" style="margin-top:0.85rem; background:#10B981; color:#fff; font-weight:800; border-radius:10px;">
     <i class="fa-solid fa-check"></i> <span>Done</span>
+</button>
+<button type="button" id="btn-errors-guide-result" style="width:100%; margin-top:0.65rem; padding:0.6rem 0.85rem; border-radius:10px; background:#FEF2F2; border:1.5px solid #FECACA; color:#DC2626; font-size:0.82rem; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px;">
+    <i class="fa-solid fa-circle-exclamation"></i>
+    <span>معرفة سبب هذا الخطأ وكيفية حله</span>
 </button>
 <div id="receipt-box" class="receipt d-none" style="text-align: left;">
                 <div class="receipt-row"><span>Student Name:</span><strong id="rcpt-name">--</strong></div>
@@ -548,6 +559,11 @@ background: #FDF2F3;
     <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
     <script type="module">
 import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum, decodePinMetadata, verifyPinOnServerFast, getCoursePinIndex, ensureStudentAuth, verifyStudentSectionAndTA, doSectionGroupsMatch } from "./firebase.js";
+import { openErrorsGuideModal } from "./errors-guide.js";
+
+document.getElementById("btn-errors-guide-before")?.addEventListener("click", () => openErrorsGuideModal("before"));
+document.getElementById("btn-errors-guide-after")?.addEventListener("click", () => openErrorsGuideModal("after"));
+document.getElementById("btn-errors-guide-result")?.addEventListener("click", () => openErrorsGuideModal("all"));
         // 🌐 Language Switcher Logic
         let currentLang = "en";
         document.getElementById("btn-lang-toggle")?.addEventListener("click", () => {
