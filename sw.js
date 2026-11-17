@@ -1,9 +1,10 @@
-const CACHE_NAME = "muc-student-offline-v37";
+const CACHE_NAME = "muc-student-offline-v39";
 
 const CORE_ASSETS = [
     "./",
     "./index.html",
     "./firebase.js",
+    "./errors-guide.js",
     "./config.js",
     "./logo.png",
     "./logo.jpg",
