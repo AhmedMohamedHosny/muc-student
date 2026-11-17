@@ -561,9 +561,9 @@ background: #FDF2F3;
 import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum, decodePinMetadata, verifyPinOnServerFast, getCoursePinIndex, ensureStudentAuth, verifyStudentSectionAndTA, doSectionGroupsMatch } from "./firebase.js";
 import { openErrorsGuideModal } from "./errors-guide.js";
 
-document.getElementById("btn-errors-guide-before")?.addEventListener("click", () => openErrorsGuideModal("before"));
-document.getElementById("btn-errors-guide-after")?.addEventListener("click", () => openErrorsGuideModal("after"));
-document.getElementById("btn-errors-guide-result")?.addEventListener("click", () => openErrorsGuideModal("all"));
+document.getElementById("btn-errors-guide-before")?.addEventListener("click", () => openErrorsGuideModal("auto"));
+document.getElementById("btn-errors-guide-after")?.addEventListener("click", () => openErrorsGuideModal("auto"));
+document.getElementById("btn-errors-guide-result")?.addEventListener("click", () => openErrorsGuideModal("auto"));
         // 🌐 Language Switcher Logic
         let currentLang = "en";
         document.getElementById("btn-lang-toggle")?.addEventListener("click", () => {
@@ -1635,8 +1635,13 @@ let html5QrScanner = null;
                         doctorId: offlinePayload.d
                     });
 
-                    if (navigator.onLine) {
-                        await syncPendingAttendance();
+if (navigator.onLine) {
+                        window._suppressSyncPopup = true;
+                        try {
+                            await syncPendingAttendance();
+                        } finally {
+                            window._suppressSyncPopup = false;
+                        }
                     }
                     refreshPendingBanner();
 
@@ -1947,7 +1952,40 @@ const stTitleEl = document.getElementById("status-title");
             document.getElementById("pending-banner").classList.toggle("d-none", n === 0);
         }
 
-async function runSync(manual) {
+// عرض نفس شاشة الإيصال الخضراء والصوت لطالب الأوفلاين فور رفع وتأكيد حضوره على السيرفر
+        function showSyncedAttendanceConfirmation(receipts) {
+            if (!Array.isArray(receipts) || receipts.length === 0) return;
+            // عدم مقاطعة الكاميرا إذا كانت مفتوحة للمسح في تلك اللحظة
+            if (qrBox && !qrBox.classList.contains("d-none")) return;
+
+            const lastRec = receipts[receipts.length - 1];
+            const typeName = lastRec.sessionType === "lab" ? "Lab" : (lastRec.sessionType === "section" ? "Section" : "Lecture");
+            const extraCount = receipts.length > 1 ? ` (+${receipts.length - 1} more)` : "";
+
+            if (lastRec.studentName) {
+                saveStudentIdPermanently(lastRec.studentId, lastRec.studentName);
+                if (welcomeNameEl) welcomeNameEl.innerText = lastRec.studentName;
+            }
+
+            showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been recorded on the live classroom screen.");
+            document.getElementById("rcpt-name").innerText = lastRec.studentName || getSavedStudentName(lastRec.studentId) || "Student";
+            document.getElementById("rcpt-id").innerText = lastRec.studentId;
+            document.getElementById("rcpt-course").innerText = String(lastRec.courseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : (lastRec.courseName || "Course");
+            document.getElementById("rcpt-lecture").innerText = `${typeName} #${lastRec.lectureNumber || 1}${extraCount}`;
+            document.getElementById("rcpt-date").innerText = lastRec.date || new Date().toLocaleDateString("en-US");
+            document.getElementById("rcpt-time").innerText = lastRec.time || new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+            document.getElementById("rcpt-status").innerText = "Present ✔";
+            document.getElementById("receipt-box").classList.remove("d-none");
+        }
+
+        window.addEventListener("muc:offline-synced", (e) => {
+            refreshPendingBanner();
+            if (e && e.detail) {
+                showSyncedAttendanceConfirmation(e.detail);
+            }
+        });
+
+        async function runSync(manual) {
             const btn = document.getElementById("btn-sync-now");
             const txt = document.getElementById("btn-sync-text");
             const fb = document.getElementById("sync-feedback");
