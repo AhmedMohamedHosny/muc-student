@@ -818,7 +818,8 @@ export async function syncPendingAttendance() {
     const queue = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
     if (!Array.isArray(queue) || queue.length === 0) return 0;
 
-    let uploaded = 0;
+let uploaded = 0;
+    const syncedReceipts = [];
     isSyncing = true;
 
     try {
@@ -941,9 +942,22 @@ export async function syncPendingAttendance() {
 
                 await withTimeout(setDoc(doc(db, "attendance_records", recordId), recordPayload, { merge: true }), 4500);
 
-                // حذف السجل من طابور الهاتف فقط بعد التأكد التام من وصوله للسيرفر
+// حذف السجل من طابور الهاتف فقط بعد التأكد التام من وصوله للسيرفر
                 removeFromQueue(item);
                 uploaded++;
+
+                const nowSync = new Date();
+                const rawCName = sData.courseName || item.courseName || "Course";
+                syncedReceipts.push({
+                    studentName: studentRealName,
+                    studentId: item.studentId,
+                    courseName: String(rawCName).toLowerCase().includes("praxis") ? "Praxis Programming" : cleanCourseDisplayName(rawCName),
+                    lectureNumber: Number(sData.lectureNumber || item.lectureNumber || 1),
+                    sessionType: sData.sessionType || item.sessionType || "lecture",
+                    status: "Present",
+                    date: nowSync.toLocaleDateString("en-US"),
+                    time: nowSync.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+                });
                 console.log(`✅ Successfully synced attendance for student (${item.studentId})`);
 
             } catch (itemErr) {
@@ -954,6 +968,13 @@ export async function syncPendingAttendance() {
         console.warn("Sync batch notice:", err.message);
     } finally {
         isSyncing = false;
+    }
+
+    if (syncedReceipts.length > 0) {
+        window._lastSyncedOfflineReceipts = syncedReceipts;
+        if (!window._suppressSyncPopup) {
+            window.dispatchEvent(new CustomEvent("muc:offline-synced", { detail: syncedReceipts }));
+        }
     }
 
     return uploaded;
