@@ -790,7 +790,63 @@ cleanedQueue.push(record);
     localStorage.setItem("muc_pending_records", JSON.stringify(cleanedQueue));
     markLectureAttendedLocally(cleanedStudentId, courseId, targetLec, sessionId);
     mirrorQueueToBackgroundDB(cleanedQueue);
+    reportPendingBeaconToCloud(cleanedQueue).catch(() => {});
     return record;
+}
+
+// 📡 إرسال إشارة السجلات المعلقة (Sync Attendance Now) إلى لوحة المشرف بمجرد توفر الإنترنت
+let _lastBeaconHash = "";
+async function reportPendingBeaconToCloud(queueArr) {
+    try {
+        if (!navigator.onLine) return;
+        const validItems = Array.isArray(queueArr)
+            ? queueArr.filter(x => x && String(x.studentId || "").trim().length >= 7)
+            : [];
+
+        const sid = validItems[0]?.studentId || localStorage.getItem("muc_saved_student_id") || "";
+        if (!sid) return;
+
+        const currentHash = validItems.map(x => `${x.sessionId}_${x.pin || ""}`).join("|");
+        if (currentHash === _lastBeaconHash && validItems.length > 0) return;
+
+        await ensureStudentAuth();
+        const beaconRef = doc(db, "offline_pending_beacon", String(sid).trim());
+
+        if (validItems.length === 0) {
+            await setDoc(beaconRef, {
+                studentId: String(sid).trim(),
+                pendingCount: 0,
+                items: [],
+                clearedAt: serverTimestamp()
+            }, { merge: true });
+            _lastBeaconHash = "";
+            return;
+        }
+
+        const stdName = localStorage.getItem(`muc_student_name_${sid}`) || validItems[0]?.studentName || "طالب";
+        const mappedItems = validItems.map(x => ({
+            sessionId: String(x.sessionId || ""),
+            courseId: String(x.courseId || "MUC_COURSE"),
+            courseName: String(x.courseName || "المقرر الدراسي"),
+            lectureNumber: Number(x.lectureNumber || 1),
+            sessionType: String(x.sessionType || "lecture"),
+            group: String(x.group || ""),
+            pin: String(x.pin || ""),
+            method: x.pin ? "PIN" : "QR",
+            scannedAt: Number(x.scannedAt || Date.now()),
+            startedAtDate: String(x.startedAtDate || new Date(x.scannedAt || Date.now()).toLocaleDateString("en-CA"))
+        }));
+
+        await setDoc(beaconRef, {
+            studentId: String(sid).trim(),
+            studentName: stdName,
+            pendingCount: mappedItems.length,
+            items: mappedItems,
+            updatedAt: serverTimestamp(),
+            lastSeenMs: Date.now()
+        }, { merge: true });
+        _lastBeaconHash = currentHash;
+    } catch (_) {}
 }
 
 // تسجيل طلب المزامنة في نظام التشغيل فوراً قبل إغلاق التطبيق
@@ -909,6 +965,7 @@ function removeFromQueue(item) {
     });
     localStorage.setItem("muc_pending_records", JSON.stringify(nextQ));
     mirrorQueueToBackgroundDB(nextQ);
+    reportPendingBeaconToCloud(nextQ).catch(() => {});
 }
 
 export async function syncPendingAttendance() {
@@ -1168,6 +1225,9 @@ async function triggerSmoothSync() {
     await reconcileBackgroundSyncedItems();
     try {
         const localQ = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
+        if (navigator.onLine) {
+            reportPendingBeaconToCloud(localQ).catch(() => {});
+        }
         if (Array.isArray(localQ) && localQ.length > 0) {
             await mirrorQueueToBackgroundDB(localQ);
         }
