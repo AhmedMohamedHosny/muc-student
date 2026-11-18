@@ -2338,8 +2338,8 @@ let pinCheck = null;
                 return;
             }
 
-            const lastRemindedAt = Number(localStorage.getItem("muc_offline_last_reminded_at") || 0);
-            if (lastRemindedAt && (Date.now() - lastRemindedAt) < (2 * 60 * 60 * 1000)) return;
+const lastRemindedAt = Number(localStorage.getItem("muc_offline_last_reminded_at") || 0);
+            if (lastRemindedAt && (Date.now() - lastRemindedAt) < (60 * 1000)) return;
             localStorage.setItem("muc_offline_last_reminded_at", String(Date.now()));
 
             if (navigator.onLine) {
