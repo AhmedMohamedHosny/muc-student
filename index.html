@@ -1953,30 +1953,60 @@ const stTitleEl = document.getElementById("status-title");
             document.getElementById("pending-banner").classList.toggle("d-none", n === 0);
         }
 
-// عرض نفس شاشة الإيصال الخضراء والصوت لطالب الأوفلاين فور رفع وتأكيد حضوره على السيرفر
-        function showSyncedAttendanceConfirmation(receipts) {
-            if (!Array.isArray(receipts) || receipts.length === 0) return;
+// عرض إيصال كل مادة مرفوعة أوفلاين بالتتابع (واحدة تلو الأخرى عند الضغط على الزر)
+        const _syncedReceiptsQueue = [];
+        let _isShowingSyncedReceipt = false;
+
+        function renderNextSyncedReceipt() {
+            if (_syncedReceiptsQueue.length === 0) {
+                _isShowingSyncedReceipt = false;
+                return false;
+            }
             // عدم مقاطعة الكاميرا إذا كانت مفتوحة للمسح في تلك اللحظة
-            if (qrBox && !qrBox.classList.contains("d-none")) return;
+            if (qrBox && !qrBox.classList.contains("d-none")) return false;
 
-            const lastRec = receipts[receipts.length - 1];
-            const typeName = lastRec.sessionType === "lab" ? "Lab" : (lastRec.sessionType === "section" ? "Section" : "Lecture");
-            const extraCount = receipts.length > 1 ? ` (+${receipts.length - 1} more)` : "";
+            _isShowingSyncedReceipt = true;
+            const item = _syncedReceiptsQueue.shift();
+            const rec = item.rec;
+            const remaining = _syncedReceiptsQueue.length;
+            const typeName = rec.sessionType === "lab" ? "Lab" : (rec.sessionType === "section" ? "Section" : "Lecture");
+            const countTag = item.total > 1 ? ` (${item.index}/${item.total})` : "";
 
-            if (lastRec.studentName) {
-                saveStudentIdPermanently(lastRec.studentId, lastRec.studentName);
-                if (welcomeNameEl) welcomeNameEl.innerText = lastRec.studentName;
+            if (rec.studentName) {
+                saveStudentIdPermanently(rec.studentId, rec.studentName);
+                if (welcomeNameEl) welcomeNameEl.innerText = rec.studentName;
             }
 
-            showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been recorded on the live classroom screen.");
-            document.getElementById("rcpt-name").innerText = lastRec.studentName || getSavedStudentName(lastRec.studentId) || "Student";
-            document.getElementById("rcpt-id").innerText = lastRec.studentId;
-            document.getElementById("rcpt-course").innerText = String(lastRec.courseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : (lastRec.courseName || "Course");
-            document.getElementById("rcpt-lecture").innerText = `${typeName} #${lastRec.lectureNumber || 1}${extraCount}`;
-            document.getElementById("rcpt-date").innerText = lastRec.date || new Date().toLocaleDateString("en-US");
-            document.getElementById("rcpt-time").innerText = lastRec.time || new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+            showResult(true, `Attendance Confirmed${countTag}!`, "Your attendance has been recorded on the live classroom screen.");
+            document.getElementById("rcpt-name").innerText = rec.studentName || getSavedStudentName(rec.studentId) || "Student";
+            document.getElementById("rcpt-id").innerText = rec.studentId;
+            document.getElementById("rcpt-course").innerText = String(rec.courseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : (rec.courseName || "Course");
+            document.getElementById("rcpt-lecture").innerText = `${typeName} #${rec.lectureNumber || 1}`;
+            document.getElementById("rcpt-date").innerText = rec.date || new Date().toLocaleDateString("en-US");
+            document.getElementById("rcpt-time").innerText = rec.time || new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
             document.getElementById("rcpt-status").innerText = "Present ✔";
             document.getElementById("receipt-box").classList.remove("d-none");
+
+            const doneBtn = document.getElementById("btn-done-result");
+            if (doneBtn) {
+                doneBtn.innerHTML = remaining > 0
+                    ? `<i class="fa-solid fa-arrow-right"></i> <span>Next Course (${remaining} left)</span>`
+                    : `<i class="fa-solid fa-check"></i> <span>Done</span>`;
+            }
+            return true;
+        }
+
+        function showSyncedAttendanceConfirmation(receipts) {
+            if (!Array.isArray(receipts) || receipts.length === 0) return;
+
+            const total = receipts.length;
+            receipts.forEach((rec, idx) => {
+                _syncedReceiptsQueue.push({ rec, index: idx + 1, total });
+            });
+
+            if (!_isShowingSyncedReceipt) {
+                renderNextSyncedReceipt();
+            }
         }
 
         window.addEventListener("muc:offline-synced", (e) => {
@@ -2467,7 +2497,11 @@ const KNOWN_COURSES_DISPLAY = {
             const sid = getSavedStudentId() || inputId.value.trim();
             if (e.target.value) renderCourseAttendanceLog(sid, e.target.value);
         });
-        document.getElementById("btn-done-result")?.addEventListener("click", () => {
+document.getElementById("btn-done-result")?.addEventListener("click", () => {
+    if (renderNextSyncedReceipt()) return;
+    _isShowingSyncedReceipt = false;
+    const doneBtn = document.getElementById("btn-done-result");
+    if (doneBtn) doneBtn.innerHTML = `<i class="fa-solid fa-check"></i> <span>Done</span>`;
     resultStep.classList.add("d-none");
     welcomeBar.classList.remove("d-none");
     footerCreditsBar?.classList.remove("d-none");
