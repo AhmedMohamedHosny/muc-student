@@ -42,7 +42,7 @@ attendance: {
         name: "الخريف 2026/2027",
         plannedLectures: 14
     },
-
+vapidKey: "BM3IEWZmnBAyXvgxlM3odJ2kPhz1XKatT6j-fUIAPND8EZuEjdT4i2c58gQ6a5jeKFVKOSWDMTK0Pl-VgHS2M3A",
     // Firebase Configuration
     firebase: {
         apiKey: "AIzaSyCGnV3fa6ztAR5tpeXBmXHSwt3-eG1sqyc",
