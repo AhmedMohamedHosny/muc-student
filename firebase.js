@@ -18,7 +18,6 @@ import {
     onSnapshot,
     serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import { getMessaging, getToken } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js";
 import { CONFIG } from "./config.js";
 
 const app = initializeApp(CONFIG.firebase);
@@ -29,47 +28,13 @@ export const db = initializeFirestore(app, {
 
 let _anonAuthPromise = null;
 export async function ensureStudentAuth() {
-    if (!auth.currentUser) {
-        if (!_anonAuthPromise) {
-            _anonAuthPromise = signInAnonymously(auth).finally(() => {
-                _anonAuthPromise = null;
-            });
-        }
-        await _anonAuthPromise;
-    }
-    registerStudentWebPushToken().catch(() => {});
-    return auth.currentUser;
-}
-
-export async function registerStudentWebPushToken() {
-    try {
-        if (!CONFIG.vapidKey || !("Notification" in window) || !("serviceWorker" in navigator)) return "";
-        if (Notification.permission === "default") {
-            await Notification.requestPermission();
-        }
-        if (Notification.permission !== "granted") return "";
-
-        const reg = await navigator.serviceWorker.ready;
-        const messaging = getMessaging(app);
-        const token = await getToken(messaging, {
-            vapidKey: CONFIG.vapidKey,
-            serviceWorkerRegistration: reg
+    if (auth.currentUser) return auth.currentUser;
+    if (!_anonAuthPromise) {
+        _anonAuthPromise = signInAnonymously(auth).finally(() => {
+            _anonAuthPromise = null;
         });
-
-        if (token) {
-            localStorage.setItem("muc_fcm_token", token);
-            const sid = localStorage.getItem("muc_saved_student_id");
-            if (sid && navigator.onLine) {
-                await setDoc(doc(db, "students", sid), {
-                    fcmToken: token,
-                    pushUpdatedAt: serverTimestamp()
-                }, { merge: true }).catch(() => {});
-            }
-        }
-        return token || "";
-    } catch (_) {
-        return "";
     }
+    return _anonAuthPromise;
 }
 
 // بصمة هاردوير بدون عشوائية لمنع نفس الموبايل من تحضير طالبين في نفس المحاضرة حتى من المتصفح الخفي
@@ -821,29 +786,10 @@ const isPraxis = String(courseId || "").toLowerCase().includes("praxis") || Stri
         doctorId: doctorId || ""
     };
 
-
-
 cleanedQueue.push(record);
     localStorage.setItem("muc_pending_records", JSON.stringify(cleanedQueue));
     markLectureAttendedLocally(cleanedStudentId, courseId, targetLec, sessionId);
     mirrorQueueToBackgroundDB(cleanedQueue);
-
-    // تسجيل تذكرة التذكير على السيرفر (مؤقت 30 ثانية للتجربة)
-    const fcmTok = localStorage.getItem("muc_fcm_token") || "";
-    if (fcmTok) {
-        const remindAtMs = nowMs + (30 * 1000);
-        setDoc(doc(db, "push_reminders", `${record.sessionId}_${cleanedStudentId}`), {
-            studentId: cleanedStudentId,
-            studentName: record.studentName,
-            sessionId: record.sessionId,
-            courseName: record.courseName,
-            fcmToken: fcmTok,
-            remindAt: remindAtMs,
-            sent: false,
-            createdAt: serverTimestamp()
-        }, { merge: true }).catch(() => {});
-    }
-
     return record;
 }
 
@@ -856,7 +802,7 @@ function registerOsBackgroundSyncNow() {
     }
 }
 
-// نسخ الطابور وإعدادات السيرفر وتوقيت تذكير الساعتين داخل IndexedDB للرفع والتذكير في الخلفية
+// نسخ الطابور وإعدادات السيرفر وتوكن المصادقة داخل IndexedDB للرفع في الخلفية والمتصفح مغلق
 async function mirrorQueueToBackgroundDB(queueArr) {
     try {
         const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
