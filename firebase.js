@@ -796,7 +796,7 @@ cleanedQueue.push(record);
 // نسخ الطابور وإعدادات السيرفر وتوقيت تذكير الساعتين داخل IndexedDB للرفع والتذكير في الخلفية
 function mirrorQueueToBackgroundDB(queueArr) {
     try {
-        const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+const TWO_HOURS_MS = 60 * 1000; // مؤقت دقيقة واحدة للتجربة
         const hasItems = Array.isArray(queueArr) && queueArr.length > 0;
         let remindAt = Number(localStorage.getItem("muc_offline_remind_at") || 0);
 
