@@ -558,8 +558,8 @@ background: #FDF2F3;
     </div>
     <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
     <script type="module">
-import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum, decodePinMetadata, verifyPinOnServerFast, getCoursePinIndex, ensureStudentAuth, verifyStudentSectionAndTA, doSectionGroupsMatch, registerStudentWebPushToken } from "./firebase.js";
-        import { openErrorsGuideModal } from "./errors-guide.js";
+import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum, decodePinMetadata, verifyPinOnServerFast, getCoursePinIndex, ensureStudentAuth, verifyStudentSectionAndTA, doSectionGroupsMatch } from "./firebase.js";
+import { openErrorsGuideModal } from "./errors-guide.js";
 
 document.getElementById("btn-errors-guide-before")?.addEventListener("click", () => openErrorsGuideModal("auto"));
 document.getElementById("btn-errors-guide-after")?.addEventListener("click", () => openErrorsGuideModal("auto"));
@@ -1514,7 +1514,9 @@ const footerCreditsBar = document.getElementById("app-footer-credits");
 let html5QrScanner = null;
 function requestStudentNotificationPermission() {
             try {
-                registerStudentWebPushToken().catch(() => {});
+                if ("Notification" in window && Notification.permission === "default") {
+                    Notification.requestPermission().catch(() => {});
+                }
             } catch (_) {}
         }
         requestStudentNotificationPermission();
@@ -2338,7 +2340,7 @@ let pinCheck = null;
             }
 
 const lastRemindedAt = Number(localStorage.getItem("muc_offline_last_reminded_at") || 0);
-            if (lastRemindedAt && (Date.now() - lastRemindedAt) < (2 * 60 * 60 * 1000)) return;
+            if (lastRemindedAt && (Date.now() - lastRemindedAt) < (60 * 1000)) return;
             localStorage.setItem("muc_offline_last_reminded_at", String(Date.now()));
 
             if (navigator.onLine) {
