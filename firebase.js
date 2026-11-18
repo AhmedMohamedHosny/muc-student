@@ -793,14 +793,24 @@ cleanedQueue.push(record);
     return record;
 }
 
-// نسخ الطابور وإعدادات السيرفر وتوقيت تذكير الساعتين داخل IndexedDB للرفع والتذكير في الخلفية
-function mirrorQueueToBackgroundDB(queueArr) {
+// تسجيل طلب المزامنة في نظام التشغيل فوراً قبل إغلاق التطبيق
+function registerOsBackgroundSyncNow() {
+    if ("serviceWorker" in navigator && "SyncManager" in window) {
+        navigator.serviceWorker.ready
+            .then(reg => reg.sync.register("muc-bg-sync-attendance"))
+            .catch(() => {});
+    }
+}
+
+// نسخ الطابور وإعدادات السيرفر وتوكن المصادقة داخل IndexedDB للرفع في الخلفية والمتصفح مغلق
+async function mirrorQueueToBackgroundDB(queueArr) {
     try {
-const TWO_HOURS_MS = 60 * 1000; // مؤقت دقيقة واحدة للتجربة
+        const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
         const hasItems = Array.isArray(queueArr) && queueArr.length > 0;
         let remindAt = Number(localStorage.getItem("muc_offline_remind_at") || 0);
 
         if (hasItems) {
+            registerOsBackgroundSyncNow();
             const oldestScan = Math.min(...queueArr.map(x => Number(x.scannedAt) || Date.now()));
             const isPastLectureOverdue = (Date.now() - oldestScan) >= TWO_HOURS_MS;
 
@@ -815,6 +825,18 @@ const TWO_HOURS_MS = 60 * 1000; // مؤقت دقيقة واحدة للتجربة
             localStorage.removeItem("muc_offline_reminded");
             localStorage.removeItem("muc_offline_last_reminded_at");
         }
+
+        let cachedAuth = null;
+        try {
+            if (auth.currentUser) {
+                const token = await auth.currentUser.getIdToken();
+                cachedAuth = {
+                    idToken: token,
+                    refreshToken: auth.currentUser.refreshToken || "",
+                    savedAt: Date.now()
+                };
+            }
+        } catch (_) {}
 
         const latestCourse = hasItems ? (queueArr[queueArr.length - 1]?.courseName || "المقرر الدراسي") : "";
 
@@ -832,6 +854,9 @@ const TWO_HOURS_MS = 60 * 1000; // مؤقت دقيقة واحدة للتجربة
                 projectId: CONFIG.firebase.projectId,
                 apiKey: CONFIG.firebase.apiKey
             }, "firebase_cfg");
+            if (cachedAuth) {
+                store.put(cachedAuth, "auth_session");
+            }
 
             if (hasItems) {
                 store.put({
@@ -844,18 +869,13 @@ const TWO_HOURS_MS = 60 * 1000; // مؤقت دقيقة واحدة للتجربة
                 store.delete("reminder_meta");
             }
 
-tx.oncomplete = async () => {
+            tx.oncomplete = async () => {
                 if ("serviceWorker" in navigator) {
                     try {
                         const reg = await navigator.serviceWorker.ready;
                         const swWorker = reg.active || reg.waiting || reg.installing;
                         if (hasItems) {
-                            if ("SyncManager" in window) {
-                                reg.sync.register("muc-bg-sync-attendance").catch(() => {});
-                            }
-                            if ("periodicSync" in reg) {
-                                reg.periodicSync.register("muc-offline-reminder-check", { minInterval: 60 * 60 * 1000 }).catch(() => {});
-                            }
+                            registerOsBackgroundSyncNow();
                             swWorker?.postMessage({
                                 type: "SCHEDULE_OFFLINE_REMINDER",
                                 remindAt,
@@ -1105,42 +1125,51 @@ export function getPendingCount() {
 }
 
 function reconcileBackgroundSyncedItems() {
-    try {
-        const req = indexedDB.open("muc_bg_sync_db", 1);
-        req.onsuccess = (e) => {
-            const idb = e.target.result;
-            if (!idb.objectStoreNames.contains("kv")) return;
-            const tx = idb.transaction("kv", "readwrite");
-            const store = tx.objectStore("kv");
-            const getReq = store.get("pending_records");
-            const recReq = store.get("last_bg_synced_receipts");
+    return new Promise((resolve) => {
+        try {
+            const req = indexedDB.open("muc_bg_sync_db", 1);
+            req.onerror = () => resolve(false);
+            req.onsuccess = (e) => {
+                const idb = e.target.result;
+                if (!idb.objectStoreNames.contains("kv")) return resolve(false);
+                const tx = idb.transaction("kv", "readwrite");
+                const store = tx.objectStore("kv");
+                const getReq = store.get("pending_records");
+                const recReq = store.get("last_bg_synced_receipts");
 
-            tx.oncomplete = () => {
-                if (Array.isArray(getReq.result)) {
-                    const localQ = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
-                    if (localQ.length > 0 && getReq.result.length === 0) {
-                        localStorage.setItem("muc_pending_records", "[]");
-                        localStorage.removeItem("muc_offline_remind_at");
-                        localStorage.removeItem("muc_offline_reminded");
-                        localStorage.removeItem("muc_offline_last_reminded_at");
+                tx.oncomplete = () => {
+                    let wasCleanedByBg = false;
+                    if (Array.isArray(getReq.result)) {
+                        const localQ = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
+                        if (localQ.length > 0 && getReq.result.length === 0) {
+                            localStorage.setItem("muc_pending_records", "[]");
+                            localStorage.removeItem("muc_offline_remind_at");
+                            localStorage.removeItem("muc_offline_reminded");
+                            localStorage.removeItem("muc_offline_last_reminded_at");
+                            wasCleanedByBg = true;
+                        }
                     }
-                }
-                if (Array.isArray(recReq.result) && recReq.result.length > 0) {
-                    const delTx = idb.transaction("kv", "readwrite");
-                    delTx.objectStore("kv").delete("last_bg_synced_receipts");
-                    window.dispatchEvent(new CustomEvent("muc:offline-synced", { detail: recReq.result }));
-                }
+                    if (Array.isArray(recReq.result) && recReq.result.length > 0) {
+                        const delTx = idb.transaction("kv", "readwrite");
+                        delTx.objectStore("kv").delete("last_bg_synced_receipts");
+                        window.dispatchEvent(new CustomEvent("muc:offline-synced", { detail: recReq.result }));
+                    }
+                    resolve(wasCleanedByBg);
+                };
+                tx.onerror = () => resolve(false);
             };
-        };
-    } catch (_) {}
+        } catch (_) {
+            resolve(false);
+        }
+    });
 }
 
-function triggerSmoothSync() {
-    reconcileBackgroundSyncedItems();
+async function triggerSmoothSync() {
+    await reconcileBackgroundSyncedItems();
     try {
         const localQ = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
         if (Array.isArray(localQ) && localQ.length > 0) {
-            mirrorQueueToBackgroundDB(localQ);
+            await mirrorQueueToBackgroundDB(localQ);
         }
     } catch (_) {}
 
@@ -1151,10 +1180,17 @@ function triggerSmoothSync() {
 window.addEventListener("online", triggerSmoothSync);
 window.addEventListener("pageshow", triggerSmoothSync);
 window.addEventListener("focus", triggerSmoothSync);
-document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") triggerSmoothSync();
+window.addEventListener("pagehide", () => {
+    if (getPendingCount() > 0) registerOsBackgroundSyncNow();
 });
-setInterval(triggerSmoothSync, 12000);
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+        triggerSmoothSync();
+    } else if (getPendingCount() > 0) {
+        registerOsBackgroundSyncNow();
+    }
+});
+setInterval(triggerSmoothSync, 10000);
 
 export function subscribeToCourseAttendance(courseId, onChange) {
     let sessions = null, records = null;
