@@ -1113,14 +1113,25 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             }
         }
 
-        function clearStudentLocalBinding(cleanId) {
+function clearStudentLocalBinding(cleanId) {
             localStorage.removeItem("muc_saved_student_id");
             localStorage.removeItem("muc_saved_student_name");
             localStorage.removeItem(`muc_student_name_${cleanId}`);
             localStorage.removeItem(`muc_lock_claimed_${cleanId}`);
+            localStorage.removeItem(`muc_attended_history_${cleanId}`);
+            localStorage.removeItem("muc_pending_records");
+            localStorage.removeItem("muc_sync_error");
+            localStorage.removeItem("muc_offline_remind_at");
+            localStorage.removeItem("muc_offline_reminded");
+            localStorage.removeItem("muc_offline_last_reminded_at");
+            localStorage.removeItem("muc_student_courses");
+            localStorage.removeItem("muc_student_sections");
+            localStorage.removeItem("muc_student_group");
             document.cookie = "muc_saved_student_id=; max-age=0; path=/";
             document.cookie = "muc_saved_student_name=; max-age=0; path=/";
+            try { indexedDB.deleteDatabase("muc_bg_sync_db"); } catch (_) {}
             clearIdentityVault();
+            if (typeof refreshPendingBanner === "function") refreshPendingBanner();
         }
 
         // دالة التحقق من ملكية الـ ID وتفعيله نهائياً (هاتف واحد ومتصفح واحد لكل طالب 1/1)
@@ -2026,10 +2037,17 @@ const stTitleEl = document.getElementById("status-title");
             }
         });
 
-        async function runSync(manual) {
+async function runSync(manual) {
             const btn = document.getElementById("btn-sync-now");
             const txt = document.getElementById("btn-sync-text");
             const fb = document.getElementById("sync-feedback");
+
+            // لو الطالب غير مسجل الدخول (تم عمل خروج له) ننظف أي بقايا معلقة تلقائياً
+            if (!getSavedStudentId()) {
+                localStorage.removeItem("muc_pending_records");
+                refreshPendingBanner();
+                return;
+            }
 
             if (!navigator.onLine) {
                 if (manual && fb) {
@@ -2045,21 +2063,27 @@ const stTitleEl = document.getElementById("status-title");
                 if (fb) fb.innerText = "";
             }
 
-            const uploadedCount = await syncPendingAttendance();
-            refreshPendingBanner();
-            const remaining = getPendingCount();
+            try {
+                const uploadedCount = await Promise.race([
+                    syncPendingAttendance(),
+                    new Promise((resolve) => setTimeout(() => resolve(0), 8000))
+                ]);
+                refreshPendingBanner();
+                const remaining = getPendingCount();
 
-            if (manual && btn) {
-                btn.disabled = false;
-                txt.innerText = "Sync Attendance Now";
-
-                if (remaining === 0 && uploadedCount > 0) {
-                    fb.style.color = "#15803D";
-                    fb.innerText = "✅ Attendance uploaded and confirmed on server successfully!";
-                } else if (remaining > 0) {
-                    fb.style.color = "#B45309";
-                    // 👈 الرسالة الإنجليزية الواضحة عندما يكون الدكتور لم يرفع المحاضرة بعد
-                    fb.innerText = "⏳ Saved on your phone. Waiting for instructor to upload offline lecture to server...";
+                if (manual && fb) {
+                    if (remaining === 0 && uploadedCount > 0) {
+                        fb.style.color = "#15803D";
+                        fb.innerText = "✅ Attendance uploaded and confirmed on server successfully!";
+                    } else if (remaining > 0) {
+                        fb.style.color = "#B45309";
+                        fb.innerText = "⏳ Saved on your phone. Waiting for instructor to upload offline lecture to server...";
+                    }
+                }
+            } finally {
+                if (manual && btn) {
+                    btn.disabled = false;
+                    txt.innerText = "Sync Attendance Now";
                 }
             }
         }
