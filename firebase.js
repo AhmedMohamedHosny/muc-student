@@ -836,10 +836,10 @@ cleanedQueue.push(record);
     markLectureAttendedLocally(cleanedStudentId, courseId, targetLec, sessionId);
     mirrorQueueToBackgroundDB(cleanedQueue);
 
-    // تسجيل تذكرة التذكير على السيرفر ليصل الإشعار لموبايل الطالب بعد ساعتين حتى لو التطبيق مغلق
+// تسجيل تذكرة التذكير على السيرفر (مؤقت 30 ثانية للتجربة)
     const fcmTok = localStorage.getItem("muc_fcm_token") || "";
-    if (navigator.onLine && fcmTok) {
-        const remindAtMs = nowMs + (2 * 60 * 60 * 1000);
+    if (fcmTok) {
+        const remindAtMs = nowMs + (30 * 1000);
         setDoc(doc(db, "push_reminders", `${record.sessionId}_${cleanedStudentId}`), {
             studentId: cleanedStudentId,
             studentName: record.studentName,
