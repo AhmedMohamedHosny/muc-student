@@ -1519,6 +1519,7 @@ function requestStudentNotificationPermission() {
                 }
             } catch (_) {}
         }
+        requestStudentNotificationPermission();
 
         btnTriggerCam?.addEventListener("click", async () => {
             requestStudentNotificationPermission();
