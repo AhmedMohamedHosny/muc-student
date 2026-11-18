@@ -1,4 +1,4 @@
-const CACHE_NAME = "muc-student-offline-v44";
+const CACHE_NAME = "muc-student-offline-v45";
 
 const CORE_ASSETS = [
     "./",
@@ -17,7 +17,6 @@ const CORE_ASSETS = [
     "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js"
 ];
 
-// 1. التثبيت: سحب أحدث نسخة من السيرفر فوراً وتخزينها للأوفلاين
 self.addEventListener("install", (event) => {
     self.skipWaiting();
     event.waitUntil(
@@ -29,15 +28,12 @@ self.addEventListener("install", (event) => {
                     if (res && res.status === 200) {
                         await cache.put(url, res);
                     }
-                } catch (err) {
-                    console.warn("SW Cache skip:", url);
-                }
+                } catch (err) {}
             }
         })
     );
 });
 
-// 2. التفعيل: مسح الكاش القديم وفحص أي سجلات أوفلاين معلقة فوراً
 self.addEventListener("activate", (event) => {
     event.waitUntil(
         (async () => {
@@ -49,7 +45,6 @@ self.addEventListener("activate", (event) => {
             );
             await self.clients.claim();
             await processBackgroundAttendanceUpload(false).catch(() => {});
-            await checkAndFireTwoHourReminder();
 
             const clientsList = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
             for (const client of clientsList) {
@@ -61,11 +56,10 @@ self.addEventListener("activate", (event) => {
     );
 });
 
-// 3. جلب الملفات: الأولوية لأحدث نسخة من السيرفر، وعند انقطاع النت يعمل من الكاش فوراً
 self.addEventListener("fetch", (event) => {
     const req = event.request;
 
-    if (req.method !== "GET" || req.url.includes("firestore.googleapis.com") || req.url.includes("identitytoolkit")) {
+    if (req.method !== "GET" || req.url.includes("firestore.googleapis.com") || req.url.includes("identitytoolkit") || req.url.includes("securetoken")) {
         return;
     }
 
@@ -129,9 +123,41 @@ self.addEventListener("sync", (event) => {
     }
 });
 
-self.addEventListener("online", () => {
-    processBackgroundAttendanceUpload(false).catch(() => {});
-});
+async function getValidBgIdToken(cfg, authSession) {
+    const reqInit = { referrer: self.location.href };
+
+    // 1. استخدام التوكن المحفوظ من جلسة الطالب إذا كان حديثاً (أقل من 50 دقيقة)
+    if (authSession && authSession.idToken && (Date.now() - Number(authSession.savedAt || 0)) < 50 * 60 * 1000) {
+        return authSession.idToken;
+    }
+
+    // 2. تجديد التوكن باستخدام refreshToken
+    if (authSession && authSession.refreshToken) {
+        try {
+            const refRes = await fetch(`https://securetoken.googleapis.com/v1/token?key=${cfg.apiKey}`, {
+                ...reqInit,
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(authSession.refreshToken)}`
+            });
+            if (refRes.ok) {
+                const refData = await refRes.json();
+                if (refData.id_token) return refData.id_token;
+            }
+        } catch (_) {}
+    }
+
+    // 3. تسجيل دخول مجهول جديد كاحتياطي
+    const authRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${cfg.apiKey}`, {
+        ...reqInit,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+    });
+    if (!authRes.ok) return "";
+    const authJson = await authRes.json();
+    return authJson.idToken || "";
+}
 
 async function processBackgroundAttendanceUpload(throwIfRemaining = false) {
     const db = await new Promise((resolve, reject) => {
@@ -142,13 +168,18 @@ async function processBackgroundAttendanceUpload(throwIfRemaining = false) {
 
     if (!db.objectStoreNames.contains("kv")) return;
 
-    const { queue, cfg } = await new Promise((resolve) => {
+    const { queue, cfg, authSession } = await new Promise((resolve) => {
         const tx = db.transaction("kv", "readonly");
         const store = tx.objectStore("kv");
         const r1 = store.get("pending_records");
         const r2 = store.get("firebase_cfg");
-        tx.oncomplete = () => resolve({ queue: r1.result || [], cfg: r2.result || null });
-        tx.onerror = () => resolve({ queue: [], cfg: null });
+        const r3 = store.get("auth_session");
+        tx.oncomplete = () => resolve({
+            queue: r1.result || [],
+            cfg: r2.result || null,
+            authSession: r3.result || null
+        });
+        tx.onerror = () => resolve({ queue: [], cfg: null, authSession: null });
     });
 
     if (!Array.isArray(queue) || queue.length === 0) return;
@@ -157,18 +188,9 @@ async function processBackgroundAttendanceUpload(throwIfRemaining = false) {
         return;
     }
 
-    const authRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${cfg.apiKey}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({})
-    });
-    if (!authRes.ok) {
-        if (throwIfRemaining) throw new Error("AUTH_RETRY");
-        return;
-    }
-    const { idToken } = await authRes.json();
+    const idToken = await getValidBgIdToken(cfg, authSession);
     if (!idToken) {
-        if (throwIfRemaining) throw new Error("NO_TOKEN");
+        if (throwIfRemaining) throw new Error("AUTH_RETRY");
         return;
     }
 
@@ -189,12 +211,12 @@ async function processBackgroundAttendanceUpload(throwIfRemaining = false) {
 
             if (item.pin) {
                 const pinStr = String(item.pin).trim();
-                const pinRes = await fetch(`${baseUrl}/attendance_pins/${encodeURIComponent(pinStr)}`, { headers });
+                const pinRes = await fetch(`${baseUrl}/attendance_pins/${encodeURIComponent(pinStr)}`, { headers, referrer: self.location.href });
                 if (pinRes.ok) {
                     const pinDoc = await pinRes.json();
                     const candId = pinDoc?.fields?.sessionId?.stringValue;
                     if (candId) {
-                        const sRes = await fetch(`${baseUrl}/attendance_sessions/${encodeURIComponent(candId)}`, { headers });
+                        const sRes = await fetch(`${baseUrl}/attendance_sessions/${encodeURIComponent(candId)}`, { headers, referrer: self.location.href });
                         if (sRes.ok) {
                             const sDoc = await sRes.json();
                             const f = sDoc.fields || {};
@@ -211,6 +233,7 @@ async function processBackgroundAttendanceUpload(throwIfRemaining = false) {
                     const queryRes = await fetch(`${baseUrl}:runQuery`, {
                         method: "POST",
                         headers,
+                        referrer: self.location.href,
                         body: JSON.stringify({
                             structuredQuery: {
                                 from: [{ collectionId: "attendance_sessions" }],
@@ -247,7 +270,7 @@ async function processBackgroundAttendanceUpload(throwIfRemaining = false) {
                 }
             } else {
                 matchedSessionId = item.sessionId;
-                const sessRes = await fetch(`${baseUrl}/attendance_sessions/${encodeURIComponent(matchedSessionId)}`, { headers });
+                const sessRes = await fetch(`${baseUrl}/attendance_sessions/${encodeURIComponent(matchedSessionId)}`, { headers, referrer: self.location.href });
                 if (!sessRes.ok) {
                     remaining.push(item);
                     continue;
@@ -257,8 +280,11 @@ async function processBackgroundAttendanceUpload(throwIfRemaining = false) {
                 if (sFields.status?.stringValue === "deleted") continue;
             }
 
-            const stdRes = await fetch(`${baseUrl}/students/${encodeURIComponent(item.studentId)}`, { headers });
-            if (!stdRes.ok) continue;
+            const stdRes = await fetch(`${baseUrl}/students/${encodeURIComponent(item.studentId)}`, { headers, referrer: self.location.href });
+            if (!stdRes.ok) {
+                remaining.push(item);
+                continue;
+            }
             const stdDoc = await stdRes.json();
             const realName = stdDoc.fields?.name?.stringValue || item.studentName || "Student";
 
@@ -272,6 +298,7 @@ async function processBackgroundAttendanceUpload(throwIfRemaining = false) {
                 {
                     method: "PATCH",
                     headers,
+                    referrer: self.location.href,
                     body: JSON.stringify({
                         fields: {
                             recordId: { stringValue: recordId },
@@ -326,7 +353,6 @@ async function processBackgroundAttendanceUpload(throwIfRemaining = false) {
     });
 
     if (remaining.length === 0) {
-        await closeOfflineReminderNotifications();
         if (bgUploadedReceipts.length > 0) {
             const last = bgUploadedReceipts[bgUploadedReceipts.length - 1];
             await self.registration.showNotification("✅ تم رفع حضورك الأوفلاين بنجاح!", {
@@ -334,117 +360,14 @@ async function processBackgroundAttendanceUpload(throwIfRemaining = false) {
                 icon: "./logo.png",
                 badge: "./logo.png",
                 tag: "muc-offline-uploaded",
+                vibrate: [200, 100, 200],
                 data: { url: "./index.html" }
             }).catch(() => {});
         }
     } else if (throwIfRemaining) {
-        // إجبار المتصفح على الاستمرار في مراقبة الشبكة وإعادة المحاولة تلقائياً حتى يكتمل الرفع
         throw new Error("PENDING_RECORDS_REMAIN");
     }
 }
-
-// ========================================================
-// ⏰ إشعار التذكير في الخلفية مع إبقاء الـ Service Worker نشطاً عبر waitUntil
-// ========================================================
-let _swReminderTimeout = null;
-
-async function closeOfflineReminderNotifications() {
-    try {
-        clearTimeout(_swReminderTimeout);
-        const list = await self.registration.getNotifications({ tag: "muc-offline-reminder" });
-        list.forEach(n => n.close());
-    } catch (_) {}
-}
-
-async function checkAndFireTwoHourReminder() {
-    try {
-        const db = await new Promise((resolve, reject) => {
-            const req = indexedDB.open("muc_bg_sync_db", 1);
-            req.onsuccess = (e) => resolve(e.target.result);
-            req.onerror = reject;
-        });
-
-        if (!db.objectStoreNames.contains("kv")) return;
-
-        const { queue, meta } = await new Promise((resolve) => {
-            const tx = db.transaction("kv", "readonly");
-            const store = tx.objectStore("kv");
-            const r1 = store.get("pending_records");
-            const r2 = store.get("reminder_meta");
-            tx.oncomplete = () => resolve({ queue: r1.result || [], meta: r2.result || null });
-            tx.onerror = () => resolve({ queue: [], meta: null });
-        });
-
-        if (!Array.isArray(queue) || queue.length === 0) {
-            await closeOfflineReminderNotifications();
-            return;
-        }
-
-        if (!meta || meta.reminded || Date.now() < Number(meta.remindAt || 0)) return;
-
-        // محاولة الرفع أولاً إذا توفر الإنترنت
-        await processBackgroundAttendanceUpload(false).catch(() => {});
-
-        const stillPending = await new Promise((resolve) => {
-            const tx = db.transaction("kv", "readonly");
-            const r = tx.objectStore("kv").get("pending_records");
-            tx.oncomplete = () => resolve(Array.isArray(r.result) ? r.result : []);
-            tx.onerror = () => resolve(queue);
-        });
-
-        if (stillPending.length === 0) return;
-
-        await new Promise((resolve) => {
-            const writeTx = db.transaction("kv", "readwrite");
-            writeTx.objectStore("kv").put({ ...meta, reminded: true }, "reminder_meta");
-            writeTx.oncomplete = resolve;
-            writeTx.onerror = resolve;
-        });
-
-        const courseLabel = meta.courseName ? ` (${meta.courseName})` : "";
-        await self.registration.showNotification("⚠️ تذكير: حضورك لم يُرفع بعد!", {
-            body: `ما زال لديك (${stillPending.length}) سجل حضور أوفلاين${courseLabel} معلق على هاتفك. افتح الإنترنت واضغط هنا لرفعه الآن.`,
-            icon: "./logo.png",
-            badge: "./logo.png",
-            tag: "muc-offline-reminder",
-            renotify: true,
-            requireInteraction: true,
-            vibrate: [250, 120, 250],
-            data: { url: "./index.html" }
-        });
-    } catch (_) {}
-}
-
-self.addEventListener("message", (event) => {
-    const msg = event.data || {};
-    if (msg.type === "CANCEL_OFFLINE_REMINDER") {
-        event.waitUntil(closeOfflineReminderNotifications());
-        return;
-    }
-
-    if (msg.type === "SCHEDULE_OFFLINE_REMINDER") {
-        const remindAt = Number(msg.remindAt || (Date.now() + 2 * 60 * 60 * 1000));
-        const delayMs = Math.max(1000, remindAt - Date.now());
-
-        clearTimeout(_swReminderTimeout);
-
-        // استخدام event.waitUntil يمنع نظام الموبايل من إيقاف الـ Service Worker بعد خروجك من التطبيق
-        event.waitUntil(
-            new Promise((resolve) => {
-                _swReminderTimeout = setTimeout(async () => {
-                    await checkAndFireTwoHourReminder();
-                    resolve();
-                }, Math.min(delayMs, 240000));
-            })
-        );
-    }
-});
-
-self.addEventListener("periodicsync", (event) => {
-    if (event.tag === "muc-offline-reminder-check") {
-        event.waitUntil(checkAndFireTwoHourReminder());
-    }
-});
 
 self.addEventListener("notificationclick", (event) => {
     event.notification.close();
