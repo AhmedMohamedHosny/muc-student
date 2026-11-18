@@ -823,20 +823,12 @@ const isPraxis = String(courseId || "").toLowerCase().includes("praxis") || Stri
 
 
 
-// تسجيل طلب المزامنة في نظام التشغيل فوراً قبل إغلاق التطبيق
-function registerOsBackgroundSyncNow() {
-    if ("serviceWorker" in navigator && "SyncManager" in window) {
-        navigator.serviceWorker.ready
-            .then(reg => reg.sync.register("muc-bg-sync-attendance"))
-            .catch(() => {});
-    }
-}
 cleanedQueue.push(record);
     localStorage.setItem("muc_pending_records", JSON.stringify(cleanedQueue));
     markLectureAttendedLocally(cleanedStudentId, courseId, targetLec, sessionId);
     mirrorQueueToBackgroundDB(cleanedQueue);
 
-// تسجيل تذكرة التذكير على السيرفر (مؤقت 30 ثانية للتجربة)
+    // تسجيل تذكرة التذكير على السيرفر (مؤقت 30 ثانية للتجربة)
     const fcmTok = localStorage.getItem("muc_fcm_token") || "";
     if (fcmTok) {
         const remindAtMs = nowMs + (30 * 1000);
@@ -855,8 +847,17 @@ cleanedQueue.push(record);
     return record;
 }
 
+// تسجيل طلب المزامنة في نظام التشغيل فوراً قبل إغلاق التطبيق
+function registerOsBackgroundSyncNow() {
+    if ("serviceWorker" in navigator && "SyncManager" in window) {
+        navigator.serviceWorker.ready
+            .then(reg => reg.sync.register("muc-bg-sync-attendance"))
+            .catch(() => {});
+    }
+}
+
 // نسخ الطابور وإعدادات السيرفر وتوقيت تذكير الساعتين داخل IndexedDB للرفع والتذكير في الخلفية
-function mirrorQueueToBackgroundDB(queueArr) {
+async function mirrorQueueToBackgroundDB(queueArr) {
     try {
         const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
         const hasItems = Array.isArray(queueArr) && queueArr.length > 0;
