@@ -1,4 +1,4 @@
-const CACHE_NAME = "muc-student-offline-v45";
+const CACHE_NAME = "muc-student-offline-v46";
 
 const CORE_ASSETS = [
     "./",
@@ -368,6 +368,34 @@ async function processBackgroundAttendanceUpload(throwIfRemaining = false) {
         throw new Error("PENDING_RECORDS_REMAIN");
     }
 }
+
+// 📩 استقبال الإشعارات السحابية من السيرفر وعرضها على شاشة القفل حتى لو المتصفح مغلق تماماً
+self.addEventListener("push", (event) => {
+    let payload = {};
+    try {
+        payload = event.data ? event.data.json() : {};
+    } catch (_) {
+        payload = { data: { title: "⚠️ تذكير MUC Attendance", body: event.data ? event.data.text() : "" } };
+    }
+
+    const info = payload.data || payload.notification || {};
+    const title = info.title || "⚠️ تذكير: حضورك لم يُرفع بعد!";
+    const body = info.body || "لديك حضور محاضرة أوفلاين معلق على هاتفك. افتح الإنترنت واضغط هنا لرفعه الآن.";
+    const url = info.url || "./index.html";
+
+    event.waitUntil(
+        self.registration.showNotification(title, {
+            body,
+            icon: "./logo.png",
+            badge: "./logo.png",
+            tag: "muc-offline-reminder",
+            renotify: true,
+            requireInteraction: true,
+            vibrate: [250, 120, 250],
+            data: { url }
+        })
+    );
+});
 
 self.addEventListener("notificationclick", (event) => {
     event.notification.close();
