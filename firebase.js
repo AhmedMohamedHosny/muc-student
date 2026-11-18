@@ -844,10 +844,11 @@ const TWO_HOURS_MS = 60 * 1000; // مؤقت دقيقة واحدة للتجربة
                 store.delete("reminder_meta");
             }
 
-            tx.oncomplete = async () => {
+tx.oncomplete = async () => {
                 if ("serviceWorker" in navigator) {
                     try {
                         const reg = await navigator.serviceWorker.ready;
+                        const swWorker = reg.active || reg.waiting || reg.installing;
                         if (hasItems) {
                             if ("SyncManager" in window) {
                                 reg.sync.register("muc-bg-sync-attendance").catch(() => {});
@@ -855,14 +856,14 @@ const TWO_HOURS_MS = 60 * 1000; // مؤقت دقيقة واحدة للتجربة
                             if ("periodicSync" in reg) {
                                 reg.periodicSync.register("muc-offline-reminder-check", { minInterval: 60 * 60 * 1000 }).catch(() => {});
                             }
-                            reg.active?.postMessage({
+                            swWorker?.postMessage({
                                 type: "SCHEDULE_OFFLINE_REMINDER",
                                 remindAt,
                                 courseName: latestCourse,
                                 count: queueArr.length
                             });
                         } else {
-                            reg.active?.postMessage({ type: "CANCEL_OFFLINE_REMINDER" });
+                            swWorker?.postMessage({ type: "CANCEL_OFFLINE_REMINDER" });
                         }
                     } catch (_) {}
                 }
@@ -902,14 +903,14 @@ let uploaded = 0;
     isSyncing = true;
 
     try {
-        if (!auth.currentUser) {
-            await withTimeout(signInAnonymously(auth), 5000);
+if (!auth.currentUser) {
+            await withTimeout(signInAnonymously(auth), 10000);
         }
 
-for (const item of queue) {
+        for (const item of queue) {
             try {
                 // جلب بيانات الطالب أولاً للتحقق من القيد والسكشن بدقة
-                const stdSnap = await withTimeout(getDoc(doc(db, "students", item.studentId)), 4500);
+                const stdSnap = await withTimeout(getDoc(doc(db, "students", item.studentId)), 10000);
                 if (!stdSnap.exists()) {
                     localStorage.setItem("muc_sync_error", `⚠️ الرقم الجامعي (${item.studentId}) غير مسجل بقاعدة البيانات!`);
                     removeFromQueue(item);
