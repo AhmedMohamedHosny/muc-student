@@ -1240,8 +1240,8 @@ const mapCache = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}"
                         primaryDevicesArr.some(d => d.deviceId === myHardwareKey || d.deviceId === deviceId || d.legacyDeviceId === deviceId || d.legacyDeviceId === myHardwareKey)
                     );
 
-// 2. لا نطرد الطالب عند الريفريش إلا إذا كان القفل موجوداً بالفعل على السيرفر ولا يشمل جهازه
-                    if (!isFirstTimeSetup && lockExists && primaryBoundIds.length > 0 && !isMyDeviceBound) {
+                    // 2. إذا قام المشرف بطرد الهاتف من لوحة التحكم -> يطرد فوراً
+                    if (!isFirstTimeSetup && (!lockExists || !isMyDeviceBound)) {
                         clearStudentLocalBinding(cleanId);
                         inputId.value = "";
                         welcomeBar.classList.add("d-none");
@@ -1371,13 +1371,17 @@ const mapCache = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}"
                             }
                         });
 } catch (e) {}
-} catch (e) {
+                } catch (e) {
                     if (isFirstTimeSetup) {
+                        welcomeBar.classList.add("d-none");
+                        scannerStep.classList.add("d-none");
+                        inputStep.classList.remove("d-none");
                         await showCustomAlert(
-                            "تنبيه الشبكة",
-                            "⚠️ الاتصال بالسيرفر استغرق وقتاً أطول من المعتاد، سيتم المتابعة وتأكيد الربط تلقائياً.",
-                            false
+                            "الشبكة ضعيفة حالياً",
+                            "⚠️ تعذر الاتصال بسيرفر الجامعة للتحقق من رقمك الجامعي وتفعيل الهاتف لأول مرة.\n\nيرجى التأكد من جودة الإنترنت والمحاولة مرة أخرى.",
+                            true
                         );
+                        return false;
                     }
                 }
             } else if (isFirstTimeSetup) {
