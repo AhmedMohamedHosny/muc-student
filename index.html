@@ -558,8 +558,8 @@ background: #FDF2F3;
     </div>
     <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
     <script type="module">
-import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum, decodePinMetadata, verifyPinOnServerFast, getCoursePinIndex, ensureStudentAuth, verifyStudentSectionAndTA, doSectionGroupsMatch, checkStudentDeviceServerState, bindStudentDeviceOnServer, subscribeToStudentDeviceLock } from "./firebase.js";
-        import { openErrorsGuideModal } from "./errors-guide.js";
+import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum, decodePinMetadata, verifyPinOnServerFast, getCoursePinIndex, ensureStudentAuth, verifyStudentSectionAndTA, doSectionGroupsMatch } from "./firebase.js";
+import { openErrorsGuideModal } from "./errors-guide.js";
 
 document.getElementById("btn-errors-guide-before")?.addEventListener("click", () => openErrorsGuideModal("auto"));
 document.getElementById("btn-errors-guide-after")?.addEventListener("click", () => openErrorsGuideModal("auto"));
@@ -1123,7 +1123,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             clearIdentityVault();
         }
 
-// دالة التحقق من ملكية الـ ID وتفعيله نهائياً (هاتف واحد ومتصفح واحد لكل طالب 1/1)
+        // دالة التحقق من ملكية الـ ID وتفعيله نهائياً (هاتف واحد ومتصفح واحد لكل طالب 1/1)
         async function activateStudentProfile(sid, isFirstTimeSetup = false) {
             const cleanId = String(sid || "").trim();
             if (!cleanId) return false;
@@ -1143,7 +1143,23 @@ const welcomeBar = document.getElementById("student-welcome-bar");
 
             if (navigator.onLine) {
                 try {
-                    const res = await checkStudentDeviceServerState(cleanId, myHardwareKey);
+                    const { db, auth } = await import("./firebase.js");
+                    const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
+                    const { doc, getDoc, setDoc, serverTimestamp } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+
+                    const verifyOnServer = async () => {
+                        if (!auth.currentUser) await signInAnonymously(auth);
+                        const [stdSnap, lockSnap, ownerSnap] = await Promise.all([
+                            getDoc(doc(db, "students", cleanId)),
+                            getDoc(doc(db, "attendance_devices", `id_lock_${cleanId}`)),
+                            getDoc(doc(db, "attendance_devices", `device_owner_${myHardwareKey}`))
+                        ]);
+                        return { stdSnap, lockSnap, ownerSnap, db, doc, setDoc, serverTimestamp };
+                    };
+const res = await Promise.race([
+                        verifyOnServer(),
+                        new Promise((_, rej) => setTimeout(() => rej(new Error("TIMEOUT")), 10000))
+                    ]);
 
                     if (!res.stdSnap.exists()) {
                         clearStudentLocalBinding(cleanId);
@@ -1154,12 +1170,12 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                         return false;
                     }
 
-                    // 1. منع تبديل الحساب على نفس الهاتف
+                    // 🛑 1. منع تبديل الحساب على نفس الهاتف: إذا كان الهاتف مملوكاً لطالب آخر في الخزنة أو السيرفر
                     const previousOwnerId = (res.ownerSnap && res.ownerSnap.exists() && res.ownerSnap.data()?.studentId) || (vaultData && vaultData.ownerSid) || "";
                     if (previousOwnerId && String(previousOwnerId).trim() !== cleanId) {
-                        const prevState = await checkStudentDeviceServerState(previousOwnerId, myHardwareKey).catch(() => null);
-                        if (prevState && prevState.lockSnap && prevState.lockSnap.exists()) {
-                            const prevName = prevState.lockSnap.data()?.studentName || (res.ownerSnap?.data()?.studentName) || previousOwnerId;
+                        const prevLockSnap = await getDoc(doc(res.db, "attendance_devices", `id_lock_${previousOwnerId}`)).catch(() => ({ exists: () => false }));
+                        if (prevLockSnap.exists()) {
+                            const prevName = prevLockSnap.data()?.studentName || (res.ownerSnap?.data()?.studentName) || previousOwnerId;
                             inputId.value = "";
                             welcomeBar.classList.add("d-none");
                             scannerStep.classList.add("d-none");
@@ -1181,15 +1197,28 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                         localStorage.setItem("muc_student_courses", JSON.stringify(myCourses));
                         localStorage.setItem("muc_student_sections", JSON.stringify(stdData.sections || {}));
                         localStorage.setItem("muc_student_group", stdData.section || stdData.group || "");
+const mapCache = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}");
+                        myCourses.forEach(cid => {
+                            getDoc(doc(res.db, "courses", cid)).then(cSnap => {
+                                if (cSnap.exists()) {
+                                    const cData = cSnap.data() || {};
+                                    if (cData.courseName) {
+                                        mapCache[cid] = cData.courseCode ? `${cData.courseName} (${cData.courseCode})` : cData.courseName;
+                                        localStorage.setItem("muc_course_names_map", JSON.stringify(mapCache));
+                                    }
+                                }
+                            }).catch(() => {});
+                        });
                     } catch (e) {}
 
                     const lockExists = res.lockSnap.exists();
                     const lockData = lockExists ? (res.lockSnap.data() || {}) : {};
                     const activeDevicesArr = Array.isArray(lockData.devices) ? lockData.devices : [];
-                    const boundDevices = Array.isArray(lockData.deviceIds)
-                        ? [...lockData.deviceIds]
+                    const boundDevices = Array.isArray(lockData.deviceIds) 
+                        ? [...lockData.deviceIds] 
                         : (lockData.deviceId ? [lockData.deviceId] : []);
 
+                    // اعتماد الهاتف الأول الأساسي فقط (1/1) لمنع أي متصفح خفي أو متصفح ثانٍ من الدخول
                     const primaryBoundIds = boundDevices.slice(0, 1);
                     const primaryDevicesArr = activeDevicesArr.slice(0, 1);
 
@@ -1215,7 +1244,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                         return false;
                     }
 
-                    // 3. قفل الهاتف الواحد والمتصفح الواحد (1/1)
+                    // 🛑 3. قفل الهاتف الواحد والمتصفح الواحد (1/1): يرفض فوراً أي دخول من المتصفح الخفي أو من متصفح/هاتف آخر!
                     if (!isMyDeviceBound && primaryBoundIds.length >= 1) {
                         inputId.value = "";
                         welcomeBar.classList.add("d-none");
@@ -1229,7 +1258,20 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                         return false;
                     }
 
-                    // 4. التسجيل والربط لأول مرة (1/1)
+                    // تأمين حفظ ملكية الهاتف للطالب الحالي
+                    if (!isFirstTimeSetup && isMyDeviceBound && (!res.ownerSnap || !res.ownerSnap.exists())) {
+                        setDoc(doc(res.db, "attendance_devices", `device_owner_${myHardwareKey}`), {
+                            deviceId: myHardwareKey,
+                            studentId: cleanId,
+                            studentName: stdName,
+                            department: stdData.department || "هندسة الحاسب",
+                            academicYear: String(stdData.academicYear || "2"),
+                            boundAt: res.serverTimestamp(),
+                            boundAtISO: new Date().toISOString()
+                        }, { merge: true }).catch(() => {});
+                    }
+
+// 4. التسجيل والربط لأول مرة (1/1) مع تأكيد الحفظ الفعلي في السيرفر قبل الدخول
                     if (isFirstTimeSetup) {
                         const phoneName = await getReadablePhoneName();
                         const isConfirmed = await askAnimatedIdConfirmation(cleanId, stdName);
@@ -1238,25 +1280,73 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                             return false;
                         }
 
-                        await bindStudentDeviceOnServer({
-                            studentId: cleanId,
-                            studentName: stdName,
-                            department: stdData.department || "هندسة الحاسب",
-                            academicYear: String(stdData.academicYear || "2"),
-                            hardwareKey: myHardwareKey,
+                        const nowISO = new Date().toISOString();
+                        const currentDeviceObj = {
+                            deviceId: myHardwareKey,
                             legacyDeviceId: deviceId,
-                            phoneName: phoneName,
-                            screenInfo: `${screen.width}x${screen.height}`
-                        });
+                            deviceName: phoneName,
+                            screenInfo: `${screen.width}x${screen.height}`,
+                            lockedAtISO: nowISO
+                        };
+
+                        const lockDocRef = doc(res.db, "attendance_devices", `id_lock_${cleanId}`);
+                        const ownerDocRef = doc(res.db, "attendance_devices", `device_owner_${myHardwareKey}`);
+
+                        const writeLockToServer = () => Promise.race([
+                            (async () => {
+                                await setDoc(lockDocRef, {
+                                    studentId: cleanId,
+                                    studentName: stdName,
+                                    department: stdData.department || "هندسة الحاسب",
+                                    academicYear: String(stdData.academicYear || "2"),
+                                    devices: [currentDeviceObj],
+                                    deviceIds: [myHardwareKey],
+                                    legacyDeviceIds: [deviceId],
+                                    legacyDeviceId: deviceId,
+                                    deviceId: myHardwareKey,
+                                    secondDeviceId: "",
+                                    deviceName: `[هاتف 1] ${phoneName}`,
+                                    screenInfo: `${screen.width}x${screen.height}`,
+                                    firstLockedAtISO: nowISO,
+                                    secondLockedAtISO: "",
+                                    lockedAt: res.serverTimestamp(),
+                                    lockedAtISO: nowISO
+                                }, { merge: true });
+
+                                // تسجيل ملكية الجهاز العكسية بدون تعطيل الربط الأساسي لو تأخرت
+                                setDoc(ownerDocRef, {
+                                    deviceId: myHardwareKey,
+                                    studentId: cleanId,
+                                    studentName: stdName,
+                                    department: stdData.department || "هندسة الحاسب",
+                                    academicYear: String(stdData.academicYear || "2"),
+                                    boundAt: res.serverTimestamp(),
+                                    boundAtISO: nowISO
+                                }, { merge: true }).catch(() => {});
+                            })(),
+                            new Promise((_, rej) => setTimeout(() => rej(new Error("WRITE_TIMEOUT")), 10000))
+                        ]);
+
+                        try {
+                            await writeLockToServer();
+                        } catch (firstWriteErr) {
+                            if (String(firstWriteErr?.message || "") === "WRITE_TIMEOUT") {
+                                // محاولة ثانية تلقائية في حال بطء الشبكة
+                                await writeLockToServer();
+                            } else {
+                                throw firstWriteErr;
+                            }
+                        }
 
                         localStorage.setItem(`muc_lock_claimed_${cleanId}`, "1");
                     }
 
-                    // 5. مراقب لحظي للطرد الفوري عند فك القفل من المشرف
+                    // 5. مراقب لحظي للطرد الفوري عند فك القفل من المشرف (مع تجاهل الكتابات المحلية المعلقة)
                     try {
+                        const { onSnapshot } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
                         if (window._liveKickUnsub) window._liveKickUnsub();
                         let sawConfirmedServerDoc = !isFirstTimeSetup;
-                        window._liveKickUnsub = subscribeToStudentDeviceLock(cleanId, async (snap) => {
+                        window._liveKickUnsub = onSnapshot(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), async (snap) => {
                             if (snap.metadata && snap.metadata.hasPendingWrites) return;
                             const d = snap.exists() ? (snap.data() || {}) : {};
                             const ids = (Array.isArray(d.deviceIds) ? d.deviceIds : (d.deviceId ? [d.deviceId] : [])).slice(0, 1);
@@ -1287,16 +1377,18 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                         });
                     } catch (e) {}
                 } catch (e) {
-                    console.error("Student activation error:", e);
                     if (isFirstTimeSetup) {
                         clearStudentLocalBinding(cleanId);
                         welcomeBar.classList.add("d-none");
                         scannerStep.classList.add("d-none");
                         inputStep.classList.remove("d-none");
-                        const rawDetail = `${e?.code || ""} ${e?.message || e || ""}`.trim();
+                        const errCode = String(e?.code || e?.message || "");
+                        const isPermDenied = errCode.includes("permission-denied") || errCode.includes("PERMISSION_DENIED");
                         await showCustomAlert(
-                            "تعذر إتمام ربط الهاتف",
-                            `⚠️ لم يتم تأكيد ربط هاتفك على السيرفر.\n\nالسبب التقني: [${rawDetail}]`,
+                            isPermDenied ? "تعذر الحفظ بسبب صلاحيات السيرفر" : "الشبكة ضعيفة حالياً",
+                            isPermDenied
+                                ? `⚠️ سيرفر قاعدة البيانات رفض تسجيل ربط الجهاز (${errCode}). يرجى مراجعة قواعد Firestore Rules لمجموعة attendance_devices.`
+                                : "⚠️ تعذر الاتصال بسيرفر الجامعة لتأكيد ربط هاتفك لأول مرة.\n\nيرجى التأكد من جودة الإنترنت والمحاولة مرة أخرى.",
                             true
                         );
                         return false;
@@ -1335,6 +1427,7 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             scannerStep.classList.remove("d-none");
             return true;
         }
+
 // 🕵️‍♂️ 1. دالة كشف وحظر المتصفح الخفي (Incognito Detector)
         async function isIncognitoMode() {
             try {
