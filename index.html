@@ -1341,41 +1341,7 @@ const mapCache = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}"
                         localStorage.setItem(`muc_lock_claimed_${cleanId}`, "1");
                     }
 
-                    // 5. مراقب لحظي للطرد الفوري عند فك القفل من المشرف (مع تجاهل الكتابات المحلية المعلقة)
-                    try {
-                        const { onSnapshot } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
-                        if (window._liveKickUnsub) window._liveKickUnsub();
-                        let sawConfirmedServerDoc = !isFirstTimeSetup;
-                        window._liveKickUnsub = onSnapshot(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), async (snap) => {
-                            if (snap.metadata && snap.metadata.hasPendingWrites) return;
-                            const d = snap.exists() ? (snap.data() || {}) : {};
-                            const ids = (Array.isArray(d.deviceIds) ? d.deviceIds : (d.deviceId ? [d.deviceId] : [])).slice(0, 1);
-                            const devs = (Array.isArray(d.devices) ? d.devices : []).slice(0, 1);
-                            const stillBound = snap.exists() && (
-                                ids.includes(myHardwareKey) ||
-                                ids.includes(deviceId) ||
-                                devs.some(x => x.deviceId === myHardwareKey || x.deviceId === deviceId || x.legacyDeviceId === deviceId)
-                            );
-                            if (stillBound) {
-                                sawConfirmedServerDoc = true;
-                                return;
-                            }
-                            if (sawConfirmedServerDoc && snap.metadata && !snap.metadata.fromCache && !stillBound) {
-                                if (window._liveKickUnsub) { window._liveKickUnsub(); window._liveKickUnsub = null; }
-                                clearStudentLocalBinding(cleanId);
-                                inputId.value = "";
-                                welcomeBar.classList.add("d-none");
-                                scannerStep.classList.add("d-none");
-                                resultStep.classList.add("d-none");
-                                inputStep.classList.remove("d-none");
-                                await showCustomAlert(
-                                    "تم إلغاء ربط هذا الهاتف",
-                                    `🚫 قام مشرف المنظومة للتو بإلغاء ربط هذا الهاتف بالرقم الجامعي (${cleanId}).`,
-                                    true
-                                );
-                            }
-                        });
-                    } catch (e) {}
+
                 } catch (e) {
                     if (isFirstTimeSetup) {
                         clearStudentLocalBinding(cleanId);
