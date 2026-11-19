@@ -358,11 +358,25 @@ export async function verifyPinOnServerFast(enteredPin) {
     await withTimeout(ensureStudentAuth(), 6000);
     const pinNum = Number(enteredPin);
 
-    const checkOnce = async () => {
-        const [pinDocRes, queryRes] = await Promise.allSettled([
-            withTimeout(getDoc(doc(db, "attendance_pins", String(enteredPin))), 7000),
-            withTimeout(getDocs(query(collection(db, "attendance_sessions"), where("pinHistory", "array-contains", pinNum))), 7000)
-        ]);
+const checkOnce = async () => {
+        let pinDocRes = { status: "rejected", reason: null };
+        try {
+            const snap = await withTimeout(getDoc(doc(db, "attendance_pins", String(enteredPin))), 6000);
+            pinDocRes = { status: "fulfilled", value: snap };
+        } catch (e) {
+            pinDocRes = { status: "rejected", reason: e };
+        }
+
+        // لا نشغل البحث الثقيل في الجلسات إلا إذا لم نجد الكود مباشرة في attendance_pins
+        let queryRes = { status: "fulfilled", value: { empty: true, docs: [] } };
+        if (pinDocRes.status !== "fulfilled" || !pinDocRes.value.exists()) {
+            try {
+                const qSnap = await withTimeout(getDocs(query(collection(db, "attendance_sessions"), where("pinHistory", "array-contains", pinNum))), 6000);
+                queryRes = { status: "fulfilled", value: qSnap };
+            } catch (e) {
+                queryRes = { status: "rejected", reason: e };
+            }
+        }
 
         // إذا فشل الطلبان معاً بسبب بطء الشبكة في المدرج -> نرفع خطأ NETWORK_TIMEOUT لإعادة المحاولة تلقائياً
         if (pinDocRes.status === "rejected" && queryRes.status === "rejected") {
@@ -595,7 +609,7 @@ if (!isEnrolled) {
 
         const cleanSavedCourseName = isPraxis ? "Praxis Programming" : String(sessionData.courseName || "Course").replace(/\s*[-–—]?\s*(Lecture|محاضرة|Lec)\s*[12]/gi, "").trim();
 
-        const writePromises = [
+const writePromises = [
             setDoc(recordRef, {
                 recordId: recordId,
                 sessionId: sessionId,
@@ -608,23 +622,23 @@ if (!isEnrolled) {
                 status: status,
                 recordedAt: serverTimestamp(),
                 method: clientToken === "PIN_VERIFIED" ? "PIN_CODE" : "QR_SCAN"
-            }, { merge: true }),
-            setDoc(deviceRef, {
-                sessionId: sessionId,
-                deviceId: safeDeviceId,
-                studentId: cleanedStudentId,
-                createdAt: serverTimestamp()
-            }, { merge: true }).catch(() => {}),
-            setDoc(ownerRef, {
-                deviceId: hwKey,
-                studentId: cleanedStudentId,
-                studentName: studentRealName,
-                department: studentData.department || "هندسة الحاسب",
-                academicYear: String(studentData.academicYear || "2"),
-                boundAt: serverTimestamp(),
-                boundAtISO: nowISO
-            }, { merge: true }).catch(() => {})
+            }, { merge: true })
         ];
+
+        // تسجيل ملكية الجهاز مرة واحدة فقط إذا لم تكن مسجلة مسبقاً (توفير 66% من الكتابة)
+        if (!ownerSnap || !ownerSnap.exists()) {
+            writePromises.push(
+                setDoc(ownerRef, {
+                    deviceId: hwKey,
+                    studentId: cleanedStudentId,
+                    studentName: studentRealName,
+                    department: studentData.department || "هندسة الحاسب",
+                    academicYear: String(studentData.academicYear || "2"),
+                    boundAt: serverTimestamp(),
+                    boundAtISO: nowISO
+                }, { merge: true }).catch(() => {})
+            );
+        }
 
         if (!idLockSnap || !idLockSnap.exists() || !isMyDev) {
             const ua = navigator.userAgent || "";
