@@ -790,83 +790,17 @@ cleanedQueue.push(record);
     localStorage.setItem("muc_pending_records", JSON.stringify(cleanedQueue));
     markLectureAttendedLocally(cleanedStudentId, courseId, targetLec, sessionId);
     mirrorQueueToBackgroundDB(cleanedQueue);
-    reportPendingBeaconToCloud(cleanedQueue).catch(() => {});
     return record;
 }
 
-// 📡 إرسال إشارة السجلات المعلقة (Sync Attendance Now) إلى لوحة المشرف بمجرد توفر الإنترنت
-let _lastBeaconHash = "";
-async function reportPendingBeaconToCloud(queueArr) {
-    try {
-        if (!navigator.onLine) return;
-        const validItems = Array.isArray(queueArr)
-            ? queueArr.filter(x => x && String(x.studentId || "").trim().length >= 7)
-            : [];
-
-        const sid = validItems[0]?.studentId || localStorage.getItem("muc_saved_student_id") || "";
-        if (!sid) return;
-
-        const currentHash = validItems.map(x => `${x.sessionId}_${x.pin || ""}`).join("|");
-        if (currentHash === _lastBeaconHash && validItems.length > 0) return;
-
-        await ensureStudentAuth();
-        const beaconRef = doc(db, "offline_pending_beacon", String(sid).trim());
-
-        if (validItems.length === 0) {
-            await setDoc(beaconRef, {
-                studentId: String(sid).trim(),
-                pendingCount: 0,
-                items: [],
-                clearedAt: serverTimestamp()
-            }, { merge: true });
-            _lastBeaconHash = "";
-            return;
-        }
-
-        const stdName = localStorage.getItem(`muc_student_name_${sid}`) || validItems[0]?.studentName || "طالب";
-        const mappedItems = validItems.map(x => ({
-            sessionId: String(x.sessionId || ""),
-            courseId: String(x.courseId || "MUC_COURSE"),
-            courseName: String(x.courseName || "المقرر الدراسي"),
-            lectureNumber: Number(x.lectureNumber || 1),
-            sessionType: String(x.sessionType || "lecture"),
-            group: String(x.group || ""),
-            pin: String(x.pin || ""),
-            method: x.pin ? "PIN" : "QR",
-            scannedAt: Number(x.scannedAt || Date.now()),
-            startedAtDate: String(x.startedAtDate || new Date(x.scannedAt || Date.now()).toLocaleDateString("en-CA"))
-        }));
-
-        await setDoc(beaconRef, {
-            studentId: String(sid).trim(),
-            studentName: stdName,
-            pendingCount: mappedItems.length,
-            items: mappedItems,
-            updatedAt: serverTimestamp(),
-            lastSeenMs: Date.now()
-        }, { merge: true });
-        _lastBeaconHash = currentHash;
-    } catch (_) {}
-}
-
-// تسجيل طلب المزامنة في نظام التشغيل فوراً قبل إغلاق التطبيق
-function registerOsBackgroundSyncNow() {
-    if ("serviceWorker" in navigator && "SyncManager" in window) {
-        navigator.serviceWorker.ready
-            .then(reg => reg.sync.register("muc-bg-sync-attendance"))
-            .catch(() => {});
-    }
-}
-
-// نسخ الطابور وإعدادات السيرفر وتوكن المصادقة داخل IndexedDB للرفع في الخلفية والمتصفح مغلق
-async function mirrorQueueToBackgroundDB(queueArr) {
+// نسخ الطابور وإعدادات السيرفر وتوقيت تذكير الساعتين داخل IndexedDB للرفع والتذكير في الخلفية
+function mirrorQueueToBackgroundDB(queueArr) {
     try {
         const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
         const hasItems = Array.isArray(queueArr) && queueArr.length > 0;
         let remindAt = Number(localStorage.getItem("muc_offline_remind_at") || 0);
 
         if (hasItems) {
-            registerOsBackgroundSyncNow();
             const oldestScan = Math.min(...queueArr.map(x => Number(x.scannedAt) || Date.now()));
             const isPastLectureOverdue = (Date.now() - oldestScan) >= TWO_HOURS_MS;
 
@@ -881,18 +815,6 @@ async function mirrorQueueToBackgroundDB(queueArr) {
             localStorage.removeItem("muc_offline_reminded");
             localStorage.removeItem("muc_offline_last_reminded_at");
         }
-
-        let cachedAuth = null;
-        try {
-            if (auth.currentUser) {
-                const token = await auth.currentUser.getIdToken();
-                cachedAuth = {
-                    idToken: token,
-                    refreshToken: auth.currentUser.refreshToken || "",
-                    savedAt: Date.now()
-                };
-            }
-        } catch (_) {}
 
         const latestCourse = hasItems ? (queueArr[queueArr.length - 1]?.courseName || "المقرر الدراسي") : "";
 
@@ -910,9 +832,6 @@ async function mirrorQueueToBackgroundDB(queueArr) {
                 projectId: CONFIG.firebase.projectId,
                 apiKey: CONFIG.firebase.apiKey
             }, "firebase_cfg");
-            if (cachedAuth) {
-                store.put(cachedAuth, "auth_session");
-            }
 
             if (hasItems) {
                 store.put({
@@ -929,17 +848,21 @@ async function mirrorQueueToBackgroundDB(queueArr) {
                 if ("serviceWorker" in navigator) {
                     try {
                         const reg = await navigator.serviceWorker.ready;
-                        const swWorker = reg.active || reg.waiting || reg.installing;
                         if (hasItems) {
-                            registerOsBackgroundSyncNow();
-                            swWorker?.postMessage({
+                            if ("SyncManager" in window) {
+                                reg.sync.register("muc-bg-sync-attendance").catch(() => {});
+                            }
+                            if ("periodicSync" in reg) {
+                                reg.periodicSync.register("muc-offline-reminder-check", { minInterval: 60 * 60 * 1000 }).catch(() => {});
+                            }
+                            reg.active?.postMessage({
                                 type: "SCHEDULE_OFFLINE_REMINDER",
                                 remindAt,
                                 courseName: latestCourse,
                                 count: queueArr.length
                             });
                         } else {
-                            swWorker?.postMessage({ type: "CANCEL_OFFLINE_REMINDER" });
+                            reg.active?.postMessage({ type: "CANCEL_OFFLINE_REMINDER" });
                         }
                     } catch (_) {}
                 }
@@ -965,7 +888,6 @@ function removeFromQueue(item) {
     });
     localStorage.setItem("muc_pending_records", JSON.stringify(nextQ));
     mirrorQueueToBackgroundDB(nextQ);
-    reportPendingBeaconToCloud(nextQ).catch(() => {});
 }
 
 export async function syncPendingAttendance() {
@@ -980,14 +902,14 @@ let uploaded = 0;
     isSyncing = true;
 
     try {
-if (!auth.currentUser) {
-            await withTimeout(signInAnonymously(auth), 10000);
+        if (!auth.currentUser) {
+            await withTimeout(signInAnonymously(auth), 5000);
         }
 
-        for (const item of queue) {
+for (const item of queue) {
             try {
                 // جلب بيانات الطالب أولاً للتحقق من القيد والسكشن بدقة
-                const stdSnap = await withTimeout(getDoc(doc(db, "students", item.studentId)), 10000);
+                const stdSnap = await withTimeout(getDoc(doc(db, "students", item.studentId)), 4500);
                 if (!stdSnap.exists()) {
                     localStorage.setItem("muc_sync_error", `⚠️ الرقم الجامعي (${item.studentId}) غير مسجل بقاعدة البيانات!`);
                     removeFromQueue(item);
@@ -1182,54 +1104,42 @@ export function getPendingCount() {
 }
 
 function reconcileBackgroundSyncedItems() {
-    return new Promise((resolve) => {
-        try {
-            const req = indexedDB.open("muc_bg_sync_db", 1);
-            req.onerror = () => resolve(false);
-            req.onsuccess = (e) => {
-                const idb = e.target.result;
-                if (!idb.objectStoreNames.contains("kv")) return resolve(false);
-                const tx = idb.transaction("kv", "readwrite");
-                const store = tx.objectStore("kv");
-                const getReq = store.get("pending_records");
-                const recReq = store.get("last_bg_synced_receipts");
+    try {
+        const req = indexedDB.open("muc_bg_sync_db", 1);
+        req.onsuccess = (e) => {
+            const idb = e.target.result;
+            if (!idb.objectStoreNames.contains("kv")) return;
+            const tx = idb.transaction("kv", "readwrite");
+            const store = tx.objectStore("kv");
+            const getReq = store.get("pending_records");
+            const recReq = store.get("last_bg_synced_receipts");
 
-                tx.oncomplete = () => {
-                    let wasCleanedByBg = false;
-                    if (Array.isArray(getReq.result)) {
-                        const localQ = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
-                        if (localQ.length > 0 && getReq.result.length === 0) {
-                            localStorage.setItem("muc_pending_records", "[]");
-                            localStorage.removeItem("muc_offline_remind_at");
-                            localStorage.removeItem("muc_offline_reminded");
-                            localStorage.removeItem("muc_offline_last_reminded_at");
-                            wasCleanedByBg = true;
-                        }
+            tx.oncomplete = () => {
+                if (Array.isArray(getReq.result)) {
+                    const localQ = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
+                    if (localQ.length > 0 && getReq.result.length === 0) {
+                        localStorage.setItem("muc_pending_records", "[]");
+                        localStorage.removeItem("muc_offline_remind_at");
+                        localStorage.removeItem("muc_offline_reminded");
+                        localStorage.removeItem("muc_offline_last_reminded_at");
                     }
-                    if (Array.isArray(recReq.result) && recReq.result.length > 0) {
-                        const delTx = idb.transaction("kv", "readwrite");
-                        delTx.objectStore("kv").delete("last_bg_synced_receipts");
-                        window.dispatchEvent(new CustomEvent("muc:offline-synced", { detail: recReq.result }));
-                    }
-                    resolve(wasCleanedByBg);
-                };
-                tx.onerror = () => resolve(false);
+                }
+                if (Array.isArray(recReq.result) && recReq.result.length > 0) {
+                    const delTx = idb.transaction("kv", "readwrite");
+                    delTx.objectStore("kv").delete("last_bg_synced_receipts");
+                    window.dispatchEvent(new CustomEvent("muc:offline-synced", { detail: recReq.result }));
+                }
             };
-        } catch (_) {
-            resolve(false);
-        }
-    });
+        };
+    } catch (_) {}
 }
 
-async function triggerSmoothSync() {
-    await reconcileBackgroundSyncedItems();
+function triggerSmoothSync() {
+    reconcileBackgroundSyncedItems();
     try {
         const localQ = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
-        if (navigator.onLine) {
-            reportPendingBeaconToCloud(localQ).catch(() => {});
-        }
         if (Array.isArray(localQ) && localQ.length > 0) {
-            await mirrorQueueToBackgroundDB(localQ);
+            mirrorQueueToBackgroundDB(localQ);
         }
     } catch (_) {}
 
@@ -1240,17 +1150,10 @@ async function triggerSmoothSync() {
 window.addEventListener("online", triggerSmoothSync);
 window.addEventListener("pageshow", triggerSmoothSync);
 window.addEventListener("focus", triggerSmoothSync);
-window.addEventListener("pagehide", () => {
-    if (getPendingCount() > 0) registerOsBackgroundSyncNow();
-});
 document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {
-        triggerSmoothSync();
-    } else if (getPendingCount() > 0) {
-        registerOsBackgroundSyncNow();
-    }
+    if (document.visibilityState === "visible") triggerSmoothSync();
 });
-setInterval(triggerSmoothSync, 10000);
+setInterval(triggerSmoothSync, 12000);
 
 export function subscribeToCourseAttendance(courseId, onChange) {
     let sessions = null, records = null;
