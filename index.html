@@ -1156,10 +1156,9 @@ const welcomeBar = document.getElementById("student-welcome-bar");
                         ]);
                         return { stdSnap, lockSnap, ownerSnap, db, doc, setDoc, serverTimestamp };
                     };
-
-                    const res = await Promise.race([
+const res = await Promise.race([
                         verifyOnServer(),
-                        new Promise((_, rej) => setTimeout(() => rej(new Error("TIMEOUT")), 5000))
+                        new Promise((_, rej) => setTimeout(() => rej(new Error("TIMEOUT")), 10000))
                     ]);
 
                     if (!res.stdSnap.exists()) {
@@ -1272,7 +1271,7 @@ const mapCache = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}"
                         }, { merge: true }).catch(() => {});
                     }
 
-                    // 4. التسجيل والربط لأول مرة (1/1)
+// 4. التسجيل والربط لأول مرة (1/1) مع تأكيد الحفظ الفعلي في السيرفر قبل الدخول
                     if (isFirstTimeSetup) {
                         const phoneName = await getReadablePhoneName();
                         const isConfirmed = await askAnimatedIdConfirmation(cleanId, stdName);
@@ -1281,61 +1280,74 @@ const mapCache = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}"
                             return false;
                         }
 
-                        try {
-                            const nowISO = new Date().toISOString();
-                            const currentDeviceObj = {
-                                deviceId: myHardwareKey,
-                                legacyDeviceId: deviceId,
-                                deviceName: phoneName,
-                                screenInfo: `${screen.width}x${screen.height}`,
-                                lockedAtISO: nowISO
-                            };
+                        const nowISO = new Date().toISOString();
+                        const currentDeviceObj = {
+                            deviceId: myHardwareKey,
+                            legacyDeviceId: deviceId,
+                            deviceName: phoneName,
+                            screenInfo: `${screen.width}x${screen.height}`,
+                            lockedAtISO: nowISO
+                        };
 
-                            await Promise.race([
-                                Promise.all([
-                                    setDoc(doc(res.db, "attendance_devices", `device_owner_${myHardwareKey}`), {
-                                        deviceId: myHardwareKey,
-                                        studentId: cleanId,
-                                        studentName: stdName,
-                                        department: stdData.department || "هندسة الحاسب",
-                                        academicYear: String(stdData.academicYear || "2"),
-                                        boundAt: res.serverTimestamp(),
-                                        boundAtISO: nowISO
-                                    }, { merge: true }),
-                                    setDoc(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), {
-                                        studentId: cleanId,
-                                        studentName: stdName,
-                                        department: stdData.department || "هندسة الحاسب",
-                                        academicYear: String(stdData.academicYear || "2"),
-                                        devices: [currentDeviceObj],
-                                        deviceIds: [myHardwareKey],
-                                        legacyDeviceIds: [deviceId],
-                                        legacyDeviceId: deviceId,
-                                        deviceId: myHardwareKey,
-                                        secondDeviceId: "",
-                                        deviceName: `[هاتف 1] ${phoneName}`,
-                                        screenInfo: `${screen.width}x${screen.height}`,
-                                        firstLockedAtISO: nowISO,
-                                        secondLockedAtISO: "",
-                                        lockedAt: res.serverTimestamp(),
-                                        lockedAtISO: nowISO
-                                    }, { merge: true })
-                                ]),
-                                new Promise((r) => setTimeout(r, 3500))
-                            ]);
-                            localStorage.setItem(`muc_lock_claimed_${cleanId}`, "1");
-                        } catch (lockErr) {
-                            console.warn("Lock write notice:", lockErr);
+                        const lockDocRef = doc(res.db, "attendance_devices", `id_lock_${cleanId}`);
+                        const ownerDocRef = doc(res.db, "attendance_devices", `device_owner_${myHardwareKey}`);
+
+                        const writeLockToServer = () => Promise.race([
+                            (async () => {
+                                await setDoc(lockDocRef, {
+                                    studentId: cleanId,
+                                    studentName: stdName,
+                                    department: stdData.department || "هندسة الحاسب",
+                                    academicYear: String(stdData.academicYear || "2"),
+                                    devices: [currentDeviceObj],
+                                    deviceIds: [myHardwareKey],
+                                    legacyDeviceIds: [deviceId],
+                                    legacyDeviceId: deviceId,
+                                    deviceId: myHardwareKey,
+                                    secondDeviceId: "",
+                                    deviceName: `[هاتف 1] ${phoneName}`,
+                                    screenInfo: `${screen.width}x${screen.height}`,
+                                    firstLockedAtISO: nowISO,
+                                    secondLockedAtISO: "",
+                                    lockedAt: res.serverTimestamp(),
+                                    lockedAtISO: nowISO
+                                }, { merge: true });
+
+                                // تسجيل ملكية الجهاز العكسية بدون تعطيل الربط الأساسي لو تأخرت
+                                setDoc(ownerDocRef, {
+                                    deviceId: myHardwareKey,
+                                    studentId: cleanId,
+                                    studentName: stdName,
+                                    department: stdData.department || "هندسة الحاسب",
+                                    academicYear: String(stdData.academicYear || "2"),
+                                    boundAt: res.serverTimestamp(),
+                                    boundAtISO: nowISO
+                                }, { merge: true }).catch(() => {});
+                            })(),
+                            new Promise((_, rej) => setTimeout(() => rej(new Error("WRITE_TIMEOUT")), 10000))
+                        ]);
+
+                        try {
+                            await writeLockToServer();
+                        } catch (firstWriteErr) {
+                            if (String(firstWriteErr?.message || "") === "WRITE_TIMEOUT") {
+                                // محاولة ثانية تلقائية في حال بطء الشبكة
+                                await writeLockToServer();
+                            } else {
+                                throw firstWriteErr;
+                            }
                         }
+
+                        localStorage.setItem(`muc_lock_claimed_${cleanId}`, "1");
                     }
 
-                    // 5. مراقب لحظي للطرد الفوري عند فك القفل من المشرف
+                    // 5. مراقب لحظي للطرد الفوري عند فك القفل من المشرف (مع تجاهل الكتابات المحلية المعلقة)
                     try {
                         const { onSnapshot } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
                         if (window._liveKickUnsub) window._liveKickUnsub();
-                        let initialSkip = true;
+                        let sawConfirmedServerDoc = !isFirstTimeSetup;
                         window._liveKickUnsub = onSnapshot(doc(res.db, "attendance_devices", `id_lock_${cleanId}`), async (snap) => {
-                            if (initialSkip) { initialSkip = false; return; }
+                            if (snap.metadata && snap.metadata.hasPendingWrites) return;
                             const d = snap.exists() ? (snap.data() || {}) : {};
                             const ids = (Array.isArray(d.deviceIds) ? d.deviceIds : (d.deviceId ? [d.deviceId] : [])).slice(0, 1);
                             const devs = (Array.isArray(d.devices) ? d.devices : []).slice(0, 1);
@@ -1344,7 +1356,11 @@ const mapCache = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}"
                                 ids.includes(deviceId) ||
                                 devs.some(x => x.deviceId === myHardwareKey || x.deviceId === deviceId || x.legacyDeviceId === deviceId)
                             );
-                            if (!stillBound) {
+                            if (stillBound) {
+                                sawConfirmedServerDoc = true;
+                                return;
+                            }
+                            if (sawConfirmedServerDoc && snap.metadata && !snap.metadata.fromCache && !stillBound) {
                                 if (window._liveKickUnsub) { window._liveKickUnsub(); window._liveKickUnsub = null; }
                                 clearStudentLocalBinding(cleanId);
                                 inputId.value = "";
@@ -1359,15 +1375,20 @@ const mapCache = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}"
                                 );
                             }
                         });
-} catch (e) {}
+                    } catch (e) {}
                 } catch (e) {
                     if (isFirstTimeSetup) {
+                        clearStudentLocalBinding(cleanId);
                         welcomeBar.classList.add("d-none");
                         scannerStep.classList.add("d-none");
                         inputStep.classList.remove("d-none");
+                        const errCode = String(e?.code || e?.message || "");
+                        const isPermDenied = errCode.includes("permission-denied") || errCode.includes("PERMISSION_DENIED");
                         await showCustomAlert(
-                            "الشبكة ضعيفة حالياً",
-                            "⚠️ تعذر الاتصال بسيرفر الجامعة للتحقق من رقمك الجامعي وتفعيل الهاتف لأول مرة.\n\nيرجى التأكد من جودة الإنترنت والمحاولة مرة أخرى.",
+                            isPermDenied ? "تعذر الحفظ بسبب صلاحيات السيرفر" : "الشبكة ضعيفة حالياً",
+                            isPermDenied
+                                ? `⚠️ سيرفر قاعدة البيانات رفض تسجيل ربط الجهاز (${errCode}). يرجى مراجعة قواعد Firestore Rules لمجموعة attendance_devices.`
+                                : "⚠️ تعذر الاتصال بسيرفر الجامعة لتأكيد ربط هاتفك لأول مرة.\n\nيرجى التأكد من جودة الإنترنت والمحاولة مرة أخرى.",
                             true
                         );
                         return false;
