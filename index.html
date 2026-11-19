@@ -1113,25 +1113,14 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             }
         }
 
-function clearStudentLocalBinding(cleanId) {
+        function clearStudentLocalBinding(cleanId) {
             localStorage.removeItem("muc_saved_student_id");
             localStorage.removeItem("muc_saved_student_name");
             localStorage.removeItem(`muc_student_name_${cleanId}`);
             localStorage.removeItem(`muc_lock_claimed_${cleanId}`);
-            localStorage.removeItem(`muc_attended_history_${cleanId}`);
-            localStorage.removeItem("muc_pending_records");
-            localStorage.removeItem("muc_sync_error");
-            localStorage.removeItem("muc_offline_remind_at");
-            localStorage.removeItem("muc_offline_reminded");
-            localStorage.removeItem("muc_offline_last_reminded_at");
-            localStorage.removeItem("muc_student_courses");
-            localStorage.removeItem("muc_student_sections");
-            localStorage.removeItem("muc_student_group");
             document.cookie = "muc_saved_student_id=; max-age=0; path=/";
             document.cookie = "muc_saved_student_name=; max-age=0; path=/";
-            try { indexedDB.deleteDatabase("muc_bg_sync_db"); } catch (_) {}
             clearIdentityVault();
-            if (typeof refreshPendingBanner === "function") refreshPendingBanner();
         }
 
         // دالة التحقق من ملكية الـ ID وتفعيله نهائياً (هاتف واحد ومتصفح واحد لكل طالب 1/1)
@@ -1523,17 +1512,7 @@ const mapCache = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}"
         }
 const footerCreditsBar = document.getElementById("app-footer-credits");
 let html5QrScanner = null;
-function requestStudentNotificationPermission() {
-            try {
-                if ("Notification" in window && Notification.permission === "default") {
-                    Notification.requestPermission().catch(() => {});
-                }
-            } catch (_) {}
-        }
-        requestStudentNotificationPermission();
-
         btnTriggerCam?.addEventListener("click", async () => {
-            requestStudentNotificationPermission();
             // إخفاء شريط الترحيب وسطر التصميم فور فتح شاشة الكاميرا
             welcomeBar.classList.add("d-none");
             footerCreditsBar?.classList.add("d-none");
@@ -2037,17 +2016,10 @@ const stTitleEl = document.getElementById("status-title");
             }
         });
 
-async function runSync(manual) {
+        async function runSync(manual) {
             const btn = document.getElementById("btn-sync-now");
             const txt = document.getElementById("btn-sync-text");
             const fb = document.getElementById("sync-feedback");
-
-            // لو الطالب غير مسجل الدخول (تم عمل خروج له) ننظف أي بقايا معلقة تلقائياً
-            if (!getSavedStudentId()) {
-                localStorage.removeItem("muc_pending_records");
-                refreshPendingBanner();
-                return;
-            }
 
             if (!navigator.onLine) {
                 if (manual && fb) {
@@ -2063,27 +2035,21 @@ async function runSync(manual) {
                 if (fb) fb.innerText = "";
             }
 
-            try {
-                const uploadedCount = await Promise.race([
-                    syncPendingAttendance(),
-                    new Promise((resolve) => setTimeout(() => resolve(0), 8000))
-                ]);
-                refreshPendingBanner();
-                const remaining = getPendingCount();
+            const uploadedCount = await syncPendingAttendance();
+            refreshPendingBanner();
+            const remaining = getPendingCount();
 
-                if (manual && fb) {
-                    if (remaining === 0 && uploadedCount > 0) {
-                        fb.style.color = "#15803D";
-                        fb.innerText = "✅ Attendance uploaded and confirmed on server successfully!";
-                    } else if (remaining > 0) {
-                        fb.style.color = "#B45309";
-                        fb.innerText = "⏳ Saved on your phone. Waiting for instructor to upload offline lecture to server...";
-                    }
-                }
-            } finally {
-                if (manual && btn) {
-                    btn.disabled = false;
-                    txt.innerText = "Sync Attendance Now";
+            if (manual && btn) {
+                btn.disabled = false;
+                txt.innerText = "Sync Attendance Now";
+
+                if (remaining === 0 && uploadedCount > 0) {
+                    fb.style.color = "#15803D";
+                    fb.innerText = "✅ Attendance uploaded and confirmed on server successfully!";
+                } else if (remaining > 0) {
+                    fb.style.color = "#B45309";
+                    // 👈 الرسالة الإنجليزية الواضحة عندما يكون الدكتور لم يرفع المحاضرة بعد
+                    fb.innerText = "⏳ Saved on your phone. Waiting for instructor to upload offline lecture to server...";
                 }
             }
         }
@@ -2100,8 +2066,8 @@ document.getElementById("btn-clear-pending")?.addEventListener("click", () => {
         document.addEventListener("visibilitychange", () => {
             if (document.visibilityState === "visible") runSync(false);
         });
+
 document.getElementById("btn-enter-pin")?.addEventListener("click", async () => {
-            requestStudentNotificationPermission();
             if (html5QrScanner) {
                 try { await html5QrScanner.stop(); await html5QrScanner.clear(); } catch(e) {}
             }
@@ -2283,7 +2249,7 @@ let pinCheck = null;
                     }
                 }
 
-// 3. حفظ السجل الأوفلاين ثم رفعه فوراً إذا كان الطالب متصلاً بالإنترنت
+                // 3. حفظ السجل الأوفلاين بنوع الجلسة الدقيق
                 await queueOfflineAttendance({
                     studentId: studentIdVal,
                     studentName: stdName,
@@ -2298,39 +2264,18 @@ let pinCheck = null;
                     pin: enteredPin
                 });
 
-                if (navigator.onLine) {
-                    window._suppressSyncPopup = true;
-                    try {
-                        await syncPendingAttendance();
-                    } finally {
-                        window._suppressSyncPopup = false;
-                    }
-                }
                 refreshPendingBanner();
-
-                const syncErrPin = localStorage.getItem("muc_sync_error");
-                if (syncErrPin) {
-                    localStorage.removeItem("muc_sync_error");
-                    throw new Error(syncErrPin);
-                }
-
-                const isPinSyncedNow = getPendingCount() === 0;
-                if (isPinSyncedNow) {
-                    showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been uploaded and registered on the server.");
-                    document.getElementById("rcpt-status").innerText = "Present ✔";
-                } else {
-                    showResult(true, "Saved Offline!", "PIN verified and saved on your phone. It will sync automatically once internet is available.");
-                    document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
-                }
-
-                document.getElementById("rcpt-name").innerText = getSavedStudentName(studentIdVal) || stdName;
+                showResult(true, "Saved Offline!", "PIN verified and saved on your phone. It will sync automatically once the lecture is uploaded.");
+                document.getElementById("rcpt-name").innerText = stdName;
                 document.getElementById("rcpt-id").innerText = studentIdVal;
                 document.getElementById("rcpt-course").innerText = String(extractedCourseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : extractedCourseName;
 
+                // 4. عرض اسم الجلسة ورقمها فقط بدون أي أقواس أو زوائد (مثل: Lecture #6 أو Section #4)
                 const offDisplayType = sType === "lab" ? "Lab" : (sType === "section" ? "Section" : "Lecture");
                 document.getElementById("rcpt-lecture").innerText = `${offDisplayType} #${extractedLecNum}`;
                 document.getElementById("rcpt-date").innerText = new Date().toLocaleDateString("en-US");
                 document.getElementById("rcpt-time").innerText = new Date().toLocaleTimeString("en-US");
+                document.getElementById("rcpt-status").innerText = "Saved Offline ⏳ (Pending Sync)";
                 document.getElementById("receipt-box").classList.remove("d-none");
             } catch (err) {
                 showResult(false, "Check-in Failed", friendlyError(err) || "Failed to verify PIN code.");
@@ -2339,66 +2284,9 @@ let pinCheck = null;
                 btnPin.innerHTML = `<i class="fa-solid fa-keyboard"></i> <span>Enter 6-Digit PIN</span>`;
             }
         });
-// فحص مستمر لمن لديه محاضرة أوفلاين معلقة فقط (يتوقف تلقائياً فور الرفع)
-        let _offlineReminderTimerId = null;
-        async function evaluateTwoHourOfflineReminder() {
-            const pendingCount = getPendingCount();
-            if (pendingCount === 0) {
-                localStorage.removeItem("muc_offline_remind_at");
-                localStorage.removeItem("muc_offline_reminded");
-                localStorage.removeItem("muc_offline_last_reminded_at");
-                clearTimeout(_offlineReminderTimerId);
-                return;
-            }
-
-            requestStudentNotificationPermission();
-
-            const remindAt = Number(localStorage.getItem("muc_offline_remind_at") || 0);
-            if (!remindAt) return;
-
-            const remainingMs = remindAt - Date.now();
-            if (remainingMs > 0) {
-                clearTimeout(_offlineReminderTimerId);
-                _offlineReminderTimerId = setTimeout(evaluateTwoHourOfflineReminder, Math.min(remainingMs + 500, 2147483647));
-                return;
-            }
-
-const lastRemindedAt = Number(localStorage.getItem("muc_offline_last_reminded_at") || 0);
-            if (lastRemindedAt && (Date.now() - lastRemindedAt) < (60 * 1000)) return;
-            localStorage.setItem("muc_offline_last_reminded_at", String(Date.now()));
-
-            if (navigator.onLine) {
-                await runSync(false);
-                if (getPendingCount() === 0) return;
-            }
-
-            const title = "⚠️ تذكير: لديك حضور محاضرة لم يُرفع بعد!";
-            const body = `مرّت ساعتان وما زال لديك (${pendingCount}) سجل حضور أوفلاين معلق على هاتفك. افتح الإنترنت واضغط هنا لرفعه وتأكيد حضورك.`;
-
-            if ("serviceWorker" in navigator && "Notification" in window && Notification.permission === "granted") {
-                try {
-                    const reg = await navigator.serviceWorker.ready;
-                    await reg.showNotification(title, {
-                        body,
-                        icon: "./logo.png",
-                        badge: "./logo.png",
-                        tag: "muc-offline-reminder",
-                        renotify: true,
-                        requireInteraction: true,
-                        vibrate: [200, 100, 200],
-                        data: { url: "./index.html" }
-                    });
-                    return;
-                } catch (_) {}
-            }
-
-            await showCustomAlert(title, body, false);
-        }
-
-        setInterval(() => { refreshPendingBanner(); showSyncErrorIfAny(); evaluateTwoHourOfflineReminder(); }, 5000);
+        setInterval(() => { refreshPendingBanner(); showSyncErrorIfAny(); }, 3000);
         refreshPendingBanner();
         runSync(false);
-        evaluateTwoHourOfflineReminder();
         // ========================================================
         // 📚 محرك استعراض سجل المقررات والحضور للطالب (My Attendance History)
         // ========================================================
