@@ -1113,14 +1113,25 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             }
         }
 
-        function clearStudentLocalBinding(cleanId) {
+function clearStudentLocalBinding(cleanId) {
             localStorage.removeItem("muc_saved_student_id");
             localStorage.removeItem("muc_saved_student_name");
             localStorage.removeItem(`muc_student_name_${cleanId}`);
             localStorage.removeItem(`muc_lock_claimed_${cleanId}`);
+            localStorage.removeItem(`muc_attended_history_${cleanId}`);
+            localStorage.removeItem("muc_pending_records");
+            localStorage.removeItem("muc_sync_error");
+            localStorage.removeItem("muc_offline_remind_at");
+            localStorage.removeItem("muc_offline_reminded");
+            localStorage.removeItem("muc_offline_last_reminded_at");
+            localStorage.removeItem("muc_student_courses");
+            localStorage.removeItem("muc_student_sections");
+            localStorage.removeItem("muc_student_group");
             document.cookie = "muc_saved_student_id=; max-age=0; path=/";
             document.cookie = "muc_saved_student_name=; max-age=0; path=/";
+            try { indexedDB.deleteDatabase("muc_bg_sync_db"); } catch (_) {}
             clearIdentityVault();
+            if (typeof refreshPendingBanner === "function") refreshPendingBanner();
         }
 
         // دالة التحقق من ملكية الـ ID وتفعيله نهائياً (هاتف واحد ومتصفح واحد لكل طالب 1/1)
