@@ -788,87 +788,8 @@ const isPraxis = String(courseId || "").toLowerCase().includes("praxis") || Stri
 
 cleanedQueue.push(record);
     localStorage.setItem("muc_pending_records", JSON.stringify(cleanedQueue));
-    markLectureAttendedLocally(cleanedStudentId, courseId, targetLec, sessionId);
-    mirrorQueueToBackgroundDB(cleanedQueue);
+markLectureAttendedLocally(cleanedStudentId, courseId, targetLec, sessionId);
     return record;
-}
-
-// نسخ الطابور وإعدادات السيرفر وتوقيت تذكير الساعتين داخل IndexedDB للرفع والتذكير في الخلفية
-function mirrorQueueToBackgroundDB(queueArr) {
-    try {
-        const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
-        const hasItems = Array.isArray(queueArr) && queueArr.length > 0;
-        let remindAt = Number(localStorage.getItem("muc_offline_remind_at") || 0);
-
-        if (hasItems) {
-            const oldestScan = Math.min(...queueArr.map(x => Number(x.scannedAt) || Date.now()));
-            const isPastLectureOverdue = (Date.now() - oldestScan) >= TWO_HOURS_MS;
-
-            if (!remindAt) {
-                remindAt = isPastLectureOverdue ? (Date.now() + 10000) : (oldestScan + TWO_HOURS_MS);
-                localStorage.setItem("muc_offline_remind_at", String(remindAt));
-                localStorage.removeItem("muc_offline_reminded");
-            }
-        } else {
-            remindAt = 0;
-            localStorage.removeItem("muc_offline_remind_at");
-            localStorage.removeItem("muc_offline_reminded");
-            localStorage.removeItem("muc_offline_last_reminded_at");
-        }
-
-        const latestCourse = hasItems ? (queueArr[queueArr.length - 1]?.courseName || "المقرر الدراسي") : "";
-
-        const req = indexedDB.open("muc_bg_sync_db", 1);
-        req.onupgradeneeded = (e) => {
-            const idb = e.target.result;
-            if (!idb.objectStoreNames.contains("kv")) idb.createObjectStore("kv");
-        };
-        req.onsuccess = (e) => {
-            const idb = e.target.result;
-            const tx = idb.transaction("kv", "readwrite");
-            const store = tx.objectStore("kv");
-            store.put(queueArr, "pending_records");
-            store.put({
-                projectId: CONFIG.firebase.projectId,
-                apiKey: CONFIG.firebase.apiKey
-            }, "firebase_cfg");
-
-            if (hasItems) {
-                store.put({
-                    remindAt,
-                    reminded: false,
-                    count: queueArr.length,
-                    courseName: latestCourse
-                }, "reminder_meta");
-            } else {
-                store.delete("reminder_meta");
-            }
-
-            tx.oncomplete = async () => {
-                if ("serviceWorker" in navigator) {
-                    try {
-                        const reg = await navigator.serviceWorker.ready;
-                        if (hasItems) {
-                            if ("SyncManager" in window) {
-                                reg.sync.register("muc-bg-sync-attendance").catch(() => {});
-                            }
-                            if ("periodicSync" in reg) {
-                                reg.periodicSync.register("muc-offline-reminder-check", { minInterval: 60 * 60 * 1000 }).catch(() => {});
-                            }
-                            reg.active?.postMessage({
-                                type: "SCHEDULE_OFFLINE_REMINDER",
-                                remindAt,
-                                courseName: latestCourse,
-                                count: queueArr.length
-                            });
-                        } else {
-                            reg.active?.postMessage({ type: "CANCEL_OFFLINE_REMINDER" });
-                        }
-                    } catch (_) {}
-                }
-            };
-        };
-    } catch (_) {}
 }
 
 let isSyncing = false;
@@ -880,14 +801,14 @@ function checkLectureMatch(courseId, courseName, studentId) {
 function removeFromQueue(item) {
     const key = item.origSessionId || item.sessionId;
     const q = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
-    const nextQ = q.filter(x => {
-        if (x.studentId !== item.studentId) return true;
-        if (x.sessionId === key || x.sessionId === item.sessionId) return false;
-        if (x.pin && Math.abs((x.scannedAt || 0) - (item.scannedAt || 0)) < 45 * 60 * 1000) return false;
-        return true;
-    });
-    localStorage.setItem("muc_pending_records", JSON.stringify(nextQ));
-    mirrorQueueToBackgroundDB(nextQ);
+    localStorage.setItem("muc_pending_records", JSON.stringify(
+        q.filter(x => {
+            if (x.studentId !== item.studentId) return true;
+            if (x.sessionId === key || x.sessionId === item.sessionId) return false;
+            if (x.pin && Math.abs((x.scannedAt || 0) - (item.scannedAt || 0)) < 45 * 60 * 1000) return false;
+            return true;
+        })
+    ));
 }
 
 export async function syncPendingAttendance() {
@@ -1103,57 +1024,19 @@ export function getPendingCount() {
     }
 }
 
-function reconcileBackgroundSyncedItems() {
-    try {
-        const req = indexedDB.open("muc_bg_sync_db", 1);
-        req.onsuccess = (e) => {
-            const idb = e.target.result;
-            if (!idb.objectStoreNames.contains("kv")) return;
-            const tx = idb.transaction("kv", "readwrite");
-            const store = tx.objectStore("kv");
-            const getReq = store.get("pending_records");
-            const recReq = store.get("last_bg_synced_receipts");
-
-            tx.oncomplete = () => {
-                if (Array.isArray(getReq.result)) {
-                    const localQ = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
-                    if (localQ.length > 0 && getReq.result.length === 0) {
-                        localStorage.setItem("muc_pending_records", "[]");
-                        localStorage.removeItem("muc_offline_remind_at");
-                        localStorage.removeItem("muc_offline_reminded");
-                        localStorage.removeItem("muc_offline_last_reminded_at");
-                    }
-                }
-                if (Array.isArray(recReq.result) && recReq.result.length > 0) {
-                    const delTx = idb.transaction("kv", "readwrite");
-                    delTx.objectStore("kv").delete("last_bg_synced_receipts");
-                    window.dispatchEvent(new CustomEvent("muc:offline-synced", { detail: recReq.result }));
-                }
-            };
-        };
-    } catch (_) {}
-}
-
 function triggerSmoothSync() {
-    reconcileBackgroundSyncedItems();
-    try {
-        const localQ = JSON.parse(localStorage.getItem("muc_pending_records") || "[]");
-        if (Array.isArray(localQ) && localQ.length > 0) {
-            mirrorQueueToBackgroundDB(localQ);
-        }
-    } catch (_) {}
-
     if (!navigator.onLine || isSyncing) return;
-    syncPendingAttendance();
+    const randomJitterMs = Math.floor(Math.random() * 4000) + 800;
+    setTimeout(() => {
+        syncPendingAttendance();
+    }, randomJitterMs);
 }
 
 window.addEventListener("online", triggerSmoothSync);
-window.addEventListener("pageshow", triggerSmoothSync);
-window.addEventListener("focus", triggerSmoothSync);
 document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") triggerSmoothSync();
 });
-setInterval(triggerSmoothSync, 12000);
+setInterval(triggerSmoothSync, 20000);
 
 export function subscribeToCourseAttendance(courseId, onChange) {
     let sessions = null, records = null;
