@@ -1113,25 +1113,14 @@ const welcomeBar = document.getElementById("student-welcome-bar");
             }
         }
 
-function clearStudentLocalBinding(cleanId) {
+        function clearStudentLocalBinding(cleanId) {
             localStorage.removeItem("muc_saved_student_id");
             localStorage.removeItem("muc_saved_student_name");
             localStorage.removeItem(`muc_student_name_${cleanId}`);
             localStorage.removeItem(`muc_lock_claimed_${cleanId}`);
-            localStorage.removeItem(`muc_attended_history_${cleanId}`);
-            localStorage.removeItem("muc_pending_records");
-            localStorage.removeItem("muc_sync_error");
-            localStorage.removeItem("muc_offline_remind_at");
-            localStorage.removeItem("muc_offline_reminded");
-            localStorage.removeItem("muc_offline_last_reminded_at");
-            localStorage.removeItem("muc_student_courses");
-            localStorage.removeItem("muc_student_sections");
-            localStorage.removeItem("muc_student_group");
             document.cookie = "muc_saved_student_id=; max-age=0; path=/";
             document.cookie = "muc_saved_student_name=; max-age=0; path=/";
-            try { indexedDB.deleteDatabase("muc_bg_sync_db"); } catch (_) {}
             clearIdentityVault();
-            if (typeof refreshPendingBanner === "function") refreshPendingBanner();
         }
 
         // دالة التحقق من ملكية الـ ID وتفعيله نهائياً (هاتف واحد ومتصفح واحد لكل طالب 1/1)
@@ -1964,60 +1953,30 @@ const stTitleEl = document.getElementById("status-title");
             document.getElementById("pending-banner").classList.toggle("d-none", n === 0);
         }
 
-// عرض إيصال كل مادة مرفوعة أوفلاين بالتتابع (واحدة تلو الأخرى عند الضغط على الزر)
-        const _syncedReceiptsQueue = [];
-        let _isShowingSyncedReceipt = false;
-
-        function renderNextSyncedReceipt() {
-            if (_syncedReceiptsQueue.length === 0) {
-                _isShowingSyncedReceipt = false;
-                return false;
-            }
-            // عدم مقاطعة الكاميرا إذا كانت مفتوحة للمسح في تلك اللحظة
-            if (qrBox && !qrBox.classList.contains("d-none")) return false;
-
-            _isShowingSyncedReceipt = true;
-            const item = _syncedReceiptsQueue.shift();
-            const rec = item.rec;
-            const remaining = _syncedReceiptsQueue.length;
-            const typeName = rec.sessionType === "lab" ? "Lab" : (rec.sessionType === "section" ? "Section" : "Lecture");
-            const countTag = item.total > 1 ? ` (${item.index}/${item.total})` : "";
-
-            if (rec.studentName) {
-                saveStudentIdPermanently(rec.studentId, rec.studentName);
-                if (welcomeNameEl) welcomeNameEl.innerText = rec.studentName;
-            }
-
-            showResult(true, `Attendance Confirmed${countTag}!`, "Your attendance has been recorded on the live classroom screen.");
-            document.getElementById("rcpt-name").innerText = rec.studentName || getSavedStudentName(rec.studentId) || "Student";
-            document.getElementById("rcpt-id").innerText = rec.studentId;
-            document.getElementById("rcpt-course").innerText = String(rec.courseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : (rec.courseName || "Course");
-            document.getElementById("rcpt-lecture").innerText = `${typeName} #${rec.lectureNumber || 1}`;
-            document.getElementById("rcpt-date").innerText = rec.date || new Date().toLocaleDateString("en-US");
-            document.getElementById("rcpt-time").innerText = rec.time || new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-            document.getElementById("rcpt-status").innerText = "Present ✔";
-            document.getElementById("receipt-box").classList.remove("d-none");
-
-            const doneBtn = document.getElementById("btn-done-result");
-            if (doneBtn) {
-                doneBtn.innerHTML = remaining > 0
-                    ? `<i class="fa-solid fa-arrow-right"></i> <span>Next Course (${remaining} left)</span>`
-                    : `<i class="fa-solid fa-check"></i> <span>Done</span>`;
-            }
-            return true;
-        }
-
+// عرض نفس شاشة الإيصال الخضراء والصوت لطالب الأوفلاين فور رفع وتأكيد حضوره على السيرفر
         function showSyncedAttendanceConfirmation(receipts) {
             if (!Array.isArray(receipts) || receipts.length === 0) return;
+            // عدم مقاطعة الكاميرا إذا كانت مفتوحة للمسح في تلك اللحظة
+            if (qrBox && !qrBox.classList.contains("d-none")) return;
 
-            const total = receipts.length;
-            receipts.forEach((rec, idx) => {
-                _syncedReceiptsQueue.push({ rec, index: idx + 1, total });
-            });
+            const lastRec = receipts[receipts.length - 1];
+            const typeName = lastRec.sessionType === "lab" ? "Lab" : (lastRec.sessionType === "section" ? "Section" : "Lecture");
+            const extraCount = receipts.length > 1 ? ` (+${receipts.length - 1} more)` : "";
 
-            if (!_isShowingSyncedReceipt) {
-                renderNextSyncedReceipt();
+            if (lastRec.studentName) {
+                saveStudentIdPermanently(lastRec.studentId, lastRec.studentName);
+                if (welcomeNameEl) welcomeNameEl.innerText = lastRec.studentName;
             }
+
+            showResult(true, "Attendance Confirmed Successfully!", "Your attendance has been recorded on the live classroom screen.");
+            document.getElementById("rcpt-name").innerText = lastRec.studentName || getSavedStudentName(lastRec.studentId) || "Student";
+            document.getElementById("rcpt-id").innerText = lastRec.studentId;
+            document.getElementById("rcpt-course").innerText = String(lastRec.courseName || "").toLowerCase().includes("praxis") ? "Praxis Programming" : (lastRec.courseName || "Course");
+            document.getElementById("rcpt-lecture").innerText = `${typeName} #${lastRec.lectureNumber || 1}${extraCount}`;
+            document.getElementById("rcpt-date").innerText = lastRec.date || new Date().toLocaleDateString("en-US");
+            document.getElementById("rcpt-time").innerText = lastRec.time || new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+            document.getElementById("rcpt-status").innerText = "Present ✔";
+            document.getElementById("receipt-box").classList.remove("d-none");
         }
 
         window.addEventListener("muc:offline-synced", (e) => {
@@ -2508,11 +2467,7 @@ const KNOWN_COURSES_DISPLAY = {
             const sid = getSavedStudentId() || inputId.value.trim();
             if (e.target.value) renderCourseAttendanceLog(sid, e.target.value);
         });
-document.getElementById("btn-done-result")?.addEventListener("click", () => {
-    if (renderNextSyncedReceipt()) return;
-    _isShowingSyncedReceipt = false;
-    const doneBtn = document.getElementById("btn-done-result");
-    if (doneBtn) doneBtn.innerHTML = `<i class="fa-solid fa-check"></i> <span>Done</span>`;
+        document.getElementById("btn-done-result")?.addEventListener("click", () => {
     resultStep.classList.add("d-none");
     welcomeBar.classList.remove("d-none");
     footerCreditsBar?.classList.remove("d-none");
