@@ -934,24 +934,48 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
                 };
             });
         }
-        // تحويل أكواد الأخطاء لرسائل مفهومة للطالب
-function friendlyError(err) {
-    const m = String(err?.message || err || "");
-    if (m.startsWith("WRONG_SECTION:")) {
-        const parts = m.split(":");
-        const stdName = parts[1] || "الطالب";
-        const stdSec = parts[2] || "سكشن آخر";
-        const targetSec = parts[3] || "هذا السكشن";
-        const taName = parts[4] ? ` (${parts[4]})` : "";
-        return `🚫 غير مسموح بتسجيل الحضور!\nالطالب (${stdName}) مقيد في [${stdSec}] ولا يمكنه التسجيل في [${targetSec}]${taName}.\n\nYou are registered in [${stdSec}] and cannot check into [${targetSec}].`;
-    }
-    if (m.startsWith("NOT_ENROLLED:")) {
-        const parts = m.split(":");
-        return `${parts[1]} غير مقيد في مقرر (${parts.slice(2).join(":")}). تواصل مع الدكتور.\n\nYou are not enrolled in this course. Please contact your doctor.`;
-    }
-    return m;
-}
+function isServerUpgradeOrQuotaError(err) {
+            const code = String(err?.code || "").toLowerCase();
+            const msg = String(err?.message || err || "").toLowerCase();
+            return (
+                code.includes("resource-exhausted") ||
+                code.includes("unavailable") ||
+                code.includes("deadline-exceeded") ||
+                msg.includes("resource-exhausted") ||
+                msg.includes("quota") ||
+                msg.includes("exceeded") ||
+                msg.includes("unavailable") ||
+                msg.includes("503") ||
+                msg.includes("429")
+            );
+        }
 
+        function getPoliteMaintenanceMessage() {
+            return "🛠️ جاري حالياً تنفيذ أعمال تطوير وتحديث على خوادم المنظومة لرفع كفاءة الأداء والاستيعاب.\n" +
+                   "يرجى المحاولة مرة أخرى بعد قليل، أو التسجيل عبر كود/باركود الأوفلاين (Offline) لحين اكتمال التحديث.\n\n" +
+                   "Server servers are currently undergoing scheduled upgrades to enhance performance. Please try again later.";
+        }
+
+        // تحويل أكواد الأخطاء لرسائل مفهومة ومهذبة للطالب
+        function friendlyError(err) {
+            if (isServerUpgradeOrQuotaError(err)) {
+                return getPoliteMaintenanceMessage();
+            }
+            const m = String(err?.message || err || "");
+            if (m.startsWith("WRONG_SECTION:")) {
+                const parts = m.split(":");
+                const stdName = parts[1] || "الطالب";
+                const stdSec = parts[2] || "سكشن آخر";
+                const targetSec = parts[3] || "هذا السكشن";
+                const taName = parts[4] ? ` (${parts[4]})` : "";
+                return `🚫 غير مسموح بتسجيل الحضور!\nالطالب (${stdName}) مقيد في [${stdSec}] ولا يمكنه التسجيل في [${targetSec}]${taName}.\n\nYou are registered in [${stdSec}] and cannot check into [${targetSec}].`;
+            }
+            if (m.startsWith("NOT_ENROLLED:")) {
+                const parts = m.split(":");
+                return `${parts[1]} غير مقيد في مقرر (${parts.slice(2).join(":")}). تواصل مع الدكتور.\n\nYou are not enrolled in this course. Please contact your doctor.`;
+            }
+            return m;
+        }
 const welcomeBar = document.getElementById("student-welcome-bar");
         const welcomeNameEl = document.getElementById("welcome-student-name");
         const welcomeIdEl = document.getElementById("welcome-student-id");
