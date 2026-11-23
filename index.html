@@ -1223,6 +1223,7 @@ const res = await Promise.race([
                         localStorage.setItem("muc_student_group", stdData.section || stdData.group || "");
 const mapCache = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}");
                         myCourses.forEach(cid => {
+                            if (mapCache[cid]) return; // تخطي القراءة إذا كان اسم المادة محفوظاً في الكاش مسبقاً
                             getDoc(doc(res.db, "courses", cid)).then(cSnap => {
                                 if (cSnap.exists()) {
                                     const cData = cSnap.data() || {};
