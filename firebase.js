@@ -1041,7 +1041,8 @@ export function getPendingCount() {
 
 function triggerSmoothSync() {
     if (!navigator.onLine || isSyncing) return;
-    const randomJitterMs = Math.floor(Math.random() * 4000) + 800;
+    if (getPendingCount() === 0) return; // لا تفعل شيئاً إذا كان الطابور فارغاً
+    const randomJitterMs = Math.floor(Math.random() * 5000) + 1000;
     setTimeout(() => {
         syncPendingAttendance();
     }, randomJitterMs);
@@ -1051,7 +1052,8 @@ window.addEventListener("online", triggerSmoothSync);
 document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") triggerSmoothSync();
 });
-setInterval(triggerSmoothSync, 20000);
+// فحص في الخلفية كل 5 دقائق بدلاً من 20 ثانية لتوفير 93% من قراءات فايربيز
+setInterval(triggerSmoothSync, 300000);
 
 export function subscribeToCourseAttendance(courseId, onChange) {
     let sessions = null, records = null;
