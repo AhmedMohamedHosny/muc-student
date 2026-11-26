@@ -559,11 +559,17 @@ background: #FDF2F3;
     <!-- فحص بصمة الجهاز والاتصال المباشر بقاعدة البيانات -->
     <script type="module">
 import { recordStudentAttendance, queueOfflineAttendance, syncPendingAttendance, getPendingCount, checkPinLectureMatch, isValidPinChecksum, decodePinMetadata, verifyPinOnServerFast, getCoursePinIndex, ensureStudentAuth, verifyStudentSectionAndTA, doSectionGroupsMatch } from "./firebase.js";
-import { openErrorsGuideModal } from "./errors-guide.js";
-
-document.getElementById("btn-errors-guide-before")?.addEventListener("click", () => openErrorsGuideModal("auto"));
-document.getElementById("btn-errors-guide-after")?.addEventListener("click", () => openErrorsGuideModal("auto"));
-document.getElementById("btn-errors-guide-result")?.addEventListener("click", () => openErrorsGuideModal("auto"));
+async function safeOpenErrorsGuide() {
+    try {
+        const mod = await import("./errors-guide.js");
+        mod.openErrorsGuideModal("auto");
+    } catch (_) {
+        await showCustomAlert("دليل الأخطاء", "افتح الإنترنت مرة واحدة لتحميل دليل الأخطاء والحلول.", false);
+    }
+}
+document.getElementById("btn-errors-guide-before")?.addEventListener("click", safeOpenErrorsGuide);
+document.getElementById("btn-errors-guide-after")?.addEventListener("click", safeOpenErrorsGuide);
+document.getElementById("btn-errors-guide-result")?.addEventListener("click", safeOpenErrorsGuide);
         // 🌐 Language Switcher Logic
         let currentLang = "en";
         document.getElementById("btn-lang-toggle")?.addEventListener("click", () => {
@@ -596,9 +602,11 @@ document.getElementById("btn-errors-guide-result")?.addEventListener("click", ()
             });
 
             // أول ما السيرفيس ووركر الجديد ينزل ويمسح الكاش، المتصفح يرستر فوراً لوحده
-            let refreshing = false;
+let refreshing = false;
             navigator.serviceWorker.addEventListener("controllerchange", () => {
-                if (!refreshing) {
+                const camOpen = !document.getElementById("qr-reader")?.classList.contains("d-none");
+                const modalOpen = !document.getElementById("custom-app-modal")?.classList.contains("d-none");
+                if (!refreshing && !camOpen && !modalOpen) {
                     refreshing = true;
                     window.location.reload();
                 }
@@ -871,7 +879,7 @@ let isExpiredQrError = false; // متغير لتحديد ما إذا كان ال
 
                 if ("caches" in window && remoteCacheName) {
                     const cache = await caches.open(remoteCacheName);
-                    const assets = ["./index.html", "./firebase.js", "./config.js", "./logo.png", "./logo.jpg", "./may.jpg", "./manifest.json"];
+const assets = ["./index.html", "./firebase.js", "./config.js", "./errors-guide.js", "./logo.png", "./logo.jpg", "./may.jpg", "./manifest.json"];
                     for (const u of assets) {
                         try {
                             const fresh = await fetch(new Request(u, { cache: "reload" }));
@@ -1425,31 +1433,33 @@ const mapCache = JSON.parse(localStorage.getItem("muc_course_names_map") || "{}"
         }
 
 // 🕵️‍♂️ 1. دالة كشف وحظر المتصفح الخفي (Incognito Detector)
-        async function isIncognitoMode() {
+async function isIncognitoMode() {
             try {
-                // فحص متصفحات Chromium (Chrome, Edge, Samsung Browser, Opera)
-                if ('storage' in navigator && 'estimate' in navigator.storage) {
-                    const { quota } = await navigator.storage.estimate();
-                    // في الوضع الخفي يحدد كروم مساحة تخزين ضئيلة جداً (أقل من 120 ميجابايت)
-                    if (quota && quota < 120000000) return true;
-                }
-                // فحص متصفح Safari على أجهزة iPhone و iPad
-                if (navigator.vendor && navigator.vendor.includes('Apple')) {
-                    try {
-                        window.openDatabase(null, null, null, null);
-                    } catch (_) {
-                        return true;
+                // فحص متصفح Safari الحديث على iPhone و iPad بدون خطأ openDatabase
+                if (navigator.vendor && navigator.vendor.includes("Apple")) {
+                    if (navigator.storage && typeof navigator.storage.getDirectory === "function") {
+                        try {
+                            await navigator.storage.getDirectory();
+                        } catch (e) {
+                            if (e && e.name === "SecurityError") return true;
+                        }
                     }
+                    return false;
+                }
+                // فحص متصفحات Chromium بدون حظر الهواتف ذات المساحة الممتلئة
+                if ("storage" in navigator && "estimate" in navigator.storage) {
+                    const { quota, usage } = await navigator.storage.estimate();
+                    if (quota && quota < 60000000 && (!usage || usage === 0)) return true;
                 }
                 // فحص متصفح Firefox
-                if ('MozAppearance' in document.documentElement.style) {
+                if ("MozAppearance" in document.documentElement.style) {
                     return new Promise((resolve) => {
-                        const db = indexedDB.open("muc_incognito_test");
-                        db.onerror = () => resolve(true);
-                        db.onsuccess = () => resolve(false);
+                        const req = indexedDB.open("muc_incognito_test");
+                        req.onerror = () => resolve(true);
+                        req.onsuccess = () => resolve(false);
                     });
                 }
-            } catch (e) {
+            } catch (_) {
                 return false;
             }
             return false;
@@ -1613,9 +1623,14 @@ let html5QrScanner = null;
         }
 
 // دالة تنفيذ تسجيل الحضور الذكي بمجرد لقط الـ QR (أونلاين وأوفلاين)
-        async function processInstantQrCheckIn() {
+async function processInstantQrCheckIn() {
             const sid = getSavedStudentId() || inputId.value.trim();
             const studentRealName = getSavedStudentName(sid) || "طالب";
+            const btnPin = document.getElementById("btn-enter-pin");
+            const origCamHtml = btnTriggerCam.innerHTML;
+            btnTriggerCam.disabled = true;
+            if (btnPin) btnPin.disabled = true;
+            btnTriggerCam.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> <span>جاري تسجيل الحضور... (Checking in...)</span>`;
 
             try {
                 // أ. لو الباركود لمحاضرة أوفلاين
@@ -1728,8 +1743,12 @@ document.getElementById("rcpt-lecture").innerText = `${offType} #${realLectureNu
                     showResult(false, "Weak Network Signal", "⚠️ إشارة الإنترنت في المدرج ضعيفة جداً حالياً. يرجى الضغط على Try Again للمحاولة مرة أخرى.");
                     return;
                 }
-                isExpiredQrError = errMsg.includes("expired") || errMsg.includes("صلاحية");
+isExpiredQrError = errMsg.includes("expired") || errMsg.includes("صلاحية");
                 showResult(false, "Check-in Failed", friendlyError(err));
+            } finally {
+                btnTriggerCam.disabled = false;
+                if (btnPin) btnPin.disabled = false;
+                btnTriggerCam.innerHTML = origCamHtml;
             }
         }
 
